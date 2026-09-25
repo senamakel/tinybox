@@ -35,5 +35,9 @@ tokio.workspace = true
 # The GitHub release verifier passes an explicit empty module configuration.
 serde_json.workspace = true
 
+[features]
+default = []
+linked = []
+
 [lints]
 workspace = true
