@@ -266,7 +266,6 @@ pub fn contains_unquoted_char(command: &str, target: char) -> bool {
                 }
                 if ch == '"' {
                     quote = QuoteState::None;
-                    continue;
                 }
             }
             QuoteState::None => {
@@ -431,9 +430,8 @@ fn quoted_heredoc_delimiter(rest: &str) -> Option<(String, usize)> {
         consumed += 1;
     }
 
-    let quote = match chars.next() {
-        Some(q @ ('\'' | '"')) => q,
-        _ => return None,
+    let Some(quote @ ('\'' | '"')) = chars.next() else {
+        return None;
     };
     consumed += 1;
 
@@ -485,9 +483,8 @@ pub fn has_leading_env_assignment(s: &str) -> bool {
     // Identifier shape: first char letter or `_`, the rest alphanumeric
     // or `_`. Anything else (e.g. `foo[bar]=`) is not a shell assignment.
     let mut chars = name.chars();
-    let first = match chars.next() {
-        Some(c) => c,
-        None => return false,
+    let Some(first) = chars.next() else {
+        return false;
     };
     if !(first.is_ascii_alphabetic() || first == '_') {
         return false;
