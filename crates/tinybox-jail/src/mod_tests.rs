@@ -63,8 +63,16 @@ fn spawn_uses_default_backend() {
     // Must succeed via whichever platform backend is detected (or
     // noop). The point of the test is that we go through the public
     // `spawn` entry rather than `spawn_with`.
-    let mut child = spawn(&jail, cmd).expect("spawn spawn");
-    let _ = child.wait().expect("wait");
+    let result = spawn(&jail, cmd);
+    if default_backend().is_available() {
+        let mut child = result.expect("spawn through available backend");
+        let _ = child.wait().expect("wait");
+    } else {
+        assert_eq!(
+            result.err().map(|error| error.kind()),
+            Some(std::io::ErrorKind::Unsupported)
+        );
+    }
 }
 
 #[test]

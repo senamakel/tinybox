@@ -14,15 +14,15 @@ spawns, never the core process itself.
 - Describe a jail declaratively via a builder (`Jail::new(root, label)` plus
   `.add_read_only(...)`, `.deny_net()`, `.deny_subprocess()`).
 - Auto-detect and cache the strongest backend for the current OS (Landlock,
-  Seatbelt, AppContainer, or noop).
+  Seatbelt, or AppContainer).
 - Spawn a `std::process::Command` inside the jail, canonicalizing `root`
   (and read-only paths) first so backends never see `..` or symlink
   trickery.
 - Provide a persistent registry to manage many jailed workspaces side by
   side, each with a stable id, label, directory, and metadata, indexed in a
   JSON file.
-- Fall back to `noop` when no OS-level sandbox is available, while still
-  letting callers rely on application-layer path checks.
+- Return an unsupported error when no OS-level sandbox is available. Select
+  `NoopBackend` explicitly only when unrestricted execution is intended.
 
 ## Key files
 

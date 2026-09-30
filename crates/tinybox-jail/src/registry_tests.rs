@@ -191,8 +191,16 @@ fn spawn_in_uses_default_backend() {
     } else {
         Command::new("true")
     };
-    let mut child = reg.spawn_in(&a.id, cmd).unwrap();
-    let _ = child.wait().unwrap();
+    let result = reg.spawn_in(&a.id, cmd);
+    if super::super::default_backend().is_available() {
+        let mut child = result.unwrap();
+        let _ = child.wait().unwrap();
+    } else {
+        assert_eq!(
+            result.err().map(|error| error.kind()),
+            Some(io::ErrorKind::Unsupported)
+        );
+    }
     fs::remove_dir_all(&base).ok();
 }
 
