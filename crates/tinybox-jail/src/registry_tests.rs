@@ -320,3 +320,50 @@ fn registry_uses_the_injected_clock_for_timestamps() {
     let updated = reg.rename(&created.id, "renamed").unwrap();
     assert_eq!(updated.updated_at_unix, 5);
 }
+
+#[test]
+fn failed_index_write_rolls_back_registry_mutations() {
+    let base = tempdir("rollback");
+    let reg = JailRegistry::open(base.path()).unwrap();
+    let blocked_tmp = base.path().join("index.json.tmp");
+    fs::create_dir(&blocked_tmp).unwrap();
+
+    let create_error = reg.create("not-persisted").err();
+    assert!(create_error.is_some());
+    assert!(reg.list().is_empty());
+
+    fs::remove_dir(&blocked_tmp).unwrap();
+    let record = reg.create("original").unwrap();
+    fs::create_dir(&blocked_tmp).unwrap();
+
+    assert!(reg.rename(&record.id, "changed").is_err());
+    assert_eq!(
+        reg.get(&record.id).map(|item| item.label),
+        Some("original".into())
+    );
+    assert!(reg.set_notes(&record.id, Some("changed".into())).is_err());
+    assert_eq!(reg.get(&record.id).and_then(|item| item.notes), None);
+}
+
+#[test]
+fn open_rejects_a_file_as_registry_directory() {
+    let base = tempdir("not-directory");
+    let file = base.path().join("file");
+    fs::write(&file, b"not a directory").unwrap();
+    let error = JailRegistry::open(file).err();
+    assert!(error.is_some());
+}
+
+#[test]
+fn spawn_rejects_a_jail_directory_removed_after_creation() {
+    let base = tempdir("removed-jail");
+    let reg = JailRegistry::open(base.path()).unwrap();
+    let record = reg.create("removed").unwrap();
+    fs::remove_dir_all(&record.dir).unwrap();
+
+    let error = reg
+        .spawn_in_with(&record.id, &super::super::NoopBackend, Command::new("true"))
+        .err()
+        .map(|error| error.kind());
+    assert_eq!(error, Some(io::ErrorKind::NotFound));
+}

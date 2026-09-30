@@ -44,7 +44,7 @@ impl JailBackend for LandlockBackend {
                 .and_then(|r| r.create())
                 .is_ok()
         }
-#[cfg(not(feature = "landlock"))]
+        #[cfg(not(feature = "landlock"))]
         {
             false
         }
@@ -109,3 +109,7 @@ impl JailBackend for LandlockBackend {
         }
     }
 }
+
+#[cfg(all(test, feature = "landlock"))]
+#[path = "linux_tests.rs"]
+mod tests;
