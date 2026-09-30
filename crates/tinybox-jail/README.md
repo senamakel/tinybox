@@ -28,15 +28,15 @@ spawns, never the core process itself.
 
 | File | Role |
 | --- | --- |
-| `crates/openhuman-core/src/sandbox/cwd_jail/mod.rs` | Module docstring plus the thin facade: `spawn` / `spawn_with` / `default_backend` (cached via `OnceLock`). Re-exports the public surface. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/jail.rs` | Core types: the `Jail` description struct (builder plus `canonicalize`/`canonicalize_or_log`) and the `JailBackend` trait (`name`/`is_available`/`spawn`). |
-| `crates/openhuman-core/src/sandbox/cwd_jail/detect.rs` | `pick_backend()`: cfg-gated platform selection; returns the first available backend or `NoopBackend`. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/noop.rs` | `NoopBackend`: no enforcement, plain `Command::spawn`. Always available. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/linux.rs` | `LandlockBackend`: kernel 5.13+ Landlock LSM applied in `pre_exec` (child-side, after fork, before exec). Gated on the `sandbox-landlock` cargo feature. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/macos.rs` | `SeatbeltBackend`: wraps the command in `/usr/bin/sandbox-exec -p '<profile>'`. Renders an allow-default-reads / deny-default-writes Seatbelt profile. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/windows.rs` | `AppContainerBackend`: `CreateAppContainerProfile` plus a DACL grant and `STARTUPINFOEX`/`CreateProcessW` via `windows-sys`. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/registry.rs` | `JailRegistry` and `JailRecord`: multi-jail manager persisted to `index.json`, with atomic-rename writes and containment checks. |
-| `crates/openhuman-core/src/sandbox/cwd_jail/{mod,jail,noop,macos,windows,registry}_tests.rs` | Sibling test suites, each `#[path]`-included from its source file. |
+| `crates/tinybox-jail/src/lib.rs` | Module docstring plus the thin facade: `spawn` / `spawn_with` / `default_backend` (cached via `OnceLock`). Re-exports the public surface. |
+| `crates/tinybox-jail/src/jail.rs` | Core types: the `Jail` description struct (builder plus `canonicalize`/`canonicalize_or_log`) and the `JailBackend` trait (`name`/`is_available`/`spawn`). |
+| `crates/tinybox-jail/src/detect.rs` | `pick_backend()`: cfg-gated platform selection; returns the first available backend or `NoopBackend`. |
+| `crates/tinybox-jail/src/noop.rs` | `NoopBackend`: no enforcement, plain `Command::spawn`. Always available. |
+| `crates/tinybox-jail/src/linux.rs` | `LandlockBackend`: kernel 5.13+ Landlock LSM applied in `pre_exec` (child-side, after fork, before exec). Gated on the `landlock` cargo feature. |
+| `crates/tinybox-jail/src/macos.rs` | `SeatbeltBackend`: wraps the command in `/usr/bin/sandbox-exec -p '<profile>'`. Renders an allow-default-reads / deny-default-writes Seatbelt profile. |
+| `crates/tinybox-jail/src/windows.rs` | `AppContainerBackend`: `CreateAppContainerProfile` plus a DACL grant and `STARTUPINFOEX`/`CreateProcessW` via `windows-sys`. |
+| `crates/tinybox-jail/src/registry.rs` | `JailRegistry` and `JailRecord`: multi-jail manager persisted to `index.json`, with atomic-rename writes and containment checks. |
+| `crates/tinybox-jail/src/{mod,jail,noop,macos,windows,registry}_tests.rs` | Sibling test suites, each `#[path]`-included from its source file. |
 
 ## Public surface
 
@@ -91,7 +91,7 @@ std only:
   (`Mutex`/`OnceLock`/`Arc`), `std::time`.
 - `serde` / `serde_json`: `JailRecord` and the index serialization
   (registry).
-- `landlock` crate: Linux backend, gated on the `sandbox-landlock` cargo
+- `landlock` crate: Linux backend, gated on the `landlock` cargo
   feature.
 - `windows-sys`: Windows AppContainer FFI (Security/Isolation, Threading,
   Memory APIs).

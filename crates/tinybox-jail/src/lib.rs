@@ -2,7 +2,7 @@
 //!
 //! ## Why this exists
 //!
-//! `crates/openhuman-core/src/security/` already has a `Sandbox` trait that wraps
+//! the host application may already have a `Sandbox` trait that wraps
 //! `Command`s (Landlock / Firejail / Bubblewrap / Docker). It works well
 //! for Linux but the macOS branch is a stub (`bwrap` doesn't exist there)
 //! and there is no Windows backend at all. Callers also have to thread
@@ -21,7 +21,7 @@
 //! ## Quick start
 //!
 //! ```ignore
-//! use openhuman_core::sandbox::cwd_jail::{spawn, Jail};
+//! use tinybox_jail::{spawn, Jail};
 //! use std::process::Command;
 //!
 //! let mut jail = Jail::new("/Users/x/work/proj", "agent.delegate")

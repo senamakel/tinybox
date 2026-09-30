@@ -1,6 +1,6 @@
 //! Linux backend: Landlock LSM (kernel 5.13+).
 //!
-//! Reuses the existing [`crate::security::landlock`] implementation
+//! Mirrors the host-side Landlock implementation
 //! but wraps it behind the [`JailBackend`] trait so callers don't have to
 //! plumb `SecurityConfig`. Landlock is applied via `pre_exec`, which runs
 //! in the *child* process after `fork()` and before `exec()` — the parent
@@ -33,7 +33,7 @@ impl JailBackend for LandlockBackend {
     }
 
     fn is_available(&self) -> bool {
-        #[cfg(feature = "sandbox-landlock")]
+        #[cfg(feature = "landlock")]
         {
             use landlock::{AccessFs, Ruleset, RulesetAttr};
             Ruleset::default()
@@ -41,14 +41,14 @@ impl JailBackend for LandlockBackend {
                 .and_then(|r| r.create())
                 .is_ok()
         }
-        #[cfg(not(feature = "sandbox-landlock"))]
+        #[cfg(not(feature = "landlock"))]
         {
             false
         }
     }
 
     fn spawn(&self, jail: &Jail, mut cmd: Command) -> std::io::Result<Child> {
-        #[cfg(feature = "sandbox-landlock")]
+        #[cfg(feature = "landlock")]
         {
             use landlock::{
                 AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
@@ -118,7 +118,7 @@ impl JailBackend for LandlockBackend {
 
             cmd.spawn()
         }
-        #[cfg(not(feature = "sandbox-landlock"))]
+        #[cfg(not(feature = "landlock"))]
         {
             let _ = jail;
             cmd.spawn()

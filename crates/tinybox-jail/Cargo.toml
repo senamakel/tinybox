@@ -1,0 +1,69 @@
+[package]
+name = "tinybox-jail"
+description = "Per-process directory jail for spawned commands: Landlock, Seatbelt, AppContainer, and a noop fallback."
+documentation = "https://docs.rs/tinybox-jail"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[features]
+# Enables the Linux Landlock backend. Without it `LandlockBackend` reports
+# itself unavailable and the default backend falls back to noop.
+landlock = ["dep:landlock"]
+
+[dependencies]
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# AppContainer profile APIs, ACL editing, STARTUPINFOEXW process spawn, and the
+# GENERIC_* file access masks used by `windows.rs`.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# This crate is FFI-heavy by nature (Win32 AppContainer, `pre_exec` for
+# Landlock), so the workspace-wide `unsafe_code = "forbid"` cannot apply. Every
+# other lint keeps the workspace level.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+doc_markdown = "warn"
+must_use_candidate = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"

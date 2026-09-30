@@ -297,7 +297,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "AppContainer spawn succeeded but cannot yet be returned as std::process::Child; \
-         see TODO in crates/openhuman-core/src/sandbox/cwd_jail/windows.rs",
+         see TODO in crates/tinybox-jail/src/windows.rs",
     ))
 }
 
