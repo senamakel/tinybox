@@ -1,5 +1,5 @@
 //! Detecting bases that execute arbitrary code (interpreters,
-//! shells, `xargs`, Windows LOLBins, …). Basename normalisation itself is
+//! shells, `xargs`, Windows `LOLBins`, …). Basename normalisation itself is
 //! `tinybox_core::shell::scan`.
 
 use super::scan::normalized_command_name;
@@ -18,6 +18,8 @@ fn is_python_command(command: &str) -> bool {
             .is_some_and(|ch| ch.is_ascii_digit())
 }
 
+/// True when `command` (any path / `.exe` form) is a base that runs arbitrary
+/// code: interpreters, shells, `xargs`, `env`, JS runtimes and Windows launchers.
 #[must_use]
 pub fn is_command_executor(command: &str) -> bool {
     let command = normalized_command_name(command);

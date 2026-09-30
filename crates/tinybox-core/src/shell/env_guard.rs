@@ -59,7 +59,7 @@ const DANGEROUS_ENV_PREFIXES: &[&str] = &[
 /// Superseded by [`super::scan::has_leading_env_assignment`] for the
 /// allowlist check (which rejects ANY leading env assignment), but kept
 /// for callers that specifically want the dangerous-only signal —
-/// notably tests that pin the old DANGEROUS_ENV_PREFIXES rejection
+/// notably tests that pin the old `DANGEROUS_ENV_PREFIXES` rejection
 /// shape.
 ///
 /// An allowlist check that uses

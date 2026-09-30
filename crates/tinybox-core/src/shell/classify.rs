@@ -263,10 +263,10 @@ fn is_install_command(base: &str, args: &[String]) -> bool {
     let first_is = |verb: &str| args.first().map(String::as_str) == Some(verb);
     match base {
         // System package managers.
-        "apt" | "apt-get" | "dnf" | "yum" | "zypper" => has("install"),
         "pacman" => is_pacman_install(args),
         "apk" => has("add"),
-        "brew" | "snap" | "flatpak" | "winget" | "choco" | "scoop" => has("install"),
+        "apt" | "apt-get" | "dnf" | "yum" | "zypper" | "brew" | "snap" | "flatpak" | "winget"
+        | "choco" | "scoop" => has("install"),
         // Language package managers — host/global-modifying installs only.
         "pip" | "pip3" | "pipx" | "gem" | "go" | "cargo" => first_is("install"),
         "npm" | "pnpm" => {
