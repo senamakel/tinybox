@@ -49,6 +49,7 @@ fn default_backend_is_cached() {
 }
 
 #[test]
+#[cfg(not(feature = "landlock"))]
 fn spawn_uses_default_backend() {
     let dir = std::env::temp_dir();
     let jail = Jail::new(&dir, "default-spawn");

@@ -36,20 +36,19 @@ spawns, never the core process itself.
 | `crates/tinybox-jail/src/macos.rs` | `SeatbeltBackend`: wraps the command in `/usr/bin/sandbox-exec -p '<profile>'`. Renders an allow-default-reads / deny-default-writes Seatbelt profile. |
 | `crates/tinybox-jail/src/windows.rs` | `AppContainerBackend`: `CreateAppContainerProfile` plus a DACL grant and `STARTUPINFOEX`/`CreateProcessW` via `windows-sys`. |
 | `crates/tinybox-jail/src/registry.rs` | `JailRegistry` and `JailRecord`: multi-jail manager persisted to `index.json`, with atomic-rename writes and containment checks. |
-| `crates/tinybox-jail/src/{mod,jail,noop,macos,windows,registry}_tests.rs` | Sibling test suites, each `#[path]`-included from its source file. |
+| `crates/tinybox-jail/src/{lib,jail,noop,macos,windows,registry}_tests.rs` | Sibling test suites, each `#[path]`-included from its source file. |
 
 ## Public surface
 
-Re-exported from `mod.rs`:
+Re-exported from `lib.rs`:
 
 - `Jail`, `JailBackend`: the declarative jail description and the
   OS-enforcement trait.
-- `NoopBackend`, `NOOP_BACKEND_NAME`: the unenforced fallback backend and its
-  `name()` string (`sandbox/ops.rs` compares against it to report
-  `Inactive`).
+- `NoopBackend`, `NOOP_BACKEND_NAME`: the unenforced backend for callers that
+  explicitly choose it.
 - `JailRecord`, `JailRegistry`: persisted multi-jail manager.
 
-Free functions in `mod.rs`:
+Free functions in `lib.rs`:
 
 - `default_backend() -> Arc<dyn JailBackend>`: process-wide cached, lazily
   auto-detected backend.
