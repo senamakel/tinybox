@@ -145,10 +145,16 @@ impl JailRegistry {
             let candidate = generate_id(now_unix(self.clock.as_ref()));
             if !idx.records.contains_key(&candidate) {
                 let dir = self.base.join(&candidate);
-                fs::create_dir_all(&dir)?;
-                break (candidate, dir);
+                match fs::create_dir(&dir) {
+                    Ok(()) => break (candidate, dir),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        log::trace!("[cwd_jail] id directory collision, regenerating");
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                log::trace!("[cwd_jail] id collision, regenerating");
             }
-            log::trace!("[cwd_jail] id collision, regenerating");
         };
 
         let now = now_unix(self.clock.as_ref());
