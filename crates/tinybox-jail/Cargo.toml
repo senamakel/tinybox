@@ -19,6 +19,8 @@ landlock = ["dep:landlock"]
 
 [dependencies]
 log = "0.4"
+# Reuse the workspace clock so registry timestamps can be controlled in tests.
+tinybox-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

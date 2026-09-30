@@ -31,9 +31,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
+use tinybox_core::clock::{Clock, SystemClock};
 
 use super::jail::{Jail, JailBackend};
 use super::{default_backend, spawn_with};
@@ -74,6 +76,7 @@ const INDEX_FILENAME: &str = "index.json";
 pub struct JailRegistry {
     base: PathBuf,
     index: Mutex<Index>,
+    clock: Arc<dyn Clock>,
 }
 
 impl JailRegistry {
@@ -81,6 +84,19 @@ impl JailRegistry {
     /// created if it does not exist; the index file is loaded if present
     /// and seeded blank otherwise.
     pub fn open(base: impl AsRef<Path>) -> io::Result<Self> {
+        Self::open_with_clock(base, Arc::new(SystemClock::new()))
+    }
+
+    /// Open a registry with a caller-supplied clock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the registry directory cannot be created or its
+    /// index cannot be read or decoded.
+    pub fn open_with_clock(
+        base: impl AsRef<Path>,
+        clock: Arc<dyn Clock>,
+    ) -> io::Result<Self> {
         let base = base.as_ref().to_path_buf();
         fs::create_dir_all(&base)?;
         let idx_path = base.join(INDEX_FILENAME);
@@ -107,6 +123,7 @@ impl JailRegistry {
         Ok(Self {
             base,
             index: Mutex::new(index),
+            clock,
         })
     }
 
@@ -128,7 +145,7 @@ impl JailRegistry {
         // existing record.
         let mut idx = self.index.lock().unwrap();
         let (id, dir) = loop {
-            let candidate = generate_id();
+            let candidate = generate_id(now_unix(self.clock.as_ref()));
             if !idx.records.contains_key(&candidate) {
                 let dir = self.base.join(&candidate);
                 fs::create_dir_all(&dir)?;
@@ -137,7 +154,7 @@ impl JailRegistry {
             log::trace!("[cwd_jail] id collision, regenerating");
         };
 
-        let now = now_unix();
+        let now = now_unix(self.clock.as_ref());
         let record = JailRecord {
             id: id.clone(),
             label,
@@ -212,7 +229,10 @@ impl JailRegistry {
         // persist failure — without that the in-memory record would
         // diverge from disk.
         let prev_label = std::mem::replace(&mut record.label, new_label);
-        let prev_updated = std::mem::replace(&mut record.updated_at_unix, now_unix());
+        let prev_updated = std::mem::replace(
+            &mut record.updated_at_unix,
+            now_unix(self.clock.as_ref()),
+        );
         let cloned = record.clone();
         if let Err(e) = self.persist(&idx) {
             if let Some(r) = idx.records.get_mut(id) {
@@ -237,7 +257,10 @@ impl JailRegistry {
             .get_mut(id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no jail {id}")))?;
         let prev_notes = std::mem::replace(&mut record.notes, notes);
-        let prev_updated = std::mem::replace(&mut record.updated_at_unix, now_unix());
+        let prev_updated = std::mem::replace(
+            &mut record.updated_at_unix,
+            now_unix(self.clock.as_ref()),
+        );
         let cloned = record.clone();
         if let Err(e) = self.persist(&idx) {
             if let Some(r) = idx.records.get_mut(id) {
@@ -419,8 +442,9 @@ impl JailRegistry {
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
+fn now_unix(clock: &dyn Clock) -> u64 {
+    clock
+        .now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
@@ -428,12 +452,11 @@ fn now_unix() -> u64 {
 
 /// Short, URL-safe id. Not cryptographically random — we use it as a
 /// directory name, not a token.
-fn generate_id() -> String {
+fn generate_id(timestamp: u64) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let ts = now_unix();
-    format!("j{ts:x}{n:x}")
+    format!("j{timestamp:x}{n:x}")
 }
 
 #[cfg(test)]
