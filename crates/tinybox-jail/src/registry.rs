@@ -83,6 +83,11 @@ impl JailRegistry {
     /// Open (or create) a registry rooted at `base`. The directory is
     /// created if it does not exist; the index file is loaded if present
     /// and seeded blank otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the base directory cannot be created or the index
+    /// cannot be read or decoded.
     pub fn open(base: impl AsRef<Path>) -> io::Result<Self> {
         Self::open_with_clock(base, Arc::new(SystemClock::new()))
     }
@@ -130,6 +135,14 @@ impl JailRegistry {
     }
 
     /// Create a new jail directory. Returns the persisted record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory creation or index persistence fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn create(&self, label: impl Into<String>) -> io::Result<JailRecord> {
         let label = label.into();
         // Label is free-form user input — log only its length so we get
@@ -186,11 +199,19 @@ impl JailRegistry {
     }
 
     /// Look up a jail by id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn get(&self, id: &str) -> Option<JailRecord> {
         self.index.lock().unwrap().records.get(id).cloned()
     }
 
     /// List every active jail. Deterministic order (by id).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn list(&self) -> Vec<JailRecord> {
         self.index
             .lock()
@@ -202,6 +223,10 @@ impl JailRegistry {
     }
 
     /// Search by label substring (case-insensitive). Useful for UI.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn find_by_label(&self, needle: &str) -> Vec<JailRecord> {
         let needle = needle.to_lowercase();
         self.index
@@ -217,6 +242,14 @@ impl JailRegistry {
     /// Rename: changes the *label* only. The directory id stays put so
     /// existing path references keep working. `AppContainer` profile names
     /// are derived from `id` (stable), not `label`, for the same reason.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id is unknown or index persistence fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn rename(&self, id: &str, new_label: impl Into<String>) -> io::Result<JailRecord> {
         let new_label = new_label.into();
         log::debug!(
@@ -247,6 +280,14 @@ impl JailRegistry {
     }
 
     /// Update the free-form notes field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id is unknown or index persistence fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn set_notes(&self, id: &str, notes: Option<String>) -> io::Result<JailRecord> {
         log::debug!(
             "[cwd_jail] registry.set_notes id={id} has_notes={}",
@@ -280,6 +321,15 @@ impl JailRegistry {
     /// so a filesystem error doesn't leave the registry in a state
     /// where the entry is gone in-memory but the directory survives on
     /// disk until the next `open()` reload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id is unknown, the path is unsafe, or removal
+    /// and persistence fail.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn delete(&self, id: &str) -> io::Result<()> {
         let mut idx = self.index.lock().unwrap();
         let record = idx
@@ -338,6 +388,14 @@ impl JailRegistry {
 
     /// Drop *all* jails. Convenience for tests / "reset everything"
     /// flows. Returns the number of jails removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deleting any jail fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry mutex was poisoned by a previous panic.
     pub fn clear(&self) -> io::Result<usize> {
         let ids: Vec<String> = self.index.lock().unwrap().records.keys().cloned().collect();
         let n = ids.len();
@@ -351,6 +409,11 @@ impl JailRegistry {
     /// Spawn `cmd` inside the named jail, using the default backend.
     /// Convenience wrapper — the same effect as
     /// `spawn(&Jail::new(record.dir, record.label), cmd)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id is unknown, the jail path is unsafe, or
+    /// spawning is unsupported or fails.
     pub fn spawn_in(&self, id: &str, cmd: Command) -> io::Result<Child> {
         let jail = self.jail_for(id)?;
         log::debug!("[cwd_jail] registry.spawn_in id={id}");
@@ -358,6 +421,11 @@ impl JailRegistry {
     }
 
     /// Same as [`Self::spawn_in`] but with a caller-supplied backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id is unknown, the jail path is unsafe, or
+    /// the backend cannot spawn the command.
     pub fn spawn_in_with(
         &self,
         id: &str,
