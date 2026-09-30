@@ -87,12 +87,16 @@ impl JailBackend for LandlockBackend {
                     .add_rule(PathBeneath::new(fd, reads))
                     .map_err(|error| std::io::Error::other(error.to_string()))?;
             }
+            let mut ruleset = Some(ruleset);
 
             // SAFETY: the child callback only applies this prebuilt ruleset.
             unsafe {
-                cmd.pre_exec(move || match ruleset.restrict_self() {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err(std::io::Error::from_raw_os_error(5)),
+                cmd.pre_exec(move || match ruleset.take() {
+                    Some(ruleset) => match ruleset.restrict_self() {
+                        Ok(_) => Ok(()),
+                        Err(_) => Err(std::io::Error::from_raw_os_error(5)),
+                    },
+                    None => Err(std::io::Error::from_raw_os_error(22)),
                 });
             }
 
