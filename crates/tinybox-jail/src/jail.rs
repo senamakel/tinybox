@@ -68,6 +68,10 @@ impl Jail {
 
     /// Canonicalize `root` and `read_only` so backends never see `..` or
     /// symlink trickery. Returns an error if `root` does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns the filesystem error encountered while canonicalizing `root`.
     pub fn canonicalize(&mut self) -> std::io::Result<()> {
         self.root = self.root.canonicalize()?;
         for p in &mut self.read_only {
@@ -110,6 +114,10 @@ pub trait JailBackend: Send + Sync {
     /// Spawn `cmd` under the jail described by `jail`. Backends own how the
     /// jail is materialized (Landlock ruleset, sandbox-exec wrapper,
     /// `AppContainer` profile + restricted token).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot apply the jail or spawn command.
     fn spawn(&self, jail: &Jail, cmd: Command) -> std::io::Result<Child>;
 }
 

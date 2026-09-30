@@ -74,6 +74,11 @@ pub fn default_backend() -> Arc<dyn JailBackend> {
 /// `..` or symlinks. If the root does not exist, the spawn fails with
 /// `NotFound` (canonicalize bubbles it up) — callers should create the
 /// workspace before encapsulating.
+///
+/// # Errors
+///
+/// Returns an error if the jail root cannot be canonicalized or the backend
+/// rejects the command.
 pub fn spawn(jail: &Jail, cmd: Command) -> std::io::Result<Child> {
     let mut jail = jail.clone();
     jail.canonicalize()?;
@@ -83,6 +88,11 @@ pub fn spawn(jail: &Jail, cmd: Command) -> std::io::Result<Child> {
 /// Same as [`spawn`] but with a caller-supplied backend. Useful in
 /// tests and for callers that want to opt into a weaker backend
 /// explicitly (e.g. forcing [`NoopBackend`] during local dev).
+///
+/// # Errors
+///
+/// Returns an error if the jail root cannot be canonicalized or the backend
+/// rejects the command.
 pub fn spawn_with(backend: &dyn JailBackend, jail: &Jail, cmd: Command) -> std::io::Result<Child> {
     let mut jail = jail.clone();
     jail.canonicalize()?;
