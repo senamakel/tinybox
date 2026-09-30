@@ -282,11 +282,7 @@ fn is_install_command(base: &str, args: &[String]) -> bool {
 /// lowercased remaining words; `joined` is the lowercased segment used for
 /// pattern matching. Fail-closed: an unrecognized base resolves to `Write`.
 #[must_use]
-pub fn classify_segment(
-    base: &str,
-    args: &[String],
-    joined: &str,
-) -> CommandClass {
+pub fn classify_segment(base: &str, args: &[String], joined: &str) -> CommandClass {
     // Catastrophic patterns first — they win regardless of the base command.
     if joined.contains("rm -rf /") || joined.contains("rm -fr /") || joined.contains(":(){:|:&};:")
     {
