@@ -44,7 +44,7 @@ impl JailBackend for LandlockBackend {
                 .and_then(|r| r.create())
                 .is_ok()
         }
-        #[cfg(not(feature = "landlock"))]
+#[cfg(not(feature = "landlock"))]
         {
             false
         }
