@@ -9,6 +9,7 @@ members = [
     "crates/tinybox-core",
     "crates/tinybox-docker",
     "crates/tinybox-host",
+    "crates/tinybox-jail",
     "crates/tinybox-linux",
     "crates/tinybox-microvm",
     "crates/tinybox-module",
@@ -57,6 +58,7 @@ serde = { version = "1", features = ["derive"] }
 # Internal path dependencies between workspace members.
 tinybox-core = { path = "crates/tinybox-core", version = "0.1.5" }
 tinybox-host = { path = "crates/tinybox-host", version = "0.1.5" }
+tinybox-jail = { path = "crates/tinybox-jail", version = "0.1.5" }
 tinybox-linux = { path = "crates/tinybox-linux", version = "0.1.5" }
 tinybox-microvm = { path = "crates/tinybox-microvm", version = "0.1.5" }
 tinybox-docker = { path = "crates/tinybox-docker", version = "0.1.5" }
