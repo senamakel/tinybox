@@ -50,12 +50,8 @@ pub mod jail;
 pub mod noop;
 pub mod registry;
 
-#[cfg(target_os = "linux")]
-pub mod linux;
-#[cfg(target_os = "macos")]
-pub mod macos;
-#[cfg(target_os = "windows")]
-pub mod windows;
+// Platform backends are intentionally not compiled until they can preserve
+// the workspace unsafe-code policy and enforce the public jail contract.
 
 pub use jail::{Jail, JailBackend};
 pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
