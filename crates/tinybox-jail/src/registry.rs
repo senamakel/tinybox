@@ -41,13 +41,20 @@ use super::{default_backend, spawn_with};
 /// Metadata persisted for each jail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JailRecord {
+    /// Stable identifier, also the directory name under the registry base.
     pub id: String,
+    /// Caller-supplied human label.
     pub label: String,
+    /// Absolute jail directory.
     pub dir: PathBuf,
+    /// Name of the backend that was the default when the jail was created.
     pub backend_at_create: String,
+    /// Creation time, seconds since the Unix epoch.
     pub created_at_unix: u64,
+    /// Last-modified time, seconds since the Unix epoch.
     pub updated_at_unix: u64,
     #[serde(default)]
+    /// Free-form notes.
     pub notes: Option<String>,
 }
 

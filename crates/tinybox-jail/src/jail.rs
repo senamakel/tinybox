@@ -46,16 +46,19 @@ impl Jail {
         }
     }
 
+    /// Grants read (and execute) access to an extra path outside the root.
     pub fn add_read_only(mut self, path: impl AsRef<Path>) -> Self {
         self.read_only.push(path.as_ref().to_path_buf());
         self
     }
 
+    /// Asks the backend to block network access where it can.
     pub fn deny_net(mut self) -> Self {
         self.allow_net = false;
         self
     }
 
+    /// Asks the backend to forbid spawning further subprocesses where it can.
     pub fn deny_subprocess(mut self) -> Self {
         self.allow_subprocess = false;
         self

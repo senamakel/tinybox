@@ -17,6 +17,7 @@ use super::jail::{Jail, JailBackend};
 /// back into a `Ready` report.
 pub const NOOP_BACKEND_NAME: &str = "noop";
 
+/// Backend that spawns the command unmodified. Always available; audit-only.
 #[derive(Debug, Default)]
 pub struct NoopBackend;
 

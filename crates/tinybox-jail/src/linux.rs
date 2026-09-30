@@ -13,6 +13,8 @@ use std::process::{Child, Command};
 
 use super::jail::{Jail, JailBackend};
 
+/// Landlock LSM backend (kernel 5.13+).
+#[derive(Debug)]
 pub struct LandlockBackend;
 
 impl Default for LandlockBackend {
@@ -22,6 +24,7 @@ impl Default for LandlockBackend {
 }
 
 impl LandlockBackend {
+    /// Creates the backend; availability is checked by `is_available`.
     pub fn new() -> Self {
         Self
     }

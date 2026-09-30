@@ -5,6 +5,8 @@ use std::sync::Arc;
 use super::jail::JailBackend;
 use super::noop::NoopBackend;
 
+/// Picks the strongest backend available on this platform, falling back to
+/// [`NoopBackend`] when no OS sandbox works.
 pub fn pick_backend() -> Arc<dyn JailBackend> {
     #[cfg(target_os = "linux")]
     {
