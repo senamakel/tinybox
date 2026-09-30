@@ -6,7 +6,7 @@
 //!
 //! - A stable **id** (UUID-ish, used in paths and the index).
 //! - A user-visible **label** (free text, displayed in UI, used for
-//!   AppContainer profile derivation on Windows).
+//!   `AppContainer` profile derivation on Windows).
 //! - A **directory** at `<base>/<id>/` that the [`crate::Jail`]
 //!   is rooted in.
 //! - **Metadata**: created/updated timestamps, backend used at create
@@ -62,7 +62,7 @@ pub struct JailRecord {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Index {
-    /// id → record. BTreeMap so list() is deterministically ordered.
+    /// id → record. `BTreeMap` so `list()` is deterministically ordered.
     records: BTreeMap<String, JailRecord>,
     #[serde(default)]
     schema_version: u32,
@@ -143,7 +143,9 @@ impl JailRegistry {
         let mut idx = self.index.lock().unwrap();
         let (id, dir) = loop {
             let candidate = generate_id(now_unix(self.clock.as_ref()));
-            if !idx.records.contains_key(&candidate) {
+            if idx.records.contains_key(&candidate) {
+                log::trace!("[cwd_jail] id collision, regenerating");
+            } else {
                 let dir = self.base.join(&candidate);
                 match fs::create_dir(&dir) {
                     Ok(()) => break (candidate, dir),
@@ -152,8 +154,6 @@ impl JailRegistry {
                     }
                     Err(error) => return Err(error),
                 }
-            } else {
-                log::trace!("[cwd_jail] id collision, regenerating");
             }
         };
 
@@ -215,7 +215,7 @@ impl JailRegistry {
     }
 
     /// Rename: changes the *label* only. The directory id stays put so
-    /// existing path references keep working. AppContainer profile names
+    /// existing path references keep working. `AppContainer` profile names
     /// are derived from `id` (stable), not `label`, for the same reason.
     pub fn rename(&self, id: &str, new_label: impl Into<String>) -> io::Result<JailRecord> {
         let new_label = new_label.into();
@@ -445,8 +445,7 @@ fn now_unix(clock: &dyn Clock) -> u64 {
     clock
         .now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Short, URL-safe id. Not cryptographically random — we use it as a

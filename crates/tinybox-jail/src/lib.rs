@@ -1,4 +1,4 @@
-//! Directory jail (cwd_jail): jail an agent/tool into a single workspace.
+//! Directory jail (`cwd_jail)`: jail an agent/tool into a single workspace.
 //!
 //! ## Why this exists
 //!
