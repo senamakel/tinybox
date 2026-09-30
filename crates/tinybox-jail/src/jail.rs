@@ -47,6 +47,7 @@ impl Jail {
     }
 
     /// Grants read (and execute) access to an extra path outside the root.
+    #[must_use]
     pub fn add_read_only(mut self, path: impl AsRef<Path>) -> Self {
         self.read_only.push(path.as_ref().to_path_buf());
         self
