@@ -5,6 +5,8 @@
 //! the ~500-line guideline.
 
 use super::*;
+use std::time::Duration;
+use tinybox_core::clock::FixedClock;
 
 fn tempdir(tag: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
@@ -303,4 +305,18 @@ fn create_consecutive_ids_are_unique_in_same_second() {
         .map(|i| reg.create(format!("j{i}")).unwrap().id)
         .collect();
     assert_eq!(ids.len(), 32);
+}
+
+#[test]
+fn registry_uses_the_injected_clock_for_timestamps() {
+    let base = tempdir("clock");
+    let clock = Arc::new(FixedClock::at_epoch());
+    let reg = JailRegistry::open_with_clock(base.path(), clock.clone()).unwrap();
+    let created = reg.create("clocked").unwrap();
+    assert_eq!(created.created_at_unix, 0);
+    assert_eq!(created.updated_at_unix, 0);
+
+    clock.advance(Duration::from_secs(5));
+    let updated = reg.rename(&created.id, "renamed").unwrap();
+    assert_eq!(updated.updated_at_unix, 5);
 }

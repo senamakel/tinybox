@@ -30,8 +30,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -93,10 +93,7 @@ impl JailRegistry {
     ///
     /// Returns an error if the registry directory cannot be created or its
     /// index cannot be read or decoded.
-    pub fn open_with_clock(
-        base: impl AsRef<Path>,
-        clock: Arc<dyn Clock>,
-    ) -> io::Result<Self> {
+    pub fn open_with_clock(base: impl AsRef<Path>, clock: Arc<dyn Clock>) -> io::Result<Self> {
         let base = base.as_ref().to_path_buf();
         fs::create_dir_all(&base)?;
         let idx_path = base.join(INDEX_FILENAME);
@@ -229,10 +226,8 @@ impl JailRegistry {
         // persist failure — without that the in-memory record would
         // diverge from disk.
         let prev_label = std::mem::replace(&mut record.label, new_label);
-        let prev_updated = std::mem::replace(
-            &mut record.updated_at_unix,
-            now_unix(self.clock.as_ref()),
-        );
+        let prev_updated =
+            std::mem::replace(&mut record.updated_at_unix, now_unix(self.clock.as_ref()));
         let cloned = record.clone();
         if let Err(e) = self.persist(&idx) {
             if let Some(r) = idx.records.get_mut(id) {
@@ -257,10 +252,8 @@ impl JailRegistry {
             .get_mut(id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no jail {id}")))?;
         let prev_notes = std::mem::replace(&mut record.notes, notes);
-        let prev_updated = std::mem::replace(
-            &mut record.updated_at_unix,
-            now_unix(self.clock.as_ref()),
-        );
+        let prev_updated =
+            std::mem::replace(&mut record.updated_at_unix, now_unix(self.clock.as_ref()));
         let cloned = record.clone();
         if let Err(e) = self.persist(&idx) {
             if let Some(r) = idx.records.get_mut(id) {
