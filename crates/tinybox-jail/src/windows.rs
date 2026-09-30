@@ -28,6 +28,10 @@
 //! shipping. Win32 has many subtle wrong-trees you can bark up.
 
 #![cfg(target_os = "windows")]
+// Written for edition 2021, where the body of an `unsafe fn` is an unsafe
+// context. Each fn documents its own safety contract; re-scoping them into
+// per-call blocks is a separate, hardware-tested change.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::OsStr;
 use std::io;
@@ -100,9 +104,12 @@ use windows_sys::Win32::System::Threading::{
 
 use super::jail::{Jail, JailBackend};
 
+/// Windows AppContainer backend.
+#[derive(Debug)]
 pub struct AppContainerBackend;
 
 impl AppContainerBackend {
+    /// Creates the backend.
     pub fn new() -> Self {
         Self
     }
