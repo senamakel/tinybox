@@ -26,7 +26,7 @@ fn create_list_get_roundtrip() {
     assert_eq!(listed.len(), 2);
     assert_eq!(reg.get(&a.id).unwrap().label, "alpha");
     assert_eq!(reg.get(&b.id).unwrap().label, "beta");
-    }
+}
 
 #[test]
 fn rename_changes_label_not_id_or_dir() {
@@ -38,7 +38,7 @@ fn rename_changes_label_not_id_or_dir() {
     assert_eq!(renamed.dir, a.dir);
     assert_eq!(renamed.label, "new");
     assert!(renamed.updated_at_unix >= a.updated_at_unix);
-    }
+}
 
 #[test]
 fn delete_removes_dir_and_record() {
@@ -50,7 +50,7 @@ fn delete_removes_dir_and_record() {
     reg.delete(&a.id).unwrap();
     assert!(!dir.exists());
     assert!(reg.get(&a.id).is_none());
-    }
+}
 
 #[test]
 fn delete_missing_errors() {
@@ -58,7 +58,7 @@ fn delete_missing_errors() {
     let reg = JailRegistry::open(&base).unwrap();
     let err = reg.delete("nope").unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    }
+}
 
 #[test]
 fn index_persists_across_reopen() {
@@ -71,7 +71,7 @@ fn index_persists_across_reopen() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, a.id);
     assert_eq!(listed[0].label, "persistent");
-    }
+}
 
 #[test]
 fn find_by_label_substring() {
@@ -83,7 +83,7 @@ fn find_by_label_substring() {
     assert_eq!(reg.find_by_label("AGENT").len(), 2);
     assert_eq!(reg.find_by_label("gamma").len(), 1);
     assert_eq!(reg.find_by_label("nope").len(), 0);
-    }
+}
 
 #[test]
 fn clear_drops_everything() {
@@ -95,7 +95,7 @@ fn clear_drops_everything() {
     let n = reg.clear().unwrap();
     assert_eq!(n, 3);
     assert_eq!(reg.list().len(), 0);
-    }
+}
 
 #[test]
 fn parallel_jails_have_distinct_dirs() {
@@ -111,7 +111,7 @@ fn parallel_jails_have_distinct_dirs() {
     for r in &jails {
         assert!(r.dir.exists());
     }
-    }
+}
 
 #[test]
 fn set_notes_roundtrips() {
@@ -123,7 +123,7 @@ fn set_notes_roundtrips() {
     assert_eq!(updated.notes.as_deref(), Some("hello"));
     let cleared = reg.set_notes(&a.id, None).unwrap();
     assert!(cleared.notes.is_none());
-    }
+}
 
 #[test]
 fn set_notes_on_missing_id_errors() {
@@ -131,7 +131,7 @@ fn set_notes_on_missing_id_errors() {
     let reg = JailRegistry::open(&base).unwrap();
     let err = reg.set_notes("nope", Some("x".into())).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    }
+}
 
 #[test]
 fn rename_on_missing_id_errors() {
@@ -139,7 +139,7 @@ fn rename_on_missing_id_errors() {
     let reg = JailRegistry::open(&base).unwrap();
     let err = reg.rename("nope", "x").unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    }
+}
 
 #[test]
 fn delete_twice_second_is_not_found() {
@@ -149,7 +149,7 @@ fn delete_twice_second_is_not_found() {
     reg.delete(&a.id).unwrap();
     let err = reg.delete(&a.id).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    }
+}
 
 #[test]
 fn spawn_in_with_missing_id_errors() {
@@ -159,7 +159,7 @@ fn spawn_in_with_missing_id_errors() {
         .spawn_in_with("nope", &super::super::NoopBackend, Command::new("true"))
         .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    }
+}
 
 #[test]
 #[cfg(not(feature = "landlock"))]
@@ -184,21 +184,21 @@ fn spawn_in_uses_default_backend() {
             Some(io::ErrorKind::Unsupported)
         );
     }
-    }
+}
 
 #[test]
 fn clear_on_empty_registry_is_zero() {
     let base = tempdir("empty-clear");
     let reg = JailRegistry::open(&base).unwrap();
     assert_eq!(reg.clear().unwrap(), 0);
-    }
+}
 
 #[test]
 fn find_by_label_on_empty_registry() {
     let base = tempdir("empty-find");
     let reg = JailRegistry::open(&base).unwrap();
     assert!(reg.find_by_label("anything").is_empty());
-    }
+}
 
 #[test]
 fn open_creates_base_directory_if_missing() {
@@ -210,7 +210,7 @@ fn open_creates_base_directory_if_missing() {
     let reg = JailRegistry::open(path).unwrap();
     assert!(path.exists());
     assert!(reg.list().is_empty());
-    }
+}
 
 #[test]
 fn corrupt_index_returns_invalid_data() {
@@ -218,7 +218,7 @@ fn corrupt_index_returns_invalid_data() {
     fs::write(base.path().join("index.json"), b"this is not json").unwrap();
     let err = JailRegistry::open(&base).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-    }
+}
 
 #[test]
 fn persist_writes_index_file() {
@@ -229,14 +229,14 @@ fn persist_writes_index_file() {
     assert!(path.exists());
     let raw = fs::read_to_string(&path).unwrap();
     assert!(raw.contains("\"label\": \"x\""));
-    }
+}
 
 #[test]
 fn base_accessor_returns_open_dir() {
     let base = tempdir("base-accessor");
     let reg = JailRegistry::open(&base).unwrap();
     assert_eq!(reg.base(), base.path());
-    }
+}
 
 #[test]
 fn delete_refuses_path_outside_base() {
@@ -254,7 +254,7 @@ fn delete_refuses_path_outside_base() {
     assert!(std::env::temp_dir().exists());
     // Record is still there because we refuse cleanly without removing.
     assert!(reg.get(&a.id).is_some());
-    }
+}
 
 #[test]
 fn spawn_in_refuses_path_outside_base() {
@@ -271,7 +271,7 @@ fn spawn_in_refuses_path_outside_base() {
         .spawn_in_with(&a.id, &super::super::NoopBackend, Command::new("true"))
         .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-    }
+}
 
 #[test]
 fn spawn_in_uses_record_dir_as_root() {
@@ -287,7 +287,7 @@ fn spawn_in_uses_record_dir_as_root() {
         .unwrap();
     let status = child.wait().unwrap();
     assert!(status.success() || cfg!(windows));
-    }
+}
 
 #[test]
 fn create_consecutive_ids_are_unique_in_same_second() {
@@ -303,4 +303,4 @@ fn create_consecutive_ids_are_unique_in_same_second() {
         .map(|i| reg.create(format!("j{i}")).unwrap().id)
         .collect();
     assert_eq!(ids.len(), 32);
-    }
+}

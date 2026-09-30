@@ -332,7 +332,7 @@ impl JailRegistry {
     pub fn spawn_in(&self, id: &str, cmd: Command) -> io::Result<Child> {
         let jail = self.jail_for(id)?;
         log::debug!("[cwd_jail] registry.spawn_in id={id}");
-        default_backend().spawn(&jail, cmd)
+        spawn_with(default_backend().as_ref(), &jail, cmd)
     }
 
     /// Same as [`Self::spawn_in`] but with a caller-supplied backend.
