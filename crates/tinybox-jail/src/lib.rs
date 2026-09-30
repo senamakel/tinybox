@@ -2,13 +2,12 @@
 //!
 //! ## Why this exists
 //!
-//! the host application may already have a `Sandbox` trait that wraps
-//! `Command`s (Landlock / Firejail / Bubblewrap / Docker). It works well
-//! for Linux but the macOS branch is a stub (`bwrap` doesn't exist there)
-//! and there is no Windows backend at all. Callers also have to thread
-//! `SecurityConfig` through every call site.
+//! `tinybox-linux` isolates a whole box with namespaces; this crate is a
+//! different, lighter mechanism: it confines a single spawned `Command` to one
+//! directory tree using whatever the host OS offers, with no daemon and no
+//! container runtime.
 //!
-//! `cwd_jail` is the user-facing facade. Callers describe *what* the
+//! This crate is the user-facing facade. Callers describe *what* the
 //! jail looks like ([`Jail`]) and the module picks the right OS backend:
 //!
 //! | OS      | Backend       | Mechanism                                  |
@@ -38,11 +37,13 @@
 //!
 //! - It does not jail the current process. Backends spawn a child. The core
 //!   itself is trusted; only the things it shells out to are caged.
-//! - It does not replace `security::SecurityPolicy`. The autonomy gate
-//!   still decides *whether* a command may run; this module decides
-//!   *what filesystem* it sees once approved.
+//! - It does not decide *whether* a command may run. The host applies its own
+//!   policy first; this crate decides *what filesystem* the command sees once
+//!   approved.
 //! - It does not encrypt files. ACLs / Landlock rules / Seatbelt profiles
 //!   are the wall — anything inside `root` is fully visible to the child.
+
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod detect;
 pub mod jail;
@@ -57,7 +58,7 @@ pub mod macos;
 pub mod windows;
 
 pub use jail::{Jail, JailBackend};
-pub use noop::{NoopBackend, NOOP_BACKEND_NAME};
+pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
 pub use registry::{JailRecord, JailRegistry};
 
 use std::process::{Child, Command};

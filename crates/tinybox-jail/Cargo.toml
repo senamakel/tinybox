@@ -51,18 +51,16 @@ missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 
+# Ported wholesale from the OpenHuman host, which did not run `pedantic`; the
+# doc-section lints (`missing_errors_doc`, ...) are left off until the public
+# surface is documented to that standard. Tests may unwrap (see `lib.rs`).
 [lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 todo = "warn"
 unimplemented = "warn"
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
-doc_markdown = "warn"
-must_use_candidate = "warn"
 
 [lints.rustdoc]
 broken_intra_doc_links = "warn"

@@ -4,7 +4,7 @@ Cross-platform directory-jail facade. Given a declarative description of a
 workspace (`Jail`), it picks the strongest available OS sandbox backend and
 spawns a child process caged into a single read/write root (plus optional
 read-only paths), with toggles for outbound network and subprocess creation.
-It is the user-facing complement to `crates/openhuman-core/src/security/`:
+It is a per-process complement to the box-level isolation in `tinybox-linux`:
 the autonomy gate decides whether a command may run, and `cwd_jail` decides
 what filesystem the approved child process sees. It jails the child it
 spawns, never the core process itself.
@@ -83,9 +83,7 @@ for all jails lives in `<base>/index.json`.
 
 ## Dependencies
 
-This module is notably self-contained: its own files contain no
-`use crate::` or `use crate::core::` imports. Dependencies are external or
-std only:
+This crate depends only on std and:
 
 - `std::process` (`Command`/`Child`), `std::fs`, `std::sync`
   (`Mutex`/`OnceLock`/`Arc`), `std::time`.
@@ -100,20 +98,6 @@ std only:
 The Linux backend's docstring references `crate::security::landlock` as
 conceptual prior art, but the implementation here is self-contained; it does
 not import that module.
-
-## Used by
-
-- Declared in `crates/openhuman-core/src/sandbox/mod.rs` (`pub mod cwd_jail;`).
-- `crates/openhuman-core/src/sandbox/ops.rs`: `execute_local_jail` builds a
-  `Jail` from the resolved `SandboxPolicy` and spawns through
-  `cwd_jail::default_backend()`, falling back to `cwd_jail::NoopBackend` when
-  no OS jail is available.
-- `crates/openhuman-core/src/agent/platform_shell.rs`: doc references to
-  `cwd_jail::spawn` when explaining why shell-spawning is routed through a
-  shared, Windows-aware command builder.
-- `crates/openhuman-core/src/tools/impl/system/{node_exec,npm_exec}.rs`
-  mention `cwd_jail` in comments/docs when describing the `Local` sandbox
-  backend.
 
 ## Notes and gotchas
 

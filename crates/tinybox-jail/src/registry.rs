@@ -21,6 +21,10 @@
 //! for the single-process core; if we ever want multi-process registry
 //! access we'll need OS-level file locking — explicit non-goal for now.
 
+// A poisoned index mutex means a panic mid-mutation; propagating it is the
+// behaviour this module always had.
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;

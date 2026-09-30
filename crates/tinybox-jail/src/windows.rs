@@ -37,19 +37,19 @@ use std::path::Path;
 use std::process::{Child, Command};
 use std::ptr;
 
-use windows_sys::core::PWSTR;
-use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HLOCAL};
+use windows_sys::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS,
-    SE_FILE_OBJECT, TRUSTEE_IS_GROUP, TRUSTEE_IS_SID, TRUSTEE_W,
+    EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
+    SetNamedSecurityInfoW, TRUSTEE_IS_GROUP, TRUSTEE_IS_SID, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
 use windows_sys::Win32::Security::{
-    DeriveCapabilitySidsFromName, FreeSid, ACL, DACL_SECURITY_INFORMATION, PSID,
+    ACL, DACL_SECURITY_INFORMATION, DeriveCapabilitySidsFromName, FreeSid, PSID,
     SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
 };
+use windows_sys::core::PWSTR;
 
 // Well-known Win32 access masks. `windows-sys` has moved these constants
 // between modules across releases (0.59 had GENERIC_READ in
@@ -90,11 +90,12 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 /// dedicated `Jail` flag (e.g. `allow_private_lan_server`) and extend
 /// this list conditionally — do NOT silently expand `allow_net`.
 const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
-use windows_sys::Win32::System::Memory::{LocalAlloc, LPTR};
+use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
-    UpdateProcThreadAttribute, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW, STARTUPINFOW,
+    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
+    UpdateProcThreadAttribute,
 };
 
 use super::jail::{Jail, JailBackend};
