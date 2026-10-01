@@ -369,5 +369,5 @@ fn cap(text: &mut String, note: &str) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod test;
