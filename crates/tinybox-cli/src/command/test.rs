@@ -848,10 +848,13 @@ async fn a_one_shot_docker_run_leaves_nothing_behind() -> Result<()> {
 
     assert_eq!(executed.code, 0);
     assert_eq!(executed.out.trim(), "once");
-    assert_eq!(invoke_scripted(dir.path(), host.clone(), &["ls"])
+    assert_eq!(
+        invoke_scripted(dir.path(), host.clone(), &["ls"])
             .await
             .out
-            .len(), 0);
+            .len(),
+        0
+    );
     Ok(())
 }
 
