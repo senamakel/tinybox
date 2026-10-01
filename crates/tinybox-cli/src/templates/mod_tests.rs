@@ -30,7 +30,7 @@ fn a_missing_file_reads_as_an_empty_index() -> Result<()> {
     let (templates, _dir) = templates()?;
 
     assert!(!templates.path().exists());
-    assert!(templates.list()?.is_empty());
+    assert_eq!(templates.list()?.len(), 0);
     Ok(())
 }
 
@@ -73,7 +73,7 @@ fn removals_persist() -> Result<()> {
 
     templates.remove(&name("ci")?)?;
 
-    assert!(FileTemplates::new(templates.path()).list()?.is_empty());
+    assert_eq!(FileTemplates::new(templates.path()).list()?.len(), 0);
     Ok(())
 }
 
