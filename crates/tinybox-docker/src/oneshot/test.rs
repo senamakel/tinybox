@@ -29,13 +29,31 @@ fn canon(p: &Path) -> String {
 fn fake(dir: &Path, body: &str) -> (DockerCli, PathBuf) {
     let out = dir.join("argv.out");
     let script = format!(
-        "#!/bin/sh\n: > '{out}'\nfor a in \"$@\"; do printf '%s\\0' \"$a\" >> '{out}'; done\n{body}\n",
+        "#!/bin/sh\n[ \"$1\" = --tinybox-probe ] && exit 0\n: > '{out}'\nfor a in \"$@\"; do printf '%s\\0' \"$a\" >> '{out}'; done\n{body}\n",
         out = out.display()
     );
     let path = dir.join("docker");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_until_executable(&path);
     (DockerCli::with_program(&path), out)
+}
+
+/// Another test thread may `fork` while our write handle is still open, and the
+/// child keeps that handle until it `exec`s; executing the script in that window
+/// fails with `ETXTBSY`. Probe (a no-op for the script) until the window closes.
+fn wait_until_executable(path: &Path) {
+    for _ in 0..200 {
+        match std::process::Command::new(path)
+            .arg("--tinybox-probe")
+            .status()
+        {
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => return,
+        }
+    }
 }
 
 fn recorded(out: &Path) -> Vec<String> {
