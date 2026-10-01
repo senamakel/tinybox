@@ -54,7 +54,7 @@ const DANGEROUS_ENV_PREFIXES: &[&str] = &[
 ];
 
 /// Returns true if `s` starts with one or more inline env assignments and any
-/// of the assigned names are in [`DANGEROUS_ENV_PREFIXES`].
+/// of the assigned names are in `DANGEROUS_ENV_PREFIXES`.
 ///
 /// Superseded by [`super::scan::has_leading_env_assignment`] for the
 /// allowlist check (which rejects ANY leading env assignment), but kept
