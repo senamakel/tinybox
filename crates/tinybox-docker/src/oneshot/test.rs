@@ -1,5 +1,5 @@
 //! One-shot argv and execution, against a fake `docker` binary so no daemon is
-//! needed. The argv literals here are the command line OpenHuman's original
+//! needed. The argv literals here are the command line the original host sandbox's
 //! sandbox produced; they must not drift.
 
 #![allow(clippy::unwrap_used, missing_docs)]
