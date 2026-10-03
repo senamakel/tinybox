@@ -56,7 +56,12 @@ fn candidates() -> Vec<Arc<dyn JailBackend>> {
 /// a caller that wants to run unconfined must choose `NoopBackend` itself.
 #[must_use]
 pub fn pick_backend() -> Arc<dyn JailBackend> {
-    for backend in candidates() {
+    pick_from(candidates())
+}
+
+/// Select an available backend from the ordered platform candidates.
+fn pick_from(backends: Vec<Arc<dyn JailBackend>>) -> Arc<dyn JailBackend> {
+    for backend in backends {
         if backend.is_available() {
             log::debug!("[cwd_jail] selected OS sandbox backend {}", backend.name());
             return backend;

@@ -50,3 +50,24 @@ fn windows_appcontainer_is_never_a_candidate() {
             .all(|backend| backend.name() != "appcontainer")
     );
 }
+
+#[test]
+fn unavailable_candidates_are_skipped_and_empty_candidates_fail_closed() {
+    for candidates in [
+        vec![],
+        vec![Arc::new(UnsupportedBackend) as Arc<dyn JailBackend>],
+    ] {
+        let picked = pick_from(candidates);
+        assert_eq!(picked.name(), UNSUPPORTED_BACKEND_NAME);
+        assert!(!picked.is_available());
+    }
+}
+
+#[test]
+fn selection_uses_the_first_available_candidate() {
+    let picked = pick_from(vec![
+        Arc::new(UnsupportedBackend),
+        Arc::new(crate::noop::NoopBackend),
+    ]);
+    assert_eq!(picked.name(), crate::noop::NOOP_BACKEND_NAME);
+}

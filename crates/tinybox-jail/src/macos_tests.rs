@@ -1,3 +1,5 @@
+//! Tests for Seatbelt profiles and launcher command forwarding.
+
 use super::*;
 use std::fs;
 use std::process::Stdio;
@@ -222,4 +224,59 @@ fn profile_allows_writes_under_read_write_paths() {
 fn profile_without_read_write_paths_only_allows_root_and_tmp() {
     let p = render_profile(&Jail::new("/work/root", "x"));
     assert_eq!(p.matches("(subpath ").count(), 2);
+}
+
+#[test]
+fn launcher_preserves_arguments_environment_overrides_and_working_directory() {
+    let jail = Jail::new("/work", "forwarding");
+    let mut cmd = Command::new("/bin/tool");
+    cmd.arg("a b")
+        .arg("$(literal)")
+        .env("SET", "value")
+        .env_remove("REMOVE")
+        .current_dir("/work");
+    let wrapper = prepare_command(&jail, &cmd, std::ffi::OsStr::new("launcher"));
+    assert_eq!(wrapper.get_program(), "launcher");
+    let args: Vec<_> = wrapper.get_args().collect();
+    assert_eq!(
+        args,
+        vec![
+            "-p",
+            &render_profile(&jail),
+            "/bin/tool",
+            "a b",
+            "$(literal)"
+        ]
+    );
+    assert_eq!(
+        wrapper.get_current_dir(),
+        Some(std::path::Path::new("/work"))
+    );
+    let env: Vec<_> = wrapper.get_envs().collect();
+    assert!(env.contains(&(
+        std::ffi::OsStr::new("SET"),
+        Some(std::ffi::OsStr::new("value"))
+    )));
+    assert!(env.contains(&(std::ffi::OsStr::new("REMOVE"), None)));
+    let defaults = prepare_command(
+        &jail,
+        &Command::new("true"),
+        std::ffi::OsStr::new("launcher"),
+    );
+    assert!(defaults.get_current_dir().is_none());
+    assert_eq!(SeatbeltBackend::default().name(), "seatbelt");
+}
+
+#[test]
+fn missing_launcher_returns_an_error() {
+    let result = SeatbeltBackend::new().spawn(
+        &Jail::new("/work", "missing"),
+        Command::new("/nonexistent/tinybox-command"),
+    );
+    if !SeatbeltBackend::new().is_available() {
+        assert_eq!(
+            result.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::NotFound)
+        );
+    }
 }
