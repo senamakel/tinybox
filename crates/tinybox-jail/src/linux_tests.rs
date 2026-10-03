@@ -230,3 +230,42 @@ fn baseline_lets_the_resolver_config_be_read_through_its_symlink() -> io::Result
     )?);
     Ok(())
 }
+
+/// File grants must enforce fully without granting their parent directory.
+#[test]
+fn individual_file_grants_preserve_read_only_and_read_write_access() -> io::Result<()> {
+    if !available() {
+        return Ok(());
+    }
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let readable = outside.path().join("readable");
+    let writable = outside.path().join("writable");
+    let denied = outside.path().join("denied");
+    std::fs::write(&readable, "read only")?;
+    std::fs::write(&writable, "writable")?;
+    std::fs::write(&denied, "unchanged")?;
+    let jail = jail_for(root.path())
+        .add_read_only(&readable)
+        .add_read_write(&writable);
+    assert!(sh(
+        &jail,
+        &format!("cat '{}' >/dev/null", readable.display())
+    )?);
+    assert!(!sh(
+        &jail,
+        &format!("truncate -s 0 '{}'", readable.display())
+    )?);
+    assert!(sh(
+        &jail,
+        &format!("truncate -s 0 '{}'", writable.display())
+    )?);
+    assert!(!sh(
+        &jail,
+        &format!("truncate -s 0 '{}'", denied.display())
+    )?);
+    assert_eq!(std::fs::read_to_string(&readable)?, "read only");
+    assert_eq!(std::fs::read_to_string(&writable)?, "");
+    assert_eq!(std::fs::read_to_string(&denied)?, "unchanged");
+    Ok(())
+}

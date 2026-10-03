@@ -107,12 +107,14 @@ impl JailBackend for LandlockBackend {
 
 #[cfg(feature = "landlock")]
 mod imp {
+    use std::fs::File;
     use std::io;
+    use std::os::fd::AsFd;
     use std::path::Path;
     use std::process::{Child, Command};
 
     use landlock::{
-        AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
+        ABI, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
         RulesetCreated, RulesetCreatedAttr, RulesetStatus,
     };
 
@@ -174,6 +176,15 @@ mod imp {
                     format!("jail path {} cannot be opened: {error}", path.display()),
                 ));
             }
+        };
+        // Directory-only grants are meaningless on a file and otherwise mark
+        // the policy partially enforced. Inspect the opened descriptor so a
+        // path replacement cannot change which object's rights are filtered.
+        let metadata = File::from(fd.as_fd().try_clone_to_owned()?).metadata()?;
+        let access = if metadata.is_dir() {
+            access
+        } else {
+            access & AccessFs::from_file(ABI::V3)
         };
         ruleset
             .add_rule(PathBeneath::new(fd, access))
@@ -274,7 +285,9 @@ mod imp {
 
 #[cfg(not(feature = "landlock"))]
 mod imp {
+    use std::fs::File;
     use std::io;
+    use std::os::fd::AsFd;
     use std::process::{Child, Command};
 
     use crate::jail::Jail;
