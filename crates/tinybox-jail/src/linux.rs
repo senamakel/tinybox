@@ -203,26 +203,9 @@ mod imp {
         Ok(ruleset)
     }
 
-    pub(super) fn spawn(jail: &Jail, cmd: Command) -> io::Result<Child> {
-        if !kernel_supports_landlock() {
-            log::warn!(
-                "[cwd_jail:landlock] kernel does not support Landlock; refusing to spawn \
-                 unconfined (label={})",
-                jail.label
-            );
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "Landlock is not supported by this kernel",
-            ));
-        }
-        let ruleset = build_ruleset(jail)?;
-        let label = jail.label.clone();
-        let worker = std::thread::Builder::new()
-            .name("tinybox-jail-spawn".into())
-            .spawn(move || -> io::Result<Child> {
-                let mut cmd = cmd;
-                let status = ruleset.restrict_self().map_err(other)?;
-                match status.ruleset {
+    /// Reject a ruleset that would let a child execute without confinement.
+    fn check_enforcement(status: RulesetStatus, label: &str) -> io::Result<()> {
+                match status {
                     RulesetStatus::NotEnforced => {
                         log::warn!(
                             "[cwd_jail:landlock] ruleset not enforced; refusing to spawn \
@@ -241,12 +224,44 @@ mod imp {
                         log::trace!("[cwd_jail:landlock] ruleset fully enforced label={label}");
                     }
                 }
+        Ok(())
+    }
+
+    pub(super) fn spawn(jail: &Jail, cmd: Command) -> io::Result<Child> {
+        spawn_with_support(jail, cmd, kernel_supports_landlock())
+    }
+
+    /// Keep the availability decision injectable without changing kernel state.
+    fn spawn_with_support(jail: &Jail, cmd: Command, supported: bool) -> io::Result<Child> {
+        if !supported {
+            log::warn!(
+                "[cwd_jail:landlock] kernel does not support Landlock; refusing to spawn \
+                 unconfined (label={})",
+                jail.label
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Landlock is not supported by this kernel",
+            ));
+        }
+        let ruleset = build_ruleset(jail)?;
+        let label = jail.label.clone();
+        let worker = std::thread::Builder::new()
+            .name("tinybox-jail-spawn".into())
+            .spawn(move || -> io::Result<Child> {
+                let mut cmd = cmd;
+                let status = ruleset.restrict_self().map_err(other)?;
+                check_enforcement(status.ruleset, &label)?;
                 cmd.spawn()
             })?;
         worker
             .join()
             .map_err(|_| io::Error::other("Landlock spawn thread panicked"))?
     }
+    #[cfg(test)]
+    #[path = "../linux_imp_tests.rs"]
+    mod tests;
+
 }
 
 #[cfg(not(feature = "landlock"))]
