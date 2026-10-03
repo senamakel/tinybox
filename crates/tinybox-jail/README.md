@@ -147,7 +147,9 @@ not import that module.
   space and toolchain caches with `add_read_write` / `add_read_only`.
 - On a kernel without Landlock (or a build without the `landlock` feature)
   the backend reports unavailable and `spawn` returns `Unsupported`; it never
-  runs the command unconfined.
+  runs the command unconfined. The availability probe checks basic support;
+  spawning also rejects partially enforced rulesets with `Unsupported` before
+  running the child, including older ABIs that cannot restrict truncation.
 - Registry containment guard: both `delete` and `jail_for` (used by
   `spawn_in`/`spawn_in_with`) refuse to operate on a record whose
   canonicalized `dir` is not under the canonicalized `base`, defending

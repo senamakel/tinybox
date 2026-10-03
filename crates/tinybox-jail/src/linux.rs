@@ -25,14 +25,16 @@
 //! Landlock does not gate the network or process creation, so `allow_net` and
 //! `allow_subprocess` are not enforced by this backend.
 //!
-//! # Degrading on old kernels
+//! # Failing closed on old kernels
 //!
 //! [`LandlockBackend::is_available`] probes the kernel. When Landlock is not
 //! supported (kernel older than 5.13, or the LSM is not enabled) the backend
 //! reports unavailable, [`crate::detect::pick_backend`] moves on, and `spawn`
 //! returns `ErrorKind::Unsupported` without ever running the command
-//! unconfined. A kernel that supports only older ABIs is handled best-effort:
-//! rights the kernel does not know are dropped and a debug line says so.
+//! unconfined. The availability probe checks basic Landlock support; spawning
+//! additionally requires the complete filesystem policy to be enforced. A
+//! partially enforced ruleset (for example, on an older ABI without truncate
+//! restrictions) returns `ErrorKind::Unsupported` before spawning the child.
 
 use std::io;
 use std::process::{Child, Command};
@@ -203,7 +205,7 @@ mod imp {
         Ok(ruleset)
     }
 
-    /// Reject a ruleset that would let a child execute without confinement.
+    /// Reject a ruleset unless every requested restriction is enforced.
     pub(super) fn check_enforcement(status: &RulesetStatus, label: &str) -> io::Result<()> {
         match status {
             RulesetStatus::NotEnforced => {
@@ -216,10 +218,16 @@ mod imp {
                     "Landlock ruleset was not enforced",
                 ));
             }
-            RulesetStatus::PartiallyEnforced => log::debug!(
-                "[cwd_jail:landlock] ruleset partially enforced (older kernel ABI) \
-                         label={label}"
-            ),
+            RulesetStatus::PartiallyEnforced => {
+                log::warn!(
+                    "[cwd_jail:landlock] ruleset partially enforced; refusing to spawn \
+                     (label={label})"
+                );
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Landlock ruleset was only partially enforced",
+                ));
+            }
             RulesetStatus::FullyEnforced => {
                 log::trace!("[cwd_jail:landlock] ruleset fully enforced label={label}");
             }
