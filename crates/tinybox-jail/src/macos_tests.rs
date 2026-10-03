@@ -264,8 +264,7 @@ fn launcher_preserves_arguments_environment_overrides_and_working_directory() {
         std::ffi::OsStr::new("launcher"),
     );
     assert!(defaults.get_current_dir().is_none());
-    let backend: SeatbeltBackend = Default::default();
-    assert_eq!(backend.name(), "seatbelt");
+    assert_default_name::<SeatbeltBackend>("seatbelt");
 }
 
 #[test]
@@ -280,4 +279,39 @@ fn missing_launcher_returns_an_error() {
             Some(std::io::ErrorKind::NotFound)
         );
     }
+}
+
+/// Check the default-construction contract through the backend trait.
+fn assert_default_name<B: JailBackend + Default>(name: &str) {
+    assert_eq!(B::default().name(), name);
+}
+
+/// Exercise the real wrapper environment using a fake launcher on Unix hosts.
+#[cfg(unix)]
+#[test]
+fn launcher_does_not_restore_inherited_environment_after_env_clear() -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir()?;
+    let launcher = root.path().join("launcher");
+    fs::write(&launcher, "#!/bin/sh\nshift 2\nexec \"$@\"\n")?;
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700))?;
+    let mut cmd = Command::new("/usr/bin/env");
+    cmd.env_clear().env("JAIL_EXPLICIT", "allowed");
+    let output = prepare_command(
+        &Jail::new(root.path(), "environment"),
+        &cmd,
+        launcher.as_os_str(),
+    )
+    .output()?;
+    assert!(output.status.success());
+    // Some shells add PWD while executing a script. No inherited parent keys
+    // should survive, and the explicitly supplied value must still be there.
+    let env = String::from_utf8_lossy(&output.stdout);
+    assert!(env.lines().any(|line| line == "JAIL_EXPLICIT=allowed"));
+    assert!(
+        env.lines()
+            .all(|line| line.starts_with("JAIL_EXPLICIT=") || line.starts_with("PWD="))
+    );
+    Ok(())
 }

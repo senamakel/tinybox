@@ -29,7 +29,11 @@ fn unenforced_rulesets_are_rejected_while_supported_abis_are_accepted() -> io::R
     );
     check_enforcement(&RulesetStatus::PartiallyEnforced, "test")?;
     check_enforcement(&RulesetStatus::FullyEnforced, "test")?;
-    let backend: LandlockBackend = Default::default();
-    assert_eq!(backend.name(), "landlock");
+    assert_default_name::<LandlockBackend>("landlock");
     Ok(())
+}
+
+/// Check the default-construction contract through the backend trait.
+fn assert_default_name<B: JailBackend + Default>(name: &str) {
+    assert_eq!(B::default().name(), name);
 }
