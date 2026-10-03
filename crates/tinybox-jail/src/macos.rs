@@ -7,6 +7,7 @@
 //! deprecated but has stayed shipping for a decade and is the only
 //! supported way to apply Seatbelt without private framework bindings.
 
+use std::fmt::Write as _;
 use std::process::{Child, Command};
 
 use super::jail::{Jail, JailBackend};
@@ -113,10 +114,7 @@ fn render_profile(jail: &Jail) -> String {
     out.push_str("(deny file-write*)\n");
     out.push_str("(allow file-write*\n");
     for path in std::iter::once(&jail.root).chain(&jail.read_write) {
-        out.push_str(&format!(
-            "  (subpath \"{}\")\n",
-            escape(&path.to_string_lossy())
-        ));
+        let _ = writeln!(out, "  (subpath \"{}\")", escape(&path.to_string_lossy()));
     }
     out.push_str("  (subpath \"/private/tmp\")\n  (literal \"/dev/null\")\n)\n");
 
