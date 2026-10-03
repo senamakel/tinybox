@@ -30,7 +30,7 @@ impl JailBackend for UnsupportedBackend {
 
 /// The OS backends this build knows about, strongest first.
 ///
-/// Windows AppContainer is intentionally absent: it cannot hand back a
+/// Windows `AppContainer` is intentionally absent: it cannot hand back a
 /// waitable `std::process::Child` yet (see `windows.rs`).
 #[cfg(target_os = "linux")]
 fn candidates() -> Vec<Arc<dyn JailBackend>> {
