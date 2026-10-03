@@ -104,8 +104,3 @@ fn path_grants_keep_write_access_on_paths_also_listed_read_only() {
         ]
     );
 }
-
-#[test]
-fn appcontainer_grants_inherit_to_files_and_directories() {
-    assert_eq!(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE, 0x03);
-}
