@@ -46,7 +46,17 @@ pub const LANDLOCK_BACKEND_NAME: &str = "landlock";
 /// shell, the dynamic loader and the C library can start. Missing entries are
 /// skipped.
 pub const SYSTEM_READ_PATHS: &[&str] = &[
-    "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
+    "/etc",
+    // `/etc/resolv.conf` is a symlink into here on systemd-resolved hosts;
+    // without it no name resolves.
+    "/run/systemd/resolve",
 ];
 
 /// Character devices every jailed child may read and write: shell

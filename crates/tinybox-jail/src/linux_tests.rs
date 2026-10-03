@@ -215,3 +215,15 @@ fn without_the_feature_spawn_is_unsupported_and_never_runs_unconfined() {
     assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     assert!(!marker.exists());
 }
+
+#[test]
+fn baseline_lets_the_resolver_config_be_read_through_its_symlink() -> io::Result<()> {
+    if !available() {
+        return Ok(());
+    }
+    let root = tempfile::tempdir()?;
+    // Resolves symlinks like a DNS lookup does: /etc/resolv.conf may point
+    // into /run/systemd/resolve.
+    assert!(sh(&jail_for(root.path()), "cat /etc/resolv.conf >/dev/null")?);
+    Ok(())
+}
