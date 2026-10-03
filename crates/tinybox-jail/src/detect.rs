@@ -29,16 +29,24 @@ impl JailBackend for UnsupportedBackend {
 }
 
 /// The OS backends this build knows about, strongest first.
-#[allow(clippy::vec_init_then_push, unused_mut)]
+///
+/// Windows AppContainer is intentionally absent: it cannot hand back a
+/// waitable `std::process::Child` yet (see `windows.rs`).
+#[cfg(target_os = "linux")]
 fn candidates() -> Vec<Arc<dyn JailBackend>> {
-    let mut backends: Vec<Arc<dyn JailBackend>> = Vec::new();
-    #[cfg(target_os = "linux")]
-    backends.push(Arc::new(crate::linux::LandlockBackend::new()));
-    #[cfg(target_os = "macos")]
-    backends.push(Arc::new(crate::macos::SeatbeltBackend::new()));
-    // Windows AppContainer is intentionally absent: it cannot hand back a
-    // waitable `std::process::Child` yet (see `windows.rs`).
-    backends
+    vec![Arc::new(crate::linux::LandlockBackend::new())]
+}
+
+/// The OS backends this build knows about, strongest first.
+#[cfg(target_os = "macos")]
+fn candidates() -> Vec<Arc<dyn JailBackend>> {
+    vec![Arc::new(crate::macos::SeatbeltBackend::new())]
+}
+
+/// The OS backends this build knows about, strongest first. None here.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn candidates() -> Vec<Arc<dyn JailBackend>> {
+    Vec::new()
 }
 
 /// Picks the first available OS backend (Landlock on Linux, Seatbelt on
