@@ -17,6 +17,9 @@
 //! | Windows | appcontainer  | `CreateAppContainerProfile` + `STARTUPINFOEX` |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
+//! The Windows backend is not compiled yet (see `windows.rs`); on Windows the
+//! default backend is `unsupported` and a host must opt into `NoopBackend`.
+//!
 //! ## Quick start
 //!
 //! ```ignore
