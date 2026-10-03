@@ -264,7 +264,8 @@ fn launcher_preserves_arguments_environment_overrides_and_working_directory() {
         std::ffi::OsStr::new("launcher"),
     );
     assert!(defaults.get_current_dir().is_none());
-    assert_eq!(SeatbeltBackend::default().name(), "seatbelt");
+    let backend: SeatbeltBackend = Default::default();
+    assert_eq!(backend.name(), "seatbelt");
 }
 
 #[test]

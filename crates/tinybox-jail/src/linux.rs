@@ -204,7 +204,7 @@ mod imp {
     }
 
     /// Reject a ruleset that would let a child execute without confinement.
-    pub(super) fn check_enforcement(status: RulesetStatus, label: &str) -> io::Result<()> {
+    pub(super) fn check_enforcement(status: &RulesetStatus, label: &str) -> io::Result<()> {
         match status {
             RulesetStatus::NotEnforced => {
                 log::warn!(
@@ -255,7 +255,7 @@ mod imp {
             .spawn(move || -> io::Result<Child> {
                 let mut cmd = cmd;
                 let status = ruleset.restrict_self().map_err(other)?;
-                check_enforcement(status.ruleset, &label)?;
+                check_enforcement(&status.ruleset, &label)?;
                 cmd.spawn()
             })?;
         worker

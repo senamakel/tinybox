@@ -22,13 +22,14 @@ fn unsupported_kernel_never_runs_the_command() -> io::Result<()> {
 #[test]
 fn unenforced_rulesets_are_rejected_while_supported_abis_are_accepted() -> io::Result<()> {
     assert_eq!(
-        check_enforcement(RulesetStatus::NotEnforced, "test")
+        check_enforcement(&RulesetStatus::NotEnforced, "test")
             .err()
             .map(|e| e.kind()),
         Some(io::ErrorKind::Unsupported)
     );
-    check_enforcement(RulesetStatus::PartiallyEnforced, "test")?;
-    check_enforcement(RulesetStatus::FullyEnforced, "test")?;
-    assert_eq!(LandlockBackend::default().name(), "landlock");
+    check_enforcement(&RulesetStatus::PartiallyEnforced, "test")?;
+    check_enforcement(&RulesetStatus::FullyEnforced, "test")?;
+    let backend: LandlockBackend = Default::default();
+    assert_eq!(backend.name(), "landlock");
     Ok(())
 }
