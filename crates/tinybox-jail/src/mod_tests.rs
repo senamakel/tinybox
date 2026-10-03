@@ -51,6 +51,7 @@ fn default_backend_is_cached() {
 #[test]
 fn spawn_uses_default_backend() {
     let dir = std::env::temp_dir();
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut jail = Jail::new(&dir, "default-spawn");
     #[cfg(target_os = "linux")]
     for path in ["/usr", "/bin", "/lib", "/lib64"] {
