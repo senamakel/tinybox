@@ -5,15 +5,12 @@ use std::sync::Arc;
 use super::jail::{Jail, JailBackend};
 use std::process::{Child, Command};
 
-/// Name reported by the backend returned when no OS sandbox is usable.
-pub const UNSUPPORTED_BACKEND_NAME: &str = "unsupported";
-
 #[derive(Debug)]
 struct UnsupportedBackend;
 
 impl JailBackend for UnsupportedBackend {
     fn name(&self) -> &'static str {
-        UNSUPPORTED_BACKEND_NAME
+        "unsupported"
     }
 
     fn is_available(&self) -> bool {
@@ -28,33 +25,11 @@ impl JailBackend for UnsupportedBackend {
     }
 }
 
-/// The OS backends this build knows about, strongest first.
-fn candidates() -> Vec<Arc<dyn JailBackend>> {
-    let mut backends: Vec<Arc<dyn JailBackend>> = Vec::new();
-    #[cfg(target_os = "linux")]
-    backends.push(Arc::new(crate::linux::LandlockBackend::new()));
-    #[cfg(target_os = "macos")]
-    backends.push(Arc::new(crate::macos::SeatbeltBackend::new()));
-    // Windows AppContainer is intentionally absent: it cannot hand back a
-    // waitable `std::process::Child` yet (see `windows.rs`).
-    backends
-}
-
-/// Picks the first available OS backend (Landlock on Linux, Seatbelt on
-/// macOS). When none works it logs a warning and returns an unsupported
-/// backend whose `is_available` is `false` and whose `spawn` fails with
-/// `ErrorKind::Unsupported`. It never silently returns an unconfined backend:
-/// a caller that wants to run unconfined must choose `NoopBackend` itself.
+/// Picks the strongest available backend, returning an unsupported backend
+/// when no OS sandbox works.
 #[must_use]
 pub fn pick_backend() -> Arc<dyn JailBackend> {
-    for backend in candidates() {
-        if backend.is_available() {
-            log::debug!("[cwd_jail] selected OS sandbox backend {}", backend.name());
-            return backend;
-        }
-        log::debug!("[cwd_jail] backend {} is not available", backend.name());
-    }
-    log::warn!("[cwd_jail] no OS sandbox available; jailed spawns are unsupported");
+    log::warn!("[cwd_jail] no OS sandbox available");
     Arc::new(UnsupportedBackend)
 }
 
