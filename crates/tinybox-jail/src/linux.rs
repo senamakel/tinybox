@@ -80,6 +80,13 @@ impl JailBackend for LandlockBackend {
             ruleset = ruleset
                 .add_rule(PathBeneath::new(root_fd, writes | reads))
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
+            for path in &jail.read_write {
+                let fd =
+                    PathFd::new(path).map_err(|error| std::io::Error::other(error.to_string()))?;
+                ruleset = ruleset
+                    .add_rule(PathBeneath::new(fd, writes | reads))
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+            }
             for path in &jail.read_only {
                 let fd =
                     PathFd::new(path).map_err(|error| std::io::Error::other(error.to_string()))?;

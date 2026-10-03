@@ -14,11 +14,15 @@ spawns, never the core process itself.
 ## Responsibilities
 
 - Describe a jail declaratively via a builder (`Jail::new(root, label)` plus
-  `.add_read_only(...)`, `.deny_net()`, `.deny_subprocess()`).
+  `.add_read_only(...)`, `.add_read_write(...)`, `.deny_net()`,
+  `.deny_subprocess()`). `add_read_write` grants an extra path outside the
+  root the same access as the root (Landlock rule, Seatbelt `file-write*`
+  subpath, `AppContainer` ACL), for host-owned scratch such as a per-call
+  output-capture directory that must not land inside the root.
 - Cache the default backend; currently this is an unsupported backend on every
   platform while OS implementations are being brought into compliance.
 - Spawn a `std::process::Command` inside the jail, canonicalizing `root`
-  (and read-only paths) first so backends never see `..` or symlink
+  (and the read-only and read/write paths) first so backends never see `..` or symlink
   trickery.
 - Provide a persistent registry to manage many jailed workspaces side by
   side, each with a stable id, label, directory, and metadata, indexed in a

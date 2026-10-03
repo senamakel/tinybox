@@ -106,15 +106,20 @@ fn render_profile(jail: &Jail) -> String {
     }
 
     // The actual directory jail: deny writes everywhere, then re-allow
-    // them under root + /private/tmp (the macOS scratchpad most tools
-    // assume exists and is writable). Shell redirections to /dev/null are
-    // ordinary output disposal, not a write to another workspace; permit
-    // that exact device without opening the rest of /dev.
+    // them under root, every `read_write` path, and /private/tmp (the macOS
+    // scratchpad most tools assume exists and is writable). Shell
+    // redirections to /dev/null are ordinary output disposal, not a write to
+    // another workspace; permit that exact device without opening the rest
+    // of /dev.
     out.push_str("(deny file-write*)\n");
-    out.push_str(&format!(
-        "(allow file-write*\n  (subpath \"{}\")\n  (subpath \"/private/tmp\")\n  (literal \"/dev/null\")\n)\n",
-        escape(&jail.root.to_string_lossy())
-    ));
+    out.push_str("(allow file-write*\n");
+    for path in std::iter::once(&jail.root).chain(&jail.read_write) {
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            escape(&path.to_string_lossy())
+        ));
+    }
+    out.push_str("  (subpath \"/private/tmp\")\n  (literal \"/dev/null\")\n)\n");
 
     // `read_only` is informational on macOS — reads are already allowed
     // by `(allow default)`. We keep the field on `Jail` because Landlock
