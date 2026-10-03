@@ -7,7 +7,7 @@
 //! deprecated but has stayed shipping for a decade and is the only
 //! supported way to apply Seatbelt without private framework bindings.
 
-#![cfg(target_os = "macos")]
+
 
 use std::process::{Child, Command};
 
