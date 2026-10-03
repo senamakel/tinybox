@@ -20,14 +20,19 @@ fn unsupported_kernel_never_runs_the_command() -> io::Result<()> {
 }
 
 #[test]
-fn unenforced_rulesets_are_rejected_while_supported_abis_are_accepted() -> io::Result<()> {
+fn only_fully_enforced_rulesets_are_accepted() -> io::Result<()> {
     assert_eq!(
         check_enforcement(&RulesetStatus::NotEnforced, "test")
             .err()
             .map(|e| e.kind()),
         Some(io::ErrorKind::Unsupported)
     );
-    check_enforcement(&RulesetStatus::PartiallyEnforced, "test")?;
+    assert_eq!(
+        check_enforcement(&RulesetStatus::PartiallyEnforced, "test")
+            .err()
+            .map(|e| e.kind()),
+        Some(io::ErrorKind::Unsupported)
+    );
     check_enforcement(&RulesetStatus::FullyEnforced, "test")?;
     assert_default_name::<LandlockBackend>("landlock");
     Ok(())
