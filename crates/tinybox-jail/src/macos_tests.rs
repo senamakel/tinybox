@@ -202,3 +202,24 @@ fn seatbelt_blocks_write_outside_root() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn profile_allows_writes_under_read_write_paths() {
+    let jail = Jail::new("/work/root", "x")
+        .add_read_write("/state/capture/1")
+        .add_read_write("/state/with \"quote\"");
+    let p = render_profile(&jail);
+    let allow = p
+        .split("(allow file-write*")
+        .nth(1)
+        .expect("profile has a file-write allow block");
+    assert!(allow.contains("(subpath \"/work/root\")"));
+    assert!(allow.contains("(subpath \"/state/capture/1\")"));
+    assert!(allow.contains("(subpath \"/state/with \\\"quote\\\"\")"));
+}
+
+#[test]
+fn profile_without_read_write_paths_only_allows_root_and_tmp() {
+    let p = render_profile(&Jail::new("/work/root", "x"));
+    assert_eq!(p.matches("(subpath ").count(), 2);
+}
