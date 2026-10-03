@@ -7,7 +7,8 @@
 //!
 //! 1. `CreateAppContainerProfile` → derive a per-jail SID.
 //! 2. Grant the SID `GENERIC_READ | GENERIC_WRITE | DELETE` on `jail.root`
-//!    via `SetNamedSecurityInfoW` (additive ACE on the existing DACL).
+//!    and every `jail.read_write` path via `SetNamedSecurityInfoW` (additive
+//!    ACE on the existing DACL).
 //! 3. Build `STARTUPINFOEXW` with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`.
 //! 4. `CreateProcessW` with `EXTENDED_STARTUPINFO_PRESENT`.
 //!
@@ -37,7 +38,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::ptr;
 
@@ -185,10 +186,10 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {
     }
     let _sid_guard = SidGuard(sid);
 
-    // 2. Grant the container SID access to the root + read-only paths.
-    grant_sid_access(&jail.root, sid, GENERIC_READ | GENERIC_WRITE | DELETE)?;
-    for ro in &jail.read_only {
-        grant_sid_access(ro, sid, GENERIC_READ)?;
+    // 2. Grant the container SID access to the root, the extra read/write
+    //    paths, and the read-only paths.
+    for (path, access) in path_grants(jail) {
+        grant_sid_access(path, sid, access)?;
     }
 
     // 3. Build SECURITY_CAPABILITIES. AppContainers start with no network
@@ -313,6 +314,17 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {
         "AppContainer spawn succeeded but cannot yet be returned as std::process::Child; \
          see TODO in crates/tinybox-jail/src/windows.rs",
     ))
+}
+
+/// The DACL grants a jail needs: the root and every `read_write` path get
+/// read, write and delete; every `read_only` path gets read.
+fn path_grants(jail: &Jail) -> Vec<(&Path, u32)> {
+    let read_write = GENERIC_READ | GENERIC_WRITE | DELETE;
+    std::iter::once(jail.root.as_path())
+        .chain(jail.read_write.iter().map(PathBuf::as_path))
+        .map(|path| (path, read_write))
+        .chain(jail.read_only.iter().map(|path| (path.as_path(), GENERIC_READ)))
+        .collect()
 }
 
 unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()> {
