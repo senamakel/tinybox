@@ -257,7 +257,10 @@ fn launcher_preserves_arguments_environment_overrides_and_working_directory() {
         std::ffi::OsStr::new("SET"),
         Some(std::ffi::OsStr::new("value"))
     )));
-    assert!(env.contains(&(std::ffi::OsStr::new("REMOVE"), None)));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != std::ffi::OsStr::new("REMOVE"))
+    );
     let defaults = prepare_command(
         &jail,
         &Command::new("true"),
