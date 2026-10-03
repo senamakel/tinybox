@@ -45,8 +45,6 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
-#[allow(missing_docs, unreachable_pub, dead_code)]
-pub mod macos;
 pub mod detect;
 pub mod jail;
 pub mod noop;
