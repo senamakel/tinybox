@@ -137,7 +137,7 @@ mod imp {
         Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
             .handle_access(AccessFs::ReadFile)
-            .and_then(RulesetAttr::create)
+            .and_then(|ruleset| ruleset.create())
             .is_ok()
     }
 
@@ -172,7 +172,7 @@ mod imp {
         let (writes, reads) = (writes(), reads());
         let mut ruleset = Ruleset::default()
             .handle_access(writes | reads)
-            .and_then(RulesetAttr::create)
+            .and_then(|ruleset| ruleset.create())
             .map_err(other)?;
         // Baseline first: it is the least privileged and skipped when absent.
         for path in SYSTEM_READ_PATHS {
