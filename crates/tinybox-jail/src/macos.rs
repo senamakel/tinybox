@@ -1,7 +1,7 @@
 //! macOS backend: Seatbelt via `sandbox-exec`.
 //!
 //! `sandbox-exec` is a built-in macOS binary that takes a Scheme-style
-//! profile (the "Seatbelt" / TrustedBSD policy language) and execs the
+//! profile (the "Seatbelt" / `TrustedBSD` policy language) and execs the
 //! requested command under it. Chromium, iOS simulators and Apple's own
 //! tools use the same SPI under the hood. The CLI is technically
 //! deprecated but has stayed shipping for a decade and is the only
@@ -23,6 +23,7 @@ impl Default for SeatbeltBackend {
 
 impl SeatbeltBackend {
     /// Creates the Seatbelt backend.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -44,12 +45,12 @@ impl JailBackend for SeatbeltBackend {
         // (`-p`) is simpler and avoids a tempfile lifecycle problem (the
         // child may outlive our parent scope).
         let program = cmd.get_program().to_os_string();
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_os_string()).collect();
+        let args: Vec<_> = cmd.get_args().map(std::ffi::OsStr::to_os_string).collect();
         let envs: Vec<_> = cmd
             .get_envs()
-            .map(|(k, v)| (k.to_os_string(), v.map(|s| s.to_os_string())))
+            .map(|(k, v)| (k.to_os_string(), v.map(std::ffi::OsStr::to_os_string)))
             .collect();
-        let cwd = cmd.get_current_dir().map(|p| p.to_path_buf());
+        let cwd = cmd.get_current_dir().map(std::path::Path::to_path_buf);
 
         let mut wrapper = Command::new("/usr/bin/sandbox-exec");
         wrapper.arg("-p").arg(profile).arg(program).args(args);

@@ -25,15 +25,12 @@ fn detection_prefers_the_platform_backend_when_it_works() {
     let expected = candidates()
         .into_iter()
         .find(|backend| backend.is_available());
-    match expected {
-        Some(backend) => {
-            assert_eq!(picked.name(), backend.name());
-            assert!(picked.is_available());
-        }
-        None => {
-            assert_eq!(picked.name(), UNSUPPORTED_BACKEND_NAME);
-            assert!(!picked.is_available());
-        }
+    if let Some(backend) = expected {
+        assert_eq!(picked.name(), backend.name());
+        assert!(picked.is_available());
+    } else {
+        assert_eq!(picked.name(), UNSUPPORTED_BACKEND_NAME);
+        assert!(!picked.is_available());
     }
 }
 

@@ -29,6 +29,7 @@ impl JailBackend for UnsupportedBackend {
 }
 
 /// The OS backends this build knows about, strongest first.
+#[allow(clippy::vec_init_then_push, unused_mut)]
 fn candidates() -> Vec<Arc<dyn JailBackend>> {
     let mut backends: Vec<Arc<dyn JailBackend>> = Vec::new();
     #[cfg(target_os = "linux")]
