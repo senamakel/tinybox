@@ -124,6 +124,11 @@ not import that module.
   returns `io::ErrorKind::Unsupported`. See the TODO in `windows.rs`. The
   Windows path is compile-checked but flagged as needing real-hardware
   testing.
+- macOS forwards only variables explicitly supplied with `Command::env` or
+  `Command::envs`. The launcher clears the inherited environment because Rust
+  exposes no getter for `Command::env_clear`; this prevents restoring parent
+  credentials a caller deliberately removed. Supply required variables such
+  as `PATH` explicitly. Linux preserves the original command environment.
 - macOS stdio is inherited: the Seatbelt wrapper cannot re-apply the
   original command's `Stdio` config, so it uses `sandbox-exec` defaults
   (inherit). The profile re-allows writes under the canonicalized `root` and

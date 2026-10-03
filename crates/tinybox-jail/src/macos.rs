@@ -13,6 +13,12 @@ use std::process::{Child, Command};
 use super::jail::{Jail, JailBackend};
 
 /// macOS Seatbelt backend that launches commands with `sandbox-exec`.
+///
+/// Only environment variables explicitly set on the command are forwarded.
+/// The wrapper clears inherited variables because `Command` does not expose
+/// whether the caller used `env_clear`; inheriting could restore credentials
+/// the caller deliberately removed. Configure required variables with `env`.
+/// Stdio uses the launcher defaults (inherit).
 #[derive(Debug)]
 pub struct SeatbeltBackend;
 
@@ -60,6 +66,9 @@ fn prepare_command(jail: &Jail, cmd: &Command, launcher: &std::ffi::OsStr) -> Co
     let cwd = cmd.get_current_dir().map(std::path::Path::to_path_buf);
 
     let mut wrapper = Command::new(launcher);
+    // Fail closed for environment authority: never restore values that an
+    // opaque Command may have deliberately cleared.
+    wrapper.env_clear();
     wrapper.arg("-p").arg(profile).arg(program).args(args);
     for (k, v) in envs {
         match v {
