@@ -62,7 +62,7 @@ fn canonicalize_errors_on_missing_root() {
 #[test]
 fn defaults_have_no_extra_read_write_paths() {
     let j = Jail::new("/tmp", "x");
-    assert!(j.read_write.is_empty());
+    assert_eq!(j.read_write, Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn add_read_write_appends_in_order_and_leaves_read_only_alone() {
         .add_read_write("/a")
         .add_read_write("/b");
     assert_eq!(j.read_write, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-    assert!(j.read_only.is_empty());
+    assert_eq!(j.read_only, Vec::<PathBuf>::new());
     assert_eq!(j.root, PathBuf::from("/tmp"));
 }
 

@@ -64,7 +64,8 @@ use windows_sys::core::PWSTR;
 const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 const DELETE: u32 = 0x0001_0000;
-const NO_INHERITANCE: u32 = 0;
+const OBJECT_INHERIT_ACE: u32 = 0x01;
+const CONTAINER_INHERIT_ACE: u32 = 0x02;
 /// SE_GROUP_ENABLED — marks a SID in a `SID_AND_ATTRIBUTES` entry as active.
 /// Required for capability SIDs passed to AppContainer SECURITY_CAPABILITIES.
 /// Source: WinNT.h.
@@ -323,7 +324,15 @@ fn path_grants(jail: &Jail) -> Vec<(&Path, u32)> {
     std::iter::once(jail.root.as_path())
         .chain(jail.read_write.iter().map(PathBuf::as_path))
         .map(|path| (path, read_write))
-        .chain(jail.read_only.iter().map(|path| (path.as_path(), GENERIC_READ)))
+        .chain(
+            jail.read_only
+                .iter()
+                .filter(|path| {
+                    path.as_path() != jail.root.as_path()
+                        && !jail.read_write.iter().any(|rw| rw == *path)
+                })
+                .map(|path| (path.as_path(), GENERIC_READ)),
+        )
         .collect()
 }
 
@@ -357,7 +366,7 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
     let mut ea: EXPLICIT_ACCESS_W = std::mem::zeroed();
     ea.grfAccessPermissions = access;
     ea.grfAccessMode = SET_ACCESS;
-    ea.grfInheritance = NO_INHERITANCE;
+    ea.grfInheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
     ea.Trustee = TRUSTEE_W {
         pMultipleTrustee: ptr::null_mut(),
         MultipleTrusteeOperation: 0,

@@ -86,3 +86,26 @@ fn path_grants_give_read_write_paths_the_same_access_as_the_root() {
         ]
     );
 }
+
+#[test]
+fn path_grants_keep_write_access_on_paths_also_listed_read_only() {
+    let jail = Jail::new(r"C:\work\root", "x")
+        .add_read_write(r"C:\state\capture")
+        .add_read_only(r"C:\work\root")
+        .add_read_only(r"C:\state\capture")
+        .add_read_only(r"C:\tools");
+    let rw = GENERIC_READ | GENERIC_WRITE | DELETE;
+    assert_eq!(
+        path_grants(&jail),
+        vec![
+            (Path::new(r"C:\work\root"), rw),
+            (Path::new(r"C:\state\capture"), rw),
+            (Path::new(r"C:\tools"), GENERIC_READ),
+        ]
+    );
+}
+
+#[test]
+fn appcontainer_grants_inherit_to_files_and_directories() {
+    assert_eq!(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE, 0x03);
+}
