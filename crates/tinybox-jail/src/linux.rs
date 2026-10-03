@@ -204,26 +204,26 @@ mod imp {
     }
 
     /// Reject a ruleset that would let a child execute without confinement.
-    fn check_enforcement(status: RulesetStatus, label: &str) -> io::Result<()> {
-                match status {
-                    RulesetStatus::NotEnforced => {
-                        log::warn!(
-                            "[cwd_jail:landlock] ruleset not enforced; refusing to spawn \
+    pub(super) fn check_enforcement(status: RulesetStatus, label: &str) -> io::Result<()> {
+        match status {
+            RulesetStatus::NotEnforced => {
+                log::warn!(
+                    "[cwd_jail:landlock] ruleset not enforced; refusing to spawn \
                              unconfined (label={label})"
-                        );
-                        return Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            "Landlock ruleset was not enforced",
-                        ));
-                    }
-                    RulesetStatus::PartiallyEnforced => log::debug!(
-                        "[cwd_jail:landlock] ruleset partially enforced (older kernel ABI) \
+                );
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Landlock ruleset was not enforced",
+                ));
+            }
+            RulesetStatus::PartiallyEnforced => log::debug!(
+                "[cwd_jail:landlock] ruleset partially enforced (older kernel ABI) \
                          label={label}"
-                    ),
-                    RulesetStatus::FullyEnforced => {
-                        log::trace!("[cwd_jail:landlock] ruleset fully enforced label={label}");
-                    }
-                }
+            ),
+            RulesetStatus::FullyEnforced => {
+                log::trace!("[cwd_jail:landlock] ruleset fully enforced label={label}");
+            }
+        }
         Ok(())
     }
 
@@ -232,7 +232,11 @@ mod imp {
     }
 
     /// Keep the availability decision injectable without changing kernel state.
-    fn spawn_with_support(jail: &Jail, cmd: Command, supported: bool) -> io::Result<Child> {
+    pub(super) fn spawn_with_support(
+        jail: &Jail,
+        cmd: Command,
+        supported: bool,
+    ) -> io::Result<Child> {
         if !supported {
             log::warn!(
                 "[cwd_jail:landlock] kernel does not support Landlock; refusing to spawn \
@@ -258,10 +262,6 @@ mod imp {
             .join()
             .map_err(|_| io::Error::other("Landlock spawn thread panicked"))?
     }
-    #[cfg(test)]
-    #[path = "../linux_imp_tests.rs"]
-    mod tests;
-
 }
 
 #[cfg(not(feature = "landlock"))]
@@ -291,3 +291,7 @@ mod imp {
 #[cfg(test)]
 #[path = "linux_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "landlock"))]
+#[path = "linux_imp_tests.rs"]
+mod imp_tests;
