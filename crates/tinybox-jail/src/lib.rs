@@ -12,9 +12,9 @@
 //!
 //! | OS      | Backend       | Mechanism                                  |
 //! |---------|---------------|--------------------------------------------|
-//! | Linux   | landlock      | Kernel 5.13+ LSM, applied in `pre_exec`    |
+//! | Linux   | landlock      | Kernel 5.13+ LSM, applied on a spawn thread |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | appcontainer  | `CreateAppContainerProfile` + `STARTUPINFOEX` |
+//! | Windows | (not compiled)| AppContainer, pending a `Child` bridge     |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
 //! The Windows backend is not compiled yet (see `windows.rs`); on Windows the
