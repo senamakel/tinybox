@@ -40,7 +40,10 @@ fn shell_starts_with_only_the_baseline_system_paths() -> io::Result<()> {
         return Ok(());
     }
     let root = tempfile::tempdir()?;
-    assert!(sh(&jail_for(root.path()), "ls / >/dev/null && echo hi >/dev/null")?);
+    assert!(sh(
+        &jail_for(root.path()),
+        "ls /usr/bin >/dev/null && echo hi >/dev/null"
+    )?);
     Ok(())
 }
 
@@ -53,7 +56,10 @@ fn writes_inside_the_root_succeed_and_outside_fail() -> io::Result<()> {
     let outside = tempfile::tempdir()?;
     let jail = jail_for(root.path());
 
-    assert!(sh(&jail, &format!("echo ok > '{}'", root.path().join("in").display()))?);
+    assert!(sh(
+        &jail,
+        &format!("echo ok > '{}'", root.path().join("in").display())
+    )?);
     assert_eq!(std::fs::read_to_string(root.path().join("in"))?, "ok\n");
 
     let target = outside.path().join("out");
@@ -72,7 +78,10 @@ fn reads_outside_granted_paths_are_denied() -> io::Result<()> {
     let secret = secret_dir.path().join("secret");
     std::fs::write(&secret, "token")?;
     let jail = jail_for(root.path());
-    assert!(!sh(&jail, &format!("cat '{}' >/dev/null", secret.display()))?);
+    assert!(!sh(
+        &jail,
+        &format!("cat '{}' >/dev/null", secret.display())
+    )?);
     Ok(())
 }
 
@@ -88,8 +97,14 @@ fn read_only_paths_are_readable_but_not_writable() -> io::Result<()> {
     let mut jail = jail;
     jail.canonicalize()?;
 
-    assert!(sh(&jail, &format!("cat '{}' >/dev/null", shared.path().join("data").display()))?);
-    assert!(!sh(&jail, &format!("echo x > '{}'", shared.path().join("new").display()))?);
+    assert!(sh(
+        &jail,
+        &format!("cat '{}' >/dev/null", shared.path().join("data").display())
+    )?);
+    assert!(!sh(
+        &jail,
+        &format!("echo x > '{}'", shared.path().join("new").display())
+    )?);
     assert!(!shared.path().join("new").exists());
     Ok(())
 }
@@ -108,7 +123,10 @@ fn read_write_paths_outside_the_root_are_writable() -> io::Result<()> {
     let write = |dir: &Path| sh(&jail, &format!("echo ok > '{}'", dir.join("out").display()));
     assert!(write(scratch.path())?, "read_write path must be writable");
     assert_eq!(std::fs::read_to_string(scratch.path().join("out"))?, "ok\n");
-    assert!(!write(denied.path())?, "paths not granted must stay unwritable");
+    assert!(
+        !write(denied.path())?,
+        "paths not granted must stay unwritable"
+    );
     assert!(!denied.path().join("out").exists());
     Ok(())
 }
@@ -161,7 +179,10 @@ fn null_stdio_and_environment_pass_through() -> io::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     assert!(LandlockBackend::new().spawn(&jail, cmd)?.wait()?.success());
-    assert_eq!(std::fs::read_to_string(root.path().join("out"))?, "from-host\n");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("out"))?,
+        "from-host\n"
+    );
     Ok(())
 }
 
@@ -175,7 +196,22 @@ fn child_cannot_regain_privileges_through_no_new_privs() -> io::Result<()> {
     // baseline, so grant /proc read access just for this probe.
     let jail = jail_for(root.path()).add_read_only("/proc");
     let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c").arg("grep -q '^NoNewPrivs:[[:space:]]*1' /proc/self/status");
+    cmd.arg("-c")
+        .arg("grep -q '^NoNewPrivs:[[:space:]]*1' /proc/self/status");
     assert!(LandlockBackend::new().spawn(&jail, cmd)?.wait()?.success());
     Ok(())
+}
+
+#[cfg(not(feature = "landlock"))]
+#[test]
+fn without_the_feature_spawn_is_unsupported_and_never_runs_unconfined() {
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("ran");
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c").arg(format!("touch '{}'", marker.display()));
+    let backend = LandlockBackend::new();
+    assert!(!backend.is_available());
+    let error = backend.spawn(&jail_for(root.path()), cmd).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert!(!marker.exists());
 }

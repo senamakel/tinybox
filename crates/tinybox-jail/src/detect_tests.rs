@@ -22,7 +22,9 @@ fn backend_detection_returns_a_backend() {
 #[test]
 fn detection_prefers_the_platform_backend_when_it_works() {
     let picked = pick_backend();
-    let expected = candidates().into_iter().find(|backend| backend.is_available());
+    let expected = candidates()
+        .into_iter()
+        .find(|backend| backend.is_available());
     match expected {
         Some(backend) => {
             assert_eq!(picked.name(), backend.name());
@@ -45,5 +47,9 @@ fn linux_with_landlock_selects_landlock_on_a_supporting_kernel() {
 
 #[test]
 fn windows_appcontainer_is_never_a_candidate() {
-    assert!(candidates().iter().all(|backend| backend.name() != "appcontainer"));
+    assert!(
+        candidates()
+            .iter()
+            .all(|backend| backend.name() != "appcontainer")
+    );
 }
