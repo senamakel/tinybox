@@ -12,6 +12,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+tinybox-bus.workspace = true
 tinybox-core.workspace = true
 tinybox-jail.workspace = true
 tinystoragedrivers-core = { workspace = true, features = ["blocking"] }

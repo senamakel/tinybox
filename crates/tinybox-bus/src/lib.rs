@@ -2,6 +2,8 @@
 //!
 //! This crate has no bus connection, executor, native backend, or policy.
 //! A caller applies its own authorization before sending these requests.
+//! [`STORAGE_NEEDS`] describes the collections persisted by the `TinyBox`
+//! drivers; it grants no authority by itself.
 //!
 //! ```
 //! use tinybox_bus::{ProcessRef, ResourceId};
@@ -46,6 +48,11 @@ pub use files::{
     AbortFileWriteRequest, BeginFileReadRequest, BeginFileWriteRequest, FileChunk, FileReadInfo,
     FileWriteInfo, FileWriteProgress, FinishFileReadRequest, FinishFileWriteRequest,
     ReadFileChunkRequest, WriteFileChunkRequest,
+};
+mod storage;
+pub use storage::{
+    BOX_COLLECTION, CollectionSpec, IndexSpec, JAIL_INDEX_COLLECTION, STORAGE_NEEDS, SearchSpec,
+    StorageNeeds,
 };
 
 /// Wire vocabulary version, independent of the release workflow's package version.

@@ -104,3 +104,5 @@ Do not report vulnerabilities through public issues. Follow the process in
 ## Releasing
 
 Change the Cargo package versions through a reviewed PR. After it merges, tag that commit as vX.Y.Z and push the tag, or dispatch Release with an existing version tag. The shared release verifies the package version, builds and loads all 17 native and distro artifacts, and publishes their checksum manifest. Release does not push version bumps to main.
+
+The TinyBox bus also has an independent pure-consumer workspace and committed lockfile at `crates/tinybox-bus/pure-consumer/`. When changing the workspace package version or the storage metadata pin, refresh that lock with `cargo generate-lockfile --manifest-path crates/tinybox-bus/pure-consumer/Cargo.toml` and commit it with the change. CI runs the consumer with `--locked` and checks its full dependency and feature graph, so a stale proof lock blocks the reviewed release commit.

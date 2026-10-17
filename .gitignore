@@ -1,5 +1,6 @@
 # Build output
 /target/
+/crates/tinybox-bus/pure-consumer/target/
 **/*.rs.bk
 *.pdb
 

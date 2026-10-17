@@ -5,12 +5,11 @@ use std::sync::Arc;
 use serde_json::Value;
 use tinybox_core::{BoxId, BoxInfo, BoxState, Error, Result, Store};
 use tinystoragedrivers_core::{
-    Blocking, CollectionSpec, DocumentStore, DocumentStoreExt, ErrorKind, Precondition, Query,
-    StorageError, Versioned,
+    Blocking, DocumentStore, DocumentStoreExt, ErrorKind, Precondition, Query, StorageError,
+    Versioned,
 };
 
-/// The collection that holds one document per box, keyed by box id.
-pub const BOX_COLLECTION: &str = "tinybox_boxes";
+use crate::BOX_COLLECTION;
 
 /// How many times a read-modify-write retries when another writer wins.
 const CAS_ATTEMPTS: usize = 8;
@@ -42,13 +41,14 @@ impl DocumentBoxStore {
     /// Returns [`Error::Store`] when the bridge cannot start or the backend
     /// refuses the collection.
     pub fn new(documents: Arc<dyn DocumentStore>) -> Result<Self> {
+        let collection = crate::collection_spec(BOX_COLLECTION)?;
         let bridge = Blocking::new().map_err(|error| store_error("open", &error))?;
         let store = Self { documents, bridge };
         let docs = Arc::clone(&store.documents);
-        store.run("open", async move {
-            docs.ensure_collection(&CollectionSpec::new(BOX_COLLECTION))
-                .await
-        })?;
+        store.run(
+            "open",
+            async move { docs.ensure_collection(&collection).await },
+        )?;
         log::debug!("[tinybox_drivers] box store ready collection={BOX_COLLECTION}");
         Ok(store)
     }

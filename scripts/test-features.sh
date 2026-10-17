@@ -16,8 +16,11 @@ case "${RUNNER_OS:-$(uname -s)}" in
     export PATH="/usr/bin:$PATH"
     ;;
 esac
+python3 scripts/test-pure-bus-consumer.py
 python3 scripts/test-e2e-version.py
 cargo test --locked --workspace
+pure_consumer=crates/tinybox-bus/pure-consumer/Cargo.toml
+scripts/test-pure-bus-consumer.sh
 cargo test --locked --workspace --all-features
 case "${RUNNER_OS:-$(uname -s)}" in
   Windows|MINGW*|MSYS*|CYGWIN*) ;;
