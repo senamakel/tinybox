@@ -7,7 +7,7 @@ cargo run --locked --manifest-path "$pure_consumer" --target-dir target
 workspace_version="$(awk '
   /^\[workspace\.package\]$/ { in_package = 1; next }
   /^\[/ { in_package = 0 }
-  in_package && $1 == "version" { gsub(/\"/, "", $3); print $3; exit }
+  in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
 ' Cargo.toml)"
 if [[ -z "$workspace_version" ]]; then
   echo "could not read the TinyBox workspace version" >&2

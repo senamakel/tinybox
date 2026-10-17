@@ -14,9 +14,9 @@ fn storage_needs_declare_every_persisted_collection_and_no_other_resources() {
             .collect::<Vec<_>>(),
         [BOX_COLLECTION, JAIL_INDEX_COLLECTION]
     );
-    assert!(STORAGE_NEEDS.blob_prefixes.is_empty());
-    assert!(STORAGE_NEEDS.stream_prefixes.is_empty());
-    assert!(STORAGE_NEEDS.secret_prefixes.is_empty());
+    assert_eq!(STORAGE_NEEDS.blob_prefixes, &[] as &[&str]);
+    assert_eq!(STORAGE_NEEDS.stream_prefixes, &[] as &[&str]);
+    assert_eq!(STORAGE_NEEDS.secret_prefixes, &[] as &[&str]);
     assert!(
         STORAGE_NEEDS
             .collections
