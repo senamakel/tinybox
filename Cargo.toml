@@ -6,6 +6,7 @@ resolver = "3"
 # scaffolded until they do something — an empty crate is a placeholder.
 members = [
     "crates/tinybox-bus",
+    "crates/tinybox-client",
     "crates/tinybox-cli",
     "crates/tinybox-core",
     "crates/tinybox-docker",
@@ -59,6 +60,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 # Internal path dependencies between workspace members.
 tinybox-bus = { path = "crates/tinybox-bus", version = "0.1.25" }
+tinybox-client = { path = "crates/tinybox-client", version = "0.1.37" }
 tinybox-core = { path = "crates/tinybox-core", version = "0.1.25" }
 tinybox-host = { path = "crates/tinybox-host", version = "0.1.25" }
 tinybox-jail = { path = "crates/tinybox-jail", version = "0.1.25" }
