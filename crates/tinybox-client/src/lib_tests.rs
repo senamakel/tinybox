@@ -429,8 +429,21 @@ async fn incompatible_fixture(
     Ok((service, calls))
 }
 
+fn assert_recorded(calls: &Calls, expected: &[(String, Value)]) {
+    let actual = calls
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert_eq!(actual, expected);
+    assert!(
+        actual
+            .iter()
+            .all(|(member, _)| tinybox_bus::METHODS.contains(&member.as_str()))
+    );
+}
+
 #[tokio::test]
-async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arguments()
+async fn discovery_and_resource_wrappers_preserve_typed_wire_calls()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
     let resource = tinybox_bus::ResourceId("resource-1".into());
@@ -438,18 +451,14 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
         resource: resource.clone(),
         process: tinybox_bus::ResourceId("process-1".into()),
     };
-    let mut expected_calls = vec![
-        (tinybox_bus::names::CAPABILITIES.to_owned(), json!([])),
-        (tinybox_bus::names::DESCRIBE.to_owned(), json!([])),
-        (tinybox_bus::names::JAIL_STATUS.to_owned(), json!([])),
-    ];
+    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
     assert_eq!(client.describe().await?, "tinybox fixture");
+    expected_calls.push((tinybox_bus::names::DESCRIBE.to_owned(), json!([])));
     assert!(client.jail_status().await?.available);
+    expected_calls.push((tinybox_bus::names::JAIL_STATUS.to_owned(), json!([])));
+
     let reserve = tinybox_bus::ReserveRequest::Resource;
-    assert_eq!(
-        client.reserve(reserve.clone()).await?,
-        tinybox_bus::ResourceId("reservation-1".into())
-    );
+    assert_eq!(client.reserve(reserve.clone()).await?, tinybox_bus::ResourceId("reservation-1".into()));
     expected_calls.push(expected(tinybox_bus::names::RESERVE, reserve));
     assert_eq!(client.inspect(resource.clone()).await?.backend, "docker");
     expected_calls.push(expected(tinybox_bus::names::INSPECT, resource.clone()));
@@ -459,20 +468,20 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
     expected_calls.push((tinybox_bus::names::SHUTDOWN.to_owned(), json!([])));
     assert!(client.is_running(process.clone()).await?);
     expected_calls.push(expected(tinybox_bus::names::IS_RUNNING, process.clone()));
-    client.cancel(process.clone()).await?;
-    expected_calls.push(expected(tinybox_bus::names::CANCEL, process.clone()));
+    client.cancel(process).await?;
+    expected_calls.push(expected(tinybox_bus::names::CANCEL, tinybox_bus::ProcessRef {
+        resource: resource.clone(),
+        process: tinybox_bus::ResourceId("process-1".into()),
+    }));
 
     let shell_command = "printf hello".to_owned();
     assert_eq!(
         client.analyze_shell(shell_command.clone()).await?.segments,
-        [shell_command.clone()]
+        std::slice::from_ref(&shell_command)
     );
     expected_calls.push(expected(tinybox_bus::names::ANALYZE_SHELL, shell_command));
     let command = "printf hello".to_owned();
-    assert_eq!(
-        client.analyze_command(command.clone()).await?.literal_words,
-        ["printf", "hello"]
-    );
+    assert_eq!(client.analyze_command(command.clone()).await?.literal_words, ["printf", "hello"]);
     expected_calls.push(expected(tinybox_bus::names::ANALYZE_COMMAND, command));
     let select = tinybox_bus::SelectShellRequest {
         command: "printf hello".into(),
@@ -480,28 +489,32 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
         runtime_path: Some("/opt/bin".into()),
         python_utf8: true,
     };
-    assert_eq!(
-        client.select_shell(select.clone()).await?.program,
-        "/bin/sh"
-    );
+    assert_eq!(client.select_shell(select.clone()).await?.program, "/bin/sh");
     expected_calls.push(expected(tinybox_bus::names::SELECT_SHELL, select));
     let grants = tinybox_bus::ResolveLocalGrantsRequest {
         home: Some("/home/test".into()),
         config: tinybox_bus::LocalGrantConfig::default(),
         protected: tinybox_bus::ProtectedPaths::default(),
     };
-    assert!(
-        client
-            .resolve_local_grants(grants.clone())
-            .await?
-            .read_only
-            .is_empty()
-    );
+    assert!(client.resolve_local_grants(grants.clone()).await?.read_only.is_empty());
     expected_calls.push(expected(tinybox_bus::names::RESOLVE_LOCAL_GRANTS, grants));
     let policy = tinybox_bus::DockerPolicyRequest::default();
-    let _ = client.validate_docker_policy(policy.clone()).await?;
+    assert!(client.validate_docker_policy(policy.clone()).await?.issues.is_empty());
     expected_calls.push(expected(tinybox_bus::names::VALIDATE_DOCKER_POLICY, policy));
+    assert_recorded(&calls, &expected_calls);
+    Ok(())
+}
 
+#[tokio::test]
+async fn docker_and_process_observation_wrappers_preserve_wire_calls()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
+    let resource = tinybox_bus::ResourceId("resource-1".into());
+    let process = tinybox_bus::ProcessRef {
+        resource: resource.clone(),
+        process: tinybox_bus::ResourceId("process-1".into()),
+    };
+    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
     let status = tinybox_bus::DockerStatusRequest { timeout_ms: 2_000 };
     assert!(client.docker_status(status).await?.available);
     expected_calls.push(expected(tinybox_bus::names::DOCKER_STATUS, status));
@@ -509,45 +522,35 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
         label: "openhuman.sandbox=true".into(),
         timeout_ms: 2_000,
     };
-    assert_eq!(
-        client
-            .cleanup_docker(cleanup.clone())
-            .await?
-            .containers_stopped,
-        2
-    );
+    assert_eq!(client.cleanup_docker(cleanup.clone()).await?.containers_stopped, 2);
     expected_calls.push(expected(tinybox_bus::names::CLEANUP_DOCKER, cleanup));
-
     let forward = tinybox_bus::ForwardRequest {
         resource: resource.clone(),
         forward: tinybox_bus::ResourceId("forward-1".into()),
         guest_port: 8080,
     };
-    assert_eq!(
-        client.forward(forward.clone()).await?.local_address,
-        "127.0.0.1:1234"
-    );
+    assert_eq!(client.forward(forward.clone()).await?.local_address, "127.0.0.1:1234");
     expected_calls.push(expected(tinybox_bus::names::FORWARD, forward));
     let close_forward = tinybox_bus::CloseForwardRequest {
-        resource: resource.clone(),
+        resource,
         forward: tinybox_bus::ResourceId("forward-1".into()),
     };
     client.close_forward(close_forward.clone()).await?;
     expected_calls.push(expected(tinybox_bus::names::CLOSE_FORWARD, close_forward));
-    assert_eq!(
-        client.read_output(process.clone(), 0).await?.next_sequence,
-        0
-    );
-    expected_calls.push((
-        tinybox_bus::names::READ_OUTPUT.to_owned(),
-        json!([process.clone(), 0]),
-    ));
+    assert_eq!(client.read_output(process.clone(), 0).await?.next_sequence, 0);
+    expected_calls.push((tinybox_bus::names::READ_OUTPUT.to_owned(), json!([process.clone(), 0])));
     client.release_output(process.clone()).await?;
-    expected_calls.push(expected(
-        tinybox_bus::names::RELEASE_OUTPUT,
-        process.clone(),
-    ));
+    expected_calls.push(expected(tinybox_bus::names::RELEASE_OUTPUT, process));
+    assert_recorded(&calls, &expected_calls);
+    Ok(())
+}
 
+#[tokio::test]
+async fn workspace_file_wrappers_preserve_typed_wire_calls()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
+    let resource = tinybox_bus::ResourceId("resource-1".into());
+    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
     let read = tinybox_bus::BeginFileReadRequest {
         resource: resource.clone(),
         transfer: tinybox_bus::ResourceId("read-1".into()),
@@ -561,13 +564,7 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
         offset: 0,
         max_bytes: 10,
     };
-    assert!(
-        client
-            .read_file_chunk(read_chunk.clone())
-            .await?
-            .bytes
-            .is_empty()
-    );
+    assert!(client.read_file_chunk(read_chunk.clone()).await?.bytes.is_empty());
     expected_calls.push(expected(tinybox_bus::names::READ_FILE_CHUNK, read_chunk));
     let finish_read = tinybox_bus::FinishFileReadRequest {
         resource: resource.clone(),
@@ -586,31 +583,15 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
         resource: resource.clone(),
         transfer: tinybox_bus::ResourceId("write-1".into()),
     };
-    assert_eq!(
-        client
-            .finish_file_write(finish_write.clone())
-            .await?
-            .next_offset,
-        0
-    );
-    expected_calls.push(expected(
-        tinybox_bus::names::FINISH_FILE_WRITE,
-        finish_write,
-    ));
+    assert_eq!(client.finish_file_write(finish_write.clone()).await?.next_offset, 0);
+    expected_calls.push(expected(tinybox_bus::names::FINISH_FILE_WRITE, finish_write));
     let abort_write = tinybox_bus::AbortFileWriteRequest {
         resource,
         transfer: tinybox_bus::ResourceId("write-1".into()),
     };
     client.abort_file_write(abort_write.clone()).await?;
     expected_calls.push(expected(tinybox_bus::names::ABORT_FILE_WRITE, abort_write));
-
-    let actual = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-    assert_eq!(actual, expected_calls);
-    assert!(
-        actual
-            .iter()
-            .all(|(member, _)| tinybox_bus::METHODS.contains(&member.as_str()))
-    );
+    assert_recorded(&calls, &expected_calls);
     Ok(())
 }
 
