@@ -1,0 +1,19 @@
+[package]
+name = "tinybox-client"
+description = "Typed TinyBus host client for the TinyBox module."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tinybox-bus.workspace = true
+tinybus = { path = "../../vendor/tinybus/crates/tinybus", default-features = false }
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
