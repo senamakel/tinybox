@@ -89,4 +89,4 @@ jobs:
     with:
       tag: ${{ needs.resolve.outputs.tag }}
       version: ${{ needs.resolve.outputs.version }}
-      reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr) }}
+      reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr || '0') }}

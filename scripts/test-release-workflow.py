@@ -121,7 +121,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "837d0424c7f38e4293f41c795f12ed5eb5dd7280",
             self.workflow,
         )
-        self.assertIn("reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr) }}", self.workflow)
+        self.assertIn(
+            "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr || '0') }}",
+            self.workflow,
+        )
         self.assertNotIn("inputs.package", self.workflow)
         self.assertNotIn("inputs.repo", self.workflow)
 
@@ -133,7 +136,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             r"module-reviewed-epic-release\.yml@837d0424c7f38e4293f41c795f12ed5eb5dd7280$",
         )
         self.assertIn(
-            "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr) }}",
+            "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr || '0') }}",
             reviewed,
         )
         self.assertNotRegex(reviewed, r"(?m)^      - uses: actions/checkout@")
