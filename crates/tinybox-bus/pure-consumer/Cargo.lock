@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-bus"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "serde",
  "tinystoragedrivers-bus",
@@ -99,12 +99,13 @@ name = "tinybox-bus-pure-consumer"
 version = "0.1.0"
 dependencies = [
  "tinybox-bus",
+ "tinystoragedrivers-bus",
 ]
 
 [[package]]
 name = "tinystoragedrivers-bus"
-version = "1.3.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168#08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168"
+version = "1.5.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=c9ea6ff1615b77b55d7269403af5fd11bedc9ce8#c9ea6ff1615b77b55d7269403af5fd11bedc9ce8"
 dependencies = [
  "serde",
  "serde_json",
