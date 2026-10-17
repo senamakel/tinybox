@@ -277,7 +277,7 @@ async fn attested_fixture() -> std::result::Result<(
     );
     let calls = Arc::new(Mutex::new(Vec::new()));
     LINKED_CAPTURES
-        .get_or_init(Default::default)
+        .get_or_init(HashMap::new)
         .lock()
         .map_err(std::io::Error::other)?
         .insert(capture_id.clone(), Arc::clone(&calls));
@@ -698,7 +698,7 @@ fn docker_request(command: String) -> tinybox_bus::DockerRunRequest {
 async fn exercise_confidential_resource_wrappers(
     client: &TinyBoxClient,
     expected_calls: &mut Vec<(String, Value)>,
-) -> tinybus::module::ModuleCallResult<()> {
+) -> std::result::Result<(), tinybus::module::ModuleCallError><()> {
     let resource = tinybox_bus::ResourceId("resource-1".into());
     let process = tinybox_bus::ResourceId("process-1".into());
     let create = tinybox_bus::CreateRequest::default();
@@ -735,7 +735,7 @@ async fn exercise_confidential_resource_wrappers(
 async fn exercise_confidential_shell_and_write_wrappers(
     client: &TinyBoxClient,
     expected_calls: &mut Vec<(String, Value)>,
-) -> tinybus::module::ModuleCallResult<()> {
+) -> std::result::Result<(), tinybus::module::ModuleCallError><()> {
     let shell = shell_exec_request("printf hello");
     assert_eq!(client.start_native_shell_exec(shell.clone()).await?.process.0, "process-1");
     expected_calls.push(expected(tinybox_bus::names::START_NATIVE_SHELL_EXEC, shell));
@@ -753,7 +753,7 @@ async fn exercise_confidential_shell_and_write_wrappers(
 async fn exercise_confidential_docker_wrappers(
     client: &TinyBoxClient,
     expected_calls: &mut Vec<(String, Value)>,
-) -> tinybus::module::ModuleCallResult<()> {
+) -> std::result::Result<(), tinybus::module::ModuleCallError><()> {
     let docker = docker_request("printf hello".into());
     assert_eq!(client.run_docker(docker.clone()).await?.stdout, "ok");
     expected_calls.push(expected(tinybox_bus::names::RUN_DOCKER, docker.clone()));
