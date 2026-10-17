@@ -1,4 +1,4 @@
-//! In-memory TinyBus tests for the typed TinyBox host client.
+//! In-memory `TinyBus` tests for the typed TinyBox host client.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -304,7 +304,7 @@ async fn attested_fixture() -> (
             "contract_version": tinybox_bus::CONTRACT_VERSION,
         }),
     )
-    .expect("linked fixture is admitted by TinyBus");
+    .expect("linked fixture is admitted by `TinyBus`");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if host
@@ -364,7 +364,7 @@ async fn construction_checks_compatibility_once_across_typed_calls()
         ["printf", "hello"]
     );
     assert_eq!(
-        client.capabilities().await?.contract_version,
+        client.capabilities().contract_version,
         tinybox_bus::CONTRACT_VERSION
     );
 
@@ -388,7 +388,7 @@ async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn
         tinybox_bus::CONTRACT_VERSION.1 + 1,
     );
     let (_service, client, calls) = fixture(version).await;
-    assert_eq!(client.capabilities().await?.contract_version, version);
+    assert_eq!(client.capabilities().contract_version, version);
     assert_eq!(
         calls.lock().expect("fixture call log lock").len(),
         1,

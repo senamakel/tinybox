@@ -14,7 +14,7 @@
 //!
 //! # async fn example(module_client: ModuleClient) -> Result<(), tinybus::module::ModuleCallError> {
 //! let tinybox = TinyBoxClient::new(module_client).await?;
-//! let capabilities = tinybox.capabilities().await?;
+//! let capabilities = tinybox.capabilities();
 //! assert_eq!(capabilities.contract_version.0, 1);
 //! # Ok(())
 //! # }
