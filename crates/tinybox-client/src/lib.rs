@@ -9,11 +9,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use tinybox_client::`TinyBox`Client;
+//! use tinybox_client::TinyBoxClient;
 //! use tinybus::module::ModuleClient;
 //!
 //! # async fn example(module_client: ModuleClient) -> Result<(), tinybus::module::ModuleCallError> {
-//! let tinybox = `TinyBox`Client::new(module_client).await?;
+//! let tinybox = TinyBoxClient::new(module_client).await?;
 //! let capabilities = tinybox.capabilities();
 //! assert_eq!(capabilities.contract_version.0, 1);
 //! # Ok(())
@@ -44,22 +44,22 @@ pub type Result<T> = std::result::Result<T, ModuleCallError>;
 /// `TinyBus` client is supplied by the host, so its configured default timeout
 /// remains in force for every operation without an operation-specific bound.
 #[derive(Clone)]
-pub struct `TinyBox`Client {
+pub struct TinyBoxClient {
     client: ModuleClient,
     capabilities: contract::ModuleCapabilities,
 }
 
-impl fmt::Debug for `TinyBox`Client {
+impl fmt::Debug for TinyBoxClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("`TinyBox`Client")
+            .debug_struct("TinyBoxClient")
             .field("module_id", &MODULE_ID)
             .field("capabilities", &self.capabilities)
             .finish_non_exhaustive()
     }
 }
 
-impl `TinyBox`Client {
+impl TinyBoxClient {
     /// Create a typed client and verify the module's wire contract once.
     ///
     /// The module must advertise the same contract major and a minor version
