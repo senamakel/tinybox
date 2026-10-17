@@ -27,6 +27,7 @@ def manifest(storage_dependency=None):
         "rev": STORAGE_REV,
         "default-features": False,
     }
+    extra_features = ', features = ["client"]' if "features" in storage_dependency else ""
     return f'''[package]
 name = "tinybox-bus-pure-consumer"
 version = "0.1.0"
@@ -37,7 +38,7 @@ publish = false
 
 [dependencies]
 tinybox-bus = {{ path = ".." }}
-tinystoragedrivers-bus = {{ version = "{storage_dependency['version']}", git = "{storage_dependency['git']}", rev = "{storage_dependency['rev']}", default-features = {str(storage_dependency['default-features']).lower()} }}
+tinystoragedrivers-bus = {{ version = "{storage_dependency['version']}", git = "{storage_dependency['git']}", rev = "{storage_dependency['rev']}", default-features = {str(storage_dependency['default-features']).lower()}{extra_features} }}
 '''
 
 
