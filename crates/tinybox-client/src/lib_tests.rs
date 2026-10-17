@@ -1,9 +1,11 @@
 //! In-memory TinyBus tests for the typed TinyBox host client.
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tinybus::broker::Broker;
 use tinybus::module::{
@@ -17,6 +19,23 @@ use tinybus::{Connection, InterfaceName, MemberName, ObjectPath, Proxy};
 use super::*;
 
 const MODULE_ID: &str = "tinybox";
+type Calls = Arc<Mutex<Vec<(String, Value)>>>;
+
+const ATTESTED_METHODS: &[&str] = &[
+    tinybox_bus::names::CAPABILITIES,
+    tinybox_bus::names::CREATE,
+    tinybox_bus::names::EXEC,
+    tinybox_bus::names::SPAWN,
+    tinybox_bus::names::START_EXEC,
+    tinybox_bus::names::START_JAILED_EXEC,
+    tinybox_bus::names::START_NATIVE_SHELL_EXEC,
+    tinybox_bus::names::WRITE_FILE_CHUNK,
+    tinybox_bus::names::RUN_DOCKER,
+    tinybox_bus::names::RUN_DOCKER_WITHOUT_WORKSPACE,
+];
+
+static LINKED_CAPTURES: OnceLock<Mutex<HashMap<String, Calls>>> = OnceLock::new();
+
 static RELEASE: ReleaseRecord = ReleaseRecord {
     id: MODULE_ID,
     bus_name: tinybox_bus::INTERFACE,
@@ -65,7 +84,8 @@ impl ModuleAccess for FixtureAccess {
 
 struct MockTinyBox {
     contract_version: (u32, u32),
-    calls: Arc<Mutex<Vec<(String, Value)>>>,
+    calls: Calls,
+    members: &'static [&'static str],
 }
 
 #[async_trait::async_trait]
@@ -75,7 +95,7 @@ impl Interface for MockTinyBox {
     }
 
     fn members(&self) -> Vec<MemberName> {
-        tinybox_bus::METHODS
+        self.members
             .iter()
             .map(|name| MemberName::new(*name).expect("valid TinyBox member"))
             .collect()
@@ -177,6 +197,7 @@ async fn fixture(
             MockTinyBox {
                 contract_version,
                 calls: Arc::clone(&calls),
+                members: tinybox_bus::METHODS,
             },
         )
         .await
@@ -289,6 +310,7 @@ async fn incompatible_fixture(
             MockTinyBox {
                 contract_version: version,
                 calls: Arc::clone(&calls),
+                members: tinybox_bus::METHODS,
             },
         )
         .await
