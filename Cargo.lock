@@ -1345,6 +1345,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinybox-client"
+version = "0.1.37"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tinybox-bus",
+ "tinybus",
+ "tokio",
+]
+
+[[package]]
 name = "tinybox-core"
 version = "0.1.37"
 dependencies = [
