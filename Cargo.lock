@@ -1212,6 +1212,7 @@ version = "0.1.36"
 dependencies = [
  "serde",
  "serde_json",
+ "tinystoragedrivers-bus 1.3.0",
 ]
 
 [[package]]
@@ -1265,6 +1266,7 @@ dependencies = [
  "log",
  "serde_json",
  "tempfile",
+ "tinybox-bus",
  "tinybox-core",
  "tinybox-jail",
  "tinystoragedrivers-core",
@@ -1432,6 +1434,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinystoragedrivers-bus"
+version = "1.3.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168#08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tinystoragedrivers-busproxy"
 version = "0.11.0"
 source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
@@ -1440,7 +1451,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinybus",
- "tinystoragedrivers-bus",
+ "tinystoragedrivers-bus 0.11.0",
  "tinystoragedrivers-client",
  "tinystoragedrivers-core",
  "tokio",
@@ -1454,7 +1465,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
- "tinystoragedrivers-bus",
+ "tinystoragedrivers-bus 0.11.0",
  "tinystoragedrivers-core",
  "tinystoragedrivers-secrets",
  "tokio",
