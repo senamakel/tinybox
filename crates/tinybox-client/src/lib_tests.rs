@@ -242,6 +242,22 @@ async fn construction_checks_compatibility_once_across_typed_calls()
 }
 
 #[tokio::test]
+async fn a_newer_minor_contract_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
+    let version = (
+        tinybox_bus::CONTRACT_VERSION.0,
+        tinybox_bus::CONTRACT_VERSION.1 + 1,
+    );
+    let (_service, client, calls) = fixture(version).await;
+    assert_eq!(client.capabilities().await?.contract_version, version);
+    assert_eq!(
+        calls.lock().expect("fixture call log lock").len(),
+        1,
+        "construction performs the compatibility probe exactly once"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn incompatible_contracts_are_rejected_before_any_typed_operation() {
     for version in [
         (
