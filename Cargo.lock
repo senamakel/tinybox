@@ -85,9 +85,9 @@ dependencies = [
 
 [[package]]
 name = "arbitrary"
-version = "1.5.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 dependencies = [
  "derive_arbitrary",
 ]
@@ -414,13 +414,13 @@ dependencies = [
 
 [[package]]
 name = "derive_arbitrary"
-version = "1.5.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -432,6 +432,17 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "subtle",
+]
+
+[[package]]
+name = "displaydoc"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1201,7 +1212,6 @@ version = "0.1.36"
 dependencies = [
  "serde",
  "serde_json",
- "tinystoragedrivers-bus 1.3.0",
 ]
 
 [[package]]
@@ -1255,7 +1265,6 @@ dependencies = [
  "log",
  "serde_json",
  "tempfile",
- "tinybox-bus",
  "tinybox-core",
  "tinybox-jail",
  "tinystoragedrivers-core",
@@ -1423,15 +1432,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tinystoragedrivers-bus"
-version = "1.3.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168#08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "tinystoragedrivers-busproxy"
 version = "0.11.0"
 source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
@@ -1440,7 +1440,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinybus",
- "tinystoragedrivers-bus 0.11.0",
+ "tinystoragedrivers-bus",
  "tinystoragedrivers-client",
  "tinystoragedrivers-core",
  "tokio",
@@ -1454,7 +1454,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
- "tinystoragedrivers-bus 0.11.0",
+ "tinystoragedrivers-bus",
  "tinystoragedrivers-core",
  "tinystoragedrivers-secrets",
  "tokio",
@@ -1917,16 +1917,18 @@ checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zip"
-version = "2.6.1"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
+checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
 dependencies = [
  "arbitrary",
  "crc32fast",
  "crossbeam-utils",
+ "displaydoc",
  "flate2",
  "indexmap",
  "memchr",
+ "thiserror",
  "zopfli",
 ]
 
