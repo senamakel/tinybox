@@ -9,8 +9,9 @@ An operator may choose the `reviewed-epic` route in the manual Release
 workflow. That route requires a positive integer canonical pull request number
 whose merge commit the existing tag identifies. The workflow passes that
 number to the shared reviewed-module-release workflow, which checks the
-canonical repository profile and approved epic base before checking out the
-admitted source, then verifies reviewed history and CI evidence before
+exact `tinyhumansai/tinybox` repository profile and
+`epic/8056-modules-wiring` base before checking out the admitted source, then
+verifies reviewed history and CI evidence before
 packaging. The shared workflow is called at the fixed reviewed-release commit
 `837d0424c7f38e4293f41c795f12ed5eb5dd7280`.
 
