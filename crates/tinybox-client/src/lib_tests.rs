@@ -350,7 +350,7 @@ async fn construction_checks_compatibility_once_across_typed_calls()
         tinybox_bus::CONTRACT_VERSION
     );
 
-    let calls = calls.lock().expect("fixture call log lock");
+    let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     assert_eq!(
         calls
             .iter()
@@ -372,7 +372,7 @@ async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn
     let (_service, client, calls) = fixture(version).await;
     assert_eq!(client.capabilities().contract_version, version);
     assert_eq!(
-        calls.lock().expect("fixture call log lock").len(),
+        calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(),
         1,
         "construction performs the compatibility probe exactly once"
     );
@@ -392,7 +392,7 @@ async fn incompatible_contracts_are_rejected_before_any_typed_operation() {
         ),
     ] {
         let (_service, calls) = incompatible_fixture(version).await;
-        assert_eq!(calls.lock().expect("fixture call log lock").len(), 1);
+        assert_eq!(calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(), 1);
     }
 }
 
@@ -613,7 +613,7 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
     client.abort_file_write(abort_write.clone()).await?;
     expected_calls.push(expected(tinybox_bus::names::ABORT_FILE_WRITE, abort_write));
 
-    let actual = calls.lock().expect("fixture call log lock").clone();
+    let actual = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     assert_eq!(actual, expected_calls);
     assert!(
         actual
@@ -633,7 +633,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         resource: tinybox_bus::ResourceId("resource-1".into()),
         argv: vec!["cat".into(), secret.into()],
         cwd: None,
-        env: Default::default(),
+        env: std::collections::BTreeMap::new(),
         stdin: None,
     };
     let error = client
@@ -647,7 +647,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
             resource: tinybox_bus::ResourceId("resource-1".into()),
             argv: vec!["echo".into(), secret.into()],
             cwd: None,
-            env: Default::default(),
+            env: std::collections::BTreeMap::new(),
             stdin: None,
         },
     };
@@ -673,7 +673,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
             python_utf8: false,
         },
         cwd: None,
-        extra_env: Default::default(),
+        extra_env: std::collections::BTreeMap::new(),
         state_dir: "/private/state".into(),
         timeout_ms: 1000,
         stdin: None,
@@ -699,7 +699,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         read_only_rootfs: None,
         read_only_mounts: vec![],
         extra_cap_drops: vec![],
-        env: Default::default(),
+        env: std::collections::BTreeMap::new(),
         label: None,
         timeout_ms: 1_000,
     };
@@ -713,7 +713,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
             .await
             .is_err()
     );
-    let calls = calls.lock().expect("fixture call log lock");
+    let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     assert_eq!(
         calls.len(),
         1,
@@ -738,7 +738,7 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
         resource: resource.clone(),
         argv: vec!["printf".into(), "hello".into()],
         cwd: None,
-        env: Default::default(),
+        env: std::collections::BTreeMap::new(),
         stdin: None,
     };
     assert_eq!(client.exec(exec.clone()).await?.exit_code, 0);
@@ -750,7 +750,7 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
             resource: resource.clone(),
             argv: vec!["printf".into(), "hello".into()],
             cwd: None,
-            env: Default::default(),
+            env: std::collections::BTreeMap::new(),
             stdin: None,
         },
     };
@@ -790,7 +790,7 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
             python_utf8: true,
         },
         cwd: Some("/workspace".into()),
-        extra_env: Default::default(),
+        extra_env: std::collections::BTreeMap::new(),
         state_dir: "/private/state".into(),
         timeout_ms: 5_000,
         stdin: None,
@@ -827,7 +827,7 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
         read_only_rootfs: Some(true),
         read_only_mounts: Vec::new(),
         extra_cap_drops: Vec::new(),
-        env: Default::default(),
+        env: std::collections::BTreeMap::new(),
         label: Some("openhuman.sandbox=true".into()),
         timeout_ms: 10_000,
     };
@@ -852,7 +852,7 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
     assert_eq!(
         calls
             .lock()
-            .expect("linked fixture call log lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_slice(),
         expected_calls
     );
