@@ -351,8 +351,37 @@ async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arg
 async fn confidential_operations_fail_closed_without_ordinary_retry() {
     let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
     let secret = "/private/marker";
+    let create = tinybox_bus::CreateRequest::default();
+    assert!(client.create(create).await.is_err());
     let exec = tinybox_bus::ExecRequest { resource: tinybox_bus::ResourceId("resource-1".into()), argv: vec!["cat".into(), secret.into()], cwd: None, env: Default::default(), stdin: None };
-    assert!(client.exec(exec).await.is_err());
+    let error = client.exec(exec).await.expect_err("confidential execution requires attestation");
+    assert!(!error.to_string().contains(secret));
+    let spawn = tinybox_bus::SpawnRequest {
+        process: tinybox_bus::ResourceId("process-1".into()),
+        command: tinybox_bus::ExecRequest { resource: tinybox_bus::ResourceId("resource-1".into()), argv: vec!["echo".into(), secret.into()], cwd: None, env: Default::default(), stdin: None },
+    };
+    assert!(client.spawn(spawn.clone()).await.is_err());
+    assert!(client.start_exec(spawn.clone()).await.is_err());
+    let jail = tinybox_bus::NativeJailConfig {
+        read_only: Vec::new(), read_write: Vec::new(), allow_net: false,
+        allow_subprocess: false, enforcement: tinybox_bus::JailEnforcement::Enforced,
+        require_process_isolation: true, deny_read: Vec::new(),
+    };
+    assert!(client.start_jailed_exec(spawn, jail).await.is_err());
+    let shell_exec = tinybox_bus::ShellExecRequest {
+        process: tinybox_bus::ResourceId("process-1".into()),
+        resource: tinybox_bus::ResourceId("resource-1".into()),
+        shell: tinybox_bus::SelectShellRequest { command: format!("echo {secret}"), preserve_pipeline_status: false, runtime_path: None, python_utf8: false },
+        cwd: None, extra_env: Default::default(), state_dir: "/private/state".into(), timeout_ms: 1000,
+        stdin: None, jail: None, hide_window: false,
+    };
+    assert!(client.start_native_shell_exec(shell_exec).await.is_err());
+    let write = tinybox_bus::WriteFileChunkRequest {
+        resource: tinybox_bus::ResourceId("resource-1".into()),
+        transfer: tinybox_bus::ResourceId("write-1".into()), offset: 0,
+        bytes: secret.as_bytes().to_vec(),
+    };
+    assert!(client.write_file_chunk(write).await.is_err());
     let docker = tinybox_bus::DockerRunRequest { workspace: "/workspace".into(), image: None, command: format!("echo {secret}"), login_shell: false, network: None, memory_limit_mb: None, cpus: None, read_only_rootfs: None, read_only_mounts: vec![], extra_cap_drops: vec![], env: Default::default(), label: None, timeout_ms: 1_000 };
     assert!(client.run_docker(docker.clone()).await.is_err());
     assert!(client.run_docker_without_workspace(tinybox_bus::DockerRunRequest { workspace: String::new(), ..docker }).await.is_err());
