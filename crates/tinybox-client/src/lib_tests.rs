@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
-use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tinybus::broker::Broker;
