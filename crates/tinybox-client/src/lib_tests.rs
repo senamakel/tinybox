@@ -264,7 +264,7 @@ async fn fixture(
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     };
     let module = ModuleClient::new(access).with_fixture(proxy);
-    let client = TinyBoxClient::new(MODULE_ID, module)
+    let client = TinyBoxClient::new(module)
         .await
         .expect("compatible TinyBox contract");
     (service, client, calls)
@@ -331,7 +331,7 @@ async fn attested_fixture() -> (
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
-    let client = TinyBoxClient::new(MODULE_ID, module)
+    let client = TinyBoxClient::new(module)
         .await
         .expect("linked TinyBox fixture has a compatible contract");
     (host, caller, client, calls)
@@ -448,7 +448,7 @@ async fn incompatible_fixture(
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
-    assert!(TinyBoxClient::new(MODULE_ID, module).await.is_err());
+    assert!(TinyBoxClient::new(module).await.is_err());
     (service, calls)
 }
 
