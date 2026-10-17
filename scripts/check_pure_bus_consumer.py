@@ -104,7 +104,11 @@ def validate_lockfile(contents: str) -> None:
 
 def validate_dependency_graph(contents: str, workspace_version: str) -> None:
     """Check the complete normal/build Cargo tree and its activated features."""
-    versions = {"tinybox-bus": set(), STORAGE_BUS_NAME: set()}
+    versions = {
+        PURE_CONSUMER_NAME: set(),
+        "tinybox-bus": set(),
+        STORAGE_BUS_NAME: set(),
+    }
     lines = [line for line in contents.splitlines() if line.strip()]
     if not lines:
         raise ProofError("normal/build dependency graph is missing")
@@ -115,7 +119,9 @@ def validate_dependency_graph(contents: str, workspace_version: str) -> None:
         name, version = fields[:2]
         features = set(re.findall(r"[A-Za-z0-9_-]+", fields[2] if len(fields) == 3 else ""))
 
-        if name == "tinybox-bus":
+        if name == PURE_CONSUMER_NAME:
+            versions[name].add(version)
+        elif name == "tinybox-bus":
             versions[name].add(version)
         elif name == STORAGE_BUS_NAME:
             versions[name].add(version)
@@ -131,6 +137,7 @@ def validate_dependency_graph(contents: str, workspace_version: str) -> None:
             raise ProofError(f"pure consumer unexpectedly depends on runtime, HTTP, or database crate {name}")
 
     expected_versions = {
+        PURE_CONSUMER_NAME: {"v0.1.0"},
         "tinybox-bus": {f"v{workspace_version}"},
         STORAGE_BUS_NAME: {f"v{STORAGE_BUS_VERSION}"},
     }

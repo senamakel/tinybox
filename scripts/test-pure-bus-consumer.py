@@ -94,6 +94,7 @@ class PureBusConsumerProofTests(unittest.TestCase):
             {"version": "1.5.0", "git": STORAGE_URL + ".git", "rev": STORAGE_REV, "default-features": False},
             {"version": "1.5.0", "git": STORAGE_URL, "rev": "08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168", "default-features": False},
             {"version": "1.5.0", "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": True},
+            {"version": "1.5.0", "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": False, "features": ["client"]},
         ):
             with self.subTest(dependency=dependency), self.assertRaises(ProofError):
                 validate_manifest(manifest(dependency))
@@ -118,6 +119,10 @@ class PureBusConsumerProofTests(unittest.TestCase):
         ):
             with self.subTest(tree=tree), self.assertRaises(ProofError):
                 validate_dependency_graph(tree, "0.1.37")
+
+    def test_proof_command_covers_normal_build_edges_and_enabled_features(self):
+        script = (ROOT / "scripts/test-pure-bus-consumer.sh").read_text()
+        self.assertIn("--format '{p} {f}' -e normal,build", script)
 
 
 if __name__ == "__main__":
