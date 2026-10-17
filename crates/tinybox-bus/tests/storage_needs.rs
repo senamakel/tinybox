@@ -1,4 +1,4 @@
-//! Public storage declarations exposed by the TinyBox bus contract.
+//! Public storage declarations exposed by the `TinyBox` bus contract.
 
 use tinybox_bus::{BOX_COLLECTION, JAIL_INDEX_COLLECTION, STORAGE_NEEDS};
 

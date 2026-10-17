@@ -12,6 +12,7 @@
 //! Both traits are synchronous, so each store owns a [`Blocking`] bridge that
 //! runs the port's futures on a dedicated runtime thread. That works from inside
 //! or outside a tokio runtime.
+//! The collection schemas come from [`tinybox_bus::STORAGE_NEEDS`].
 //!
 //! [`DocumentStore`]: tinystoragedrivers_core::DocumentStore
 //! [`Blocking`]: tinystoragedrivers_core::Blocking

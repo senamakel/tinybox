@@ -1,7 +1,12 @@
 //! The document drivers persist exactly the schemas declared by tinybox-bus.
 
 use super::*;
+use std::sync::Arc;
 use tinybox_bus::{CollectionSpec, IndexSpec, STORAGE_NEEDS, SearchSpec};
+use tinybox_core::{
+    BoxId, BoxInfo, BoxSpec, BoxState, HostRef, Placement, SandboxRef, Store, WorkspaceSource,
+};
+use tinybox_jail::IndexStore;
 use tinystoragedrivers_core::{
     Blocking, DocumentStore, IndexSpec as DriverIndexSpec, MemoryStorage, Scope, StorageBackend,
 };
@@ -11,20 +16,32 @@ fn stores_create_every_collection_the_bus_declares()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let storage = MemoryStorage::new().for_scope(&Scope::local())?;
     let documents: Arc<dyn DocumentStore> = storage.documents().clone();
-    DocumentBoxStore::new(Arc::clone(&documents))?;
-    DocumentIndexStore::new(Arc::clone(&documents), "main")?;
+    let boxes = DocumentBoxStore::new(Arc::clone(&documents))?;
+    let index = DocumentIndexStore::new(Arc::clone(&documents), "main")?;
 
     let bridge = Blocking::new()?;
-    let collections = bridge.run(async move { documents.collections("").await })??;
-    let declared: Vec<_> = STORAGE_NEEDS
-        .collections
-        .iter()
-        .map(|collection| collection.name.as_str())
-        .collect();
-    assert_eq!(
-        collections.iter().map(String::as_str).collect::<Vec<_>>(),
-        declared
+    let record = BoxInfo::new(
+        BoxId::new("storage-needs")?,
+        BoxState::Ready,
+        BoxSpec::new(
+            Placement::new(HostRef::new("local")?, SandboxRef::new("passthrough")?),
+            WorkspaceSource::LocalDir("/workspace".into()),
+        ),
     );
+    boxes.insert(&record)?;
+    assert_eq!(boxes.get(&record.id)?, record);
+
+    index.save(br#"{"records":{},"schema_version":1}"#)?;
+    assert_eq!(
+        index.load()?.as_deref(),
+        Some(br#"{"records":{},"schema_version":1}"#.as_slice())
+    );
+
+    for declaration in STORAGE_NEEDS.collections {
+        let required = to_driver_collection_spec(declaration);
+        let documents = Arc::clone(&documents);
+        bridge.run(async move { documents.validate_collection_spec(&required).await })??;
+    }
     Ok(())
 }
 

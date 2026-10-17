@@ -2,6 +2,8 @@
 //!
 //! This crate has no bus connection, executor, native backend, or policy.
 //! A caller applies its own authorization before sending these requests.
+//! [`STORAGE_NEEDS`] describes the collections persisted by the `TinyBox`
+//! drivers; it grants no authority by itself.
 //!
 //! ```
 //! use tinybox_bus::{ProcessRef, ResourceId};

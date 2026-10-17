@@ -1,4 +1,4 @@
-//! Storage resources requested by the TinyBox module.
+//! Storage resources requested by the `TinyBox` module.
 
 use std::sync::LazyLock;
 
@@ -26,7 +26,7 @@ static COLLECTIONS: LazyLock<[CollectionSpec; 2]> = LazyLock::new(|| {
     ]
 });
 
-/// Storage declarations the TinyBox module requests from its host.
+/// Storage declarations the `TinyBox` module requests from its host.
 ///
 /// These metadata describe the two persisted resources used by the drivers;
 /// the host still decides whether to grant them to a module instance.

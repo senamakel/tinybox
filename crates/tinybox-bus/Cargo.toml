@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# The bus boundary contains data only; serialization is its sole dependency.
+# The bus boundary contains data only and uses the canonical storage schema.
 serde.workspace = true
 tinystoragedrivers-bus.workspace = true
 
