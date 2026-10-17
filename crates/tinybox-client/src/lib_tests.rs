@@ -69,7 +69,10 @@ impl ModuleAccess for FixtureAccess {
         &self.reporter
     }
 
-    fn ensure_loaded<'a>(&'a self, _id: &'a str) -> AccessFuture<'a, Result<(), String>> {
+    fn ensure_loaded<'a>(
+        &'a self,
+        _id: &'a str,
+    ) -> AccessFuture<'a, std::result::Result<(), String>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -77,7 +80,7 @@ impl ModuleAccess for FixtureAccess {
         &'a self,
         _bus_name: &'a str,
         _object_path: &'a str,
-    ) -> AccessFuture<'a, Result<Proxy, ProxyFailure>> {
+    ) -> AccessFuture<'a, std::result::Result<Proxy, ProxyFailure>> {
         Box::pin(async { Err(ProxyFailure::Transport) })
     }
 }
@@ -350,7 +353,7 @@ fn expected_args<Args: Serialize>(member: &str, args: Args) -> (String, Value) {
 
 #[tokio::test]
 async fn construction_checks_compatibility_once_across_typed_calls()
--> Result<(), Box<dyn std::error::Error>> {
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
     assert_eq!(client.describe().await?, "tinybox fixture");
     assert_eq!(
@@ -378,7 +381,8 @@ async fn construction_checks_compatibility_once_across_typed_calls()
 }
 
 #[tokio::test]
-async fn a_newer_minor_contract_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
+async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn std::error::Error>>
+{
     let version = (
         tinybox_bus::CONTRACT_VERSION.0,
         tinybox_bus::CONTRACT_VERSION.1 + 1,
@@ -454,7 +458,7 @@ async fn incompatible_fixture(
 
 #[tokio::test]
 async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arguments()
--> Result<(), Box<dyn std::error::Error>> {
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
     let resource = tinybox_bus::ResourceId("resource-1".into());
     let process = tinybox_bus::ProcessRef {
@@ -738,7 +742,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attested_linked_module_accepts_every_confidential_wrapper()
--> Result<(), Box<dyn std::error::Error>> {
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_host, _caller, client, calls) = attested_fixture().await;
     let resource = tinybox_bus::ResourceId("resource-1".into());
     let process = tinybox_bus::ResourceId("process-1".into());
