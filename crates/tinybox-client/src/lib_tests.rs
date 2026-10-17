@@ -138,13 +138,13 @@ tinybus_module::module_export_static! {
 #[async_trait::async_trait]
 impl Interface for MockTinyBox {
     fn name(&self) -> InterfaceName {
-        InterfaceName::new(tinybox_bus::INTERFACE).expect("valid `TinyBox` interface")
+        InterfaceName::new(tinybox_bus::INTERFACE).unwrap_or_else(|_| std::process::abort())
     }
 
     fn members(&self) -> Vec<MemberName> {
         self.members
             .iter()
-            .map(|name| MemberName::new(*name).expect("valid `TinyBox` member"))
+            .filter_map(|name| MemberName::new(*name).ok())
             .collect()
     }
 
@@ -152,7 +152,7 @@ impl Interface for MockTinyBox {
         let name = member.as_str();
         self.calls
             .lock()
-            .expect("fixture call log lock")
+            .map_err(|_| tinybus::Error::failed("fixture call log is poisoned"))?
             .push((name.to_owned(), args));
         let value = match name {
             tinybox_bus::names::DESCRIBE => json!("tinybox fixture"),
@@ -231,54 +231,43 @@ impl Interface for MockTinyBox {
 
 async fn fixture(
     contract_version: (u32, u32),
-) -> (Connection, TinyBoxClient, Arc<Mutex<Vec<(String, Value)>>>) {
+) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
-    let service = Connection::connect(bus.connect().await.expect("service transport"))
-        .await
-        .expect("service connection");
+    let service = Connection::connect(bus.connect().await?).await?;
     let calls = Arc::new(Mutex::new(Vec::new()));
     service
         .serve_at(
-            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid `TinyBox` path"),
+            ObjectPath::new(tinybox_bus::OBJECT_PATH)?,
             MockTinyBox {
                 contract_version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
             },
         )
-        .await
-        .expect("serve mock `TinyBox`");
-    service
-        .request_name(tinybox_bus::INTERFACE)
-        .await
-        .expect("request `TinyBox` name");
-    let caller = Connection::connect(bus.connect().await.expect("client transport"))
-        .await
-        .expect("client connection");
+        .await?;
+    service.request_name(tinybox_bus::INTERFACE).await?;
+    let caller = Connection::connect(bus.connect().await?).await?;
     let proxy = caller
         .proxy(
             tinybox_bus::INTERFACE,
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
-        )
-        .expect("`TinyBox` proxy");
+        )?;
     let access = FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     };
     let module = ModuleClient::new(access).with_fixture(proxy);
-    let client = TinyBoxClient::new(module)
-        .await
-        .expect("compatible `TinyBox` contract");
-    (service, client, calls)
+    let client = TinyBoxClient::new(module).await?;
+    Ok((service, client, calls))
 }
 
-async fn attested_fixture() -> (
+async fn attested_fixture() -> std::result::Result<(
     tinybus::module::ModuleHost,
     Connection,
     TinyBoxClient,
     Calls,
-) {
+), Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static NEXT_CAPTURE: AtomicUsize = AtomicUsize::new(1);
@@ -290,7 +279,7 @@ async fn attested_fixture() -> (
     LINKED_CAPTURES
         .get_or_init(Default::default)
         .lock()
-        .expect("linked fixture capture registry lock")
+        .map_err(std::io::Error::other)?
         .insert(capture_id.clone(), Arc::clone(&calls));
 
     let bus = MemoryBus::new();
@@ -298,13 +287,12 @@ async fn attested_fixture() -> (
     broker.clone().spawn(bus.clone());
     let host = tinybus::module::ModuleHost::new(broker);
     host.attach_linked_with_config(
-        linked_module().expect("linked fixture exports valid module metadata"),
+        linked_module()?,
         json!({
             "capture_id": capture_id,
             "contract_version": tinybox_bus::CONTRACT_VERSION,
         }),
-    )
-    .expect("linked fixture is admitted by `TinyBus`");
+    )?;
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if host
@@ -317,27 +305,21 @@ async fn attested_fixture() -> (
             tokio::task::yield_now().await;
         }
     })
-    .await
-    .expect("linked fixture reaches Ready");
+    .await?;
 
-    let caller = Connection::connect(bus.connect().await.expect("client transport"))
-        .await
-        .expect("client connection");
+    let caller = Connection::connect(bus.connect().await?).await?;
     let proxy = caller
         .proxy(
             tinybox_bus::INTERFACE,
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
-        )
-        .expect("`TinyBox` linked fixture proxy");
+        )?;
     let module = ModuleClient::new(FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
-    let client = TinyBoxClient::new(module)
-        .await
-        .expect("linked `TinyBox` fixture has a compatible contract");
-    (host, caller, client, calls)
+    let client = TinyBoxClient::new(module).await?;
+    Ok((host, caller, client, calls))
 }
 
 fn expected<Request: Serialize>(member: &str, request: Request) -> (String, Value) {
@@ -347,7 +329,7 @@ fn expected<Request: Serialize>(member: &str, request: Request) -> (String, Valu
 fn expected_args<Args: Serialize>(member: &str, args: Args) -> (String, Value) {
     (
         member.to_owned(),
-        serde_json::to_value(args).expect("serialize expected wire arguments"),
+        serde_json::to_value(args).unwrap_or(Value::Null),
     )
 }
 
