@@ -1,4 +1,4 @@
-//! In-memory `TinyBus` tests for the typed TinyBox host client.
+//! In-memory `TinyBus` tests for the typed `TinyBox` host client.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -85,7 +85,7 @@ impl ModuleAccess for FixtureAccess {
     }
 }
 
-struct MockTinyBox {
+struct Mock`TinyBox` {
     contract_version: (u32, u32),
     calls: Calls,
     members: &'static [&'static str],
@@ -109,7 +109,7 @@ async fn linked_fixture_setup(
     connection
         .serve_at(
             ObjectPath::new(tinybox_bus::OBJECT_PATH)?,
-            MockTinyBox {
+            Mock`TinyBox` {
                 contract_version: config.contract_version,
                 calls,
                 members: ATTESTED_METHODS,
@@ -136,15 +136,15 @@ tinybus_module::module_export_static! {
 }
 
 #[async_trait::async_trait]
-impl Interface for MockTinyBox {
+impl Interface for Mock`TinyBox` {
     fn name(&self) -> InterfaceName {
-        InterfaceName::new(tinybox_bus::INTERFACE).expect("valid TinyBox interface")
+        InterfaceName::new(tinybox_bus::INTERFACE).expect("valid `TinyBox` interface")
     }
 
     fn members(&self) -> Vec<MemberName> {
         self.members
             .iter()
-            .map(|name| MemberName::new(*name).expect("valid TinyBox member"))
+            .map(|name| MemberName::new(*name).expect("valid `TinyBox` member"))
             .collect()
     }
 
@@ -231,7 +231,7 @@ impl Interface for MockTinyBox {
 
 async fn fixture(
     contract_version: (u32, u32),
-) -> (Connection, TinyBoxClient, Arc<Mutex<Vec<(String, Value)>>>) {
+) -> (Connection, `TinyBox`Client, Arc<Mutex<Vec<(String, Value)>>>) {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
     let service = Connection::connect(bus.connect().await.expect("service transport"))
@@ -240,19 +240,19 @@ async fn fixture(
     let calls = Arc::new(Mutex::new(Vec::new()));
     service
         .serve_at(
-            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid TinyBox path"),
-            MockTinyBox {
+            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid `TinyBox` path"),
+            Mock`TinyBox` {
                 contract_version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
             },
         )
         .await
-        .expect("serve mock TinyBox");
+        .expect("serve mock `TinyBox`");
     service
         .request_name(tinybox_bus::INTERFACE)
         .await
-        .expect("request TinyBox name");
+        .expect("request `TinyBox` name");
     let caller = Connection::connect(bus.connect().await.expect("client transport"))
         .await
         .expect("client connection");
@@ -262,21 +262,21 @@ async fn fixture(
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
         )
-        .expect("TinyBox proxy");
+        .expect("`TinyBox` proxy");
     let access = FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     };
     let module = ModuleClient::new(access).with_fixture(proxy);
-    let client = TinyBoxClient::new(module)
+    let client = `TinyBox`Client::new(module)
         .await
-        .expect("compatible TinyBox contract");
+        .expect("compatible `TinyBox` contract");
     (service, client, calls)
 }
 
 async fn attested_fixture() -> (
     tinybus::module::ModuleHost,
     Connection,
-    TinyBoxClient,
+    `TinyBox`Client,
     Calls,
 ) {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -329,14 +329,14 @@ async fn attested_fixture() -> (
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
         )
-        .expect("TinyBox linked fixture proxy");
+        .expect("`TinyBox` linked fixture proxy");
     let module = ModuleClient::new(FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
-    let client = TinyBoxClient::new(module)
+    let client = `TinyBox`Client::new(module)
         .await
-        .expect("linked TinyBox fixture has a compatible contract");
+        .expect("linked `TinyBox` fixture has a compatible contract");
     (host, caller, client, calls)
 }
 
@@ -425,19 +425,19 @@ async fn incompatible_fixture(
     let calls = Arc::new(Mutex::new(Vec::new()));
     service
         .serve_at(
-            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid TinyBox path"),
-            MockTinyBox {
+            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid `TinyBox` path"),
+            Mock`TinyBox` {
                 contract_version: version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
             },
         )
         .await
-        .expect("serve mock TinyBox");
+        .expect("serve mock `TinyBox`");
     service
         .request_name(tinybox_bus::INTERFACE)
         .await
-        .expect("request TinyBox name");
+        .expect("request `TinyBox` name");
     let caller = Connection::connect(bus.connect().await.expect("client transport"))
         .await
         .expect("client connection");
@@ -447,12 +447,12 @@ async fn incompatible_fixture(
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
         )
-        .expect("TinyBox proxy");
+        .expect("`TinyBox` proxy");
     let module = ModuleClient::new(FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
-    assert!(TinyBoxClient::new(module).await.is_err());
+    assert!(`TinyBox`Client::new(module).await.is_err());
     (service, calls)
 }
 
