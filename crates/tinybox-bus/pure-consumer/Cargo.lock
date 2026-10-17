@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-bus"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "serde",
  "tinystoragedrivers-bus",

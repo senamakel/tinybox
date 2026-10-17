@@ -61,7 +61,7 @@ source = "{source}"
 
 
 VALID_TREE = """tinybox-bus-pure-consumer v0.1.0
-tinybox-bus v0.1.37 [default]
+tinybox-bus v0.1.38 [default]
 tinystoragedrivers-bus v1.5.0 []
 serde v1.0.0 [default, derive, std]
 """
@@ -71,7 +71,7 @@ class PureBusConsumerProofTests(unittest.TestCase):
     def test_accepts_exact_published_dependency_and_normal_build_feature_graph(self):
         validate_manifest(manifest())
         validate_lockfile(lockfile())
-        validate_dependency_graph(VALID_TREE, "0.1.37")
+        validate_dependency_graph(VALID_TREE, "0.1.38")
 
     def test_rejects_old_published_release_even_when_it_was_the_previous_expected_pin(self):
         with self.assertRaisesRegex(ProofError, "version and source"):
@@ -104,22 +104,22 @@ class PureBusConsumerProofTests(unittest.TestCase):
         bad_trees = (
             VALID_TREE.replace("tinystoragedrivers-bus v1.5.0 []", "tinystoragedrivers-bus v1.5.0 [client]"),
             VALID_TREE + "tinystoragedrivers-client v1.5.0\n",
-            VALID_TREE + "tinybox-module v0.1.37\n",
+            VALID_TREE + "tinybox-module v0.1.38\n",
             VALID_TREE + "tokio v1.0.0 [rt]\n",
             VALID_TREE + "sqlx v0.8.0\n",
         )
         for tree in bad_trees:
             with self.subTest(tree=tree), self.assertRaises(ProofError):
-                validate_dependency_graph(tree, "0.1.37")
+                validate_dependency_graph(tree, "0.1.38")
 
     def test_rejects_missing_duplicate_or_wrong_versions_in_the_resolved_graph(self):
         for tree in (
-            "tinybox-bus-pure-consumer v0.1.0\ntinybox-bus v0.1.37\n",
+            "tinybox-bus-pure-consumer v0.1.0\ntinybox-bus v0.1.38\n",
             VALID_TREE + "tinystoragedrivers-bus v1.3.0\n",
             VALID_TREE + "tinybox-bus v0.1.36\n",
         ):
             with self.subTest(tree=tree), self.assertRaises(ProofError):
-                validate_dependency_graph(tree, "0.1.37")
+                validate_dependency_graph(tree, "0.1.38")
 
     def test_proof_command_covers_normal_build_edges_and_enabled_features(self):
         script = (ROOT / "scripts/test-pure-bus-consumer.sh").read_text()
