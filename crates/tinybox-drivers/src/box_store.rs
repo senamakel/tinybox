@@ -45,9 +45,10 @@ impl DocumentBoxStore {
         let bridge = Blocking::new().map_err(|error| store_error("open", &error))?;
         let store = Self { documents, bridge };
         let docs = Arc::clone(&store.documents);
-        store.run("open", async move {
-            docs.ensure_collection(&collection).await
-        })?;
+        store.run(
+            "open",
+            async move { docs.ensure_collection(&collection).await },
+        )?;
         log::debug!("[tinybox_drivers] box store ready collection={BOX_COLLECTION}");
         Ok(store)
     }

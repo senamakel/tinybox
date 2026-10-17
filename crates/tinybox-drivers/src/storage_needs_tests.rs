@@ -1,12 +1,14 @@
+//! The document drivers persist exactly the schemas declared by tinybox-bus.
+
 use super::*;
+use tinybox_bus::{CollectionSpec, IndexSpec, STORAGE_NEEDS, SearchSpec};
 use tinystoragedrivers_core::{
     Blocking, DocumentStore, IndexSpec as DriverIndexSpec, MemoryStorage, Scope, StorageBackend,
 };
-use tinybox_bus::{CollectionSpec, IndexSpec, SearchSpec, STORAGE_NEEDS};
 
 #[test]
-fn stores_create_every_collection_the_bus_declares(
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn stores_create_every_collection_the_bus_declares()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let storage = MemoryStorage::new().for_scope(&Scope::local())?;
     let documents: Arc<dyn DocumentStore> = storage.documents().clone();
     DocumentBoxStore::new(Arc::clone(&documents))?;
@@ -45,11 +47,7 @@ fn conversion_preserves_indexes_expiry_and_search_fields() {
         to_driver_collection_spec(&declaration),
         tinystoragedrivers_core::CollectionSpec {
             name: "tinybox_example".into(),
-            indexes: vec![DriverIndexSpec::new(
-                "by_owner",
-                ["owner.id", "state"]
-            )
-            .unique()],
+            indexes: vec![DriverIndexSpec::new("by_owner", ["owner.id", "state"]).unique()],
             ttl_field: Some("expires_ms".into()),
             search: Some(tinystoragedrivers_core::SearchSpec {
                 fields: vec!["title".into(), "description".into()],

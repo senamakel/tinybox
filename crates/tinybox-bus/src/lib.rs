@@ -49,7 +49,7 @@ pub use files::{
 };
 mod storage;
 pub use storage::{
-    BOX_COLLECTION, CollectionSpec, IndexSpec, JAIL_INDEX_COLLECTION, SearchSpec, STORAGE_NEEDS,
+    BOX_COLLECTION, CollectionSpec, IndexSpec, JAIL_INDEX_COLLECTION, STORAGE_NEEDS, SearchSpec,
     StorageNeeds,
 };
 
