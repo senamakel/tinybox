@@ -20,9 +20,9 @@ def workspace_version():
 
 EXPECTED_CARGO_CALLS = [
     "test --locked --workspace",
-    "test --locked --workspace --all-features",
     f"run --locked --manifest-path {PURE_CONSUMER} --target-dir target",
     f"tree --locked --manifest-path {PURE_CONSUMER} --prefix none --format {{p}} {{f}} -e normal,build",
+    "test --locked --workspace --all-features",
 ]
 
 def fake_cargo():
