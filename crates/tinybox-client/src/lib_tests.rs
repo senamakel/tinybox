@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use serde::Serialize;
 use serde::Deserialize;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::{Value, json};
 use tinybus::broker::Broker;
 use tinybus::module::{
@@ -86,6 +87,50 @@ struct MockTinyBox {
     contract_version: (u32, u32),
     calls: Calls,
     members: &'static [&'static str],
+}
+
+#[derive(Deserialize)]
+struct LinkedFixtureConfig {
+    capture_id: String,
+    contract_version: (u32, u32),
+}
+
+async fn linked_fixture_setup(
+    connection: Connection,
+    config: LinkedFixtureConfig,
+) -> tinybus::Result<()> {
+    let calls = LINKED_CAPTURES
+        .get()
+        .and_then(|captures| captures.lock().ok())
+        .and_then(|captures| captures.get(&config.capture_id).cloned())
+        .ok_or_else(|| tinybus::Error::failed("linked fixture capture is missing"))?;
+    connection
+        .serve_at(
+            ObjectPath::new(tinybox_bus::OBJECT_PATH)?,
+            MockTinyBox {
+                contract_version: config.contract_version,
+                calls,
+                members: ATTESTED_METHODS,
+            },
+        )
+        .await?;
+    connection.request_name(tinybox_bus::INTERFACE).await
+}
+
+tinybus_module::module_export_static! {
+    setup = linked_fixture_setup,
+    config = LinkedFixtureConfig,
+    worker_threads = 1,
+    provides = ["ai.tinyhumans.tinybox.Box"],
+    methods = [
+        "Capabilities", "Create", "Exec", "Spawn", "StartExec",
+        "StartJailedExec", "StartNativeShellExec", "WriteFileChunk",
+        "RunDocker", "RunDockerWithoutWorkspace"
+    ],
+    signals = [],
+    requires = [],
+    optional = [],
+    lazy = false,
 }
 
 #[async_trait::async_trait]
@@ -226,10 +271,81 @@ async fn fixture(
     (service, client, calls)
 }
 
+async fn attested_fixture() -> (
+    tinybus::module::ModuleHost,
+    Connection,
+    TinyBoxClient,
+    Calls,
+) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_CAPTURE: AtomicUsize = AtomicUsize::new(1);
+    let capture_id = format!(
+        "tinybox-client-{}",
+        NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed)
+    );
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    LINKED_CAPTURES
+        .get_or_init(Default::default)
+        .lock()
+        .expect("linked fixture capture registry lock")
+        .insert(capture_id.clone(), Arc::clone(&calls));
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    broker.clone().spawn(bus.clone());
+    let host = tinybus::module::ModuleHost::new(broker);
+    host.attach_linked_with_config(
+        linked_module().expect("linked fixture exports valid module metadata"),
+        json!({
+            "capture_id": capture_id,
+            "contract_version": tinybox_bus::CONTRACT_VERSION,
+        }),
+    )
+    .expect("linked fixture is admitted by TinyBus");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if host
+                .list()
+                .iter()
+                .any(|module| matches!(module.state, tinybus::module::ModuleState::Ready))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("linked fixture reaches Ready");
+
+    let caller = Connection::connect(bus.connect().await.expect("client transport"))
+        .await
+        .expect("client connection");
+    let proxy = caller
+        .proxy(
+            tinybox_bus::INTERFACE,
+            tinybox_bus::OBJECT_PATH,
+            tinybox_bus::INTERFACE,
+        )
+        .expect("TinyBox linked fixture proxy");
+    let module = ModuleClient::new(FixtureAccess {
+        reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
+    })
+    .with_fixture(proxy);
+    let client = TinyBoxClient::new(MODULE_ID, module)
+        .await
+        .expect("linked TinyBox fixture has a compatible contract");
+    (host, caller, client, calls)
+}
+
 fn expected<Request: Serialize>(member: &str, request: Request) -> (String, Value) {
+    expected_args(member, (request,))
+}
+
+fn expected_args<Args: Serialize>(member: &str, args: Args) -> (String, Value) {
     (
         member.to_owned(),
-        serde_json::to_value((request,)).expect("serialize expected wire arguments"),
+        serde_json::to_value(args).expect("serialize expected wire arguments"),
     )
 }
 
@@ -619,6 +735,143 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         "only the construction capability probe reaches the un-attested fixture"
     );
     assert_eq!(calls[0].0, tinybox_bus::names::CAPABILITIES);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attested_linked_module_accepts_every_confidential_wrapper()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_host, _caller, client, calls) = attested_fixture().await;
+    let resource = tinybox_bus::ResourceId("resource-1".into());
+    let process = tinybox_bus::ResourceId("process-1".into());
+    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
+
+    let create = tinybox_bus::CreateRequest::default();
+    assert_eq!(client.create(create.clone()).await?.backend, "docker");
+    expected_calls.push(expected(tinybox_bus::names::CREATE, create));
+
+    let exec = tinybox_bus::ExecRequest {
+        resource: resource.clone(),
+        argv: vec!["printf".into(), "hello".into()],
+        cwd: None,
+        env: Default::default(),
+        stdin: None,
+    };
+    assert_eq!(client.exec(exec.clone()).await?.exit_code, 0);
+    expected_calls.push(expected(tinybox_bus::names::EXEC, exec));
+
+    let spawn = tinybox_bus::SpawnRequest {
+        process: process.clone(),
+        command: tinybox_bus::ExecRequest {
+            resource: resource.clone(),
+            argv: vec!["printf".into(), "hello".into()],
+            cwd: None,
+            env: Default::default(),
+            stdin: None,
+        },
+    };
+    assert_eq!(client.spawn(spawn.clone()).await?.process, process);
+    expected_calls.push(expected(tinybox_bus::names::SPAWN, spawn.clone()));
+    assert_eq!(client.start_exec(spawn.clone()).await?.resource, resource);
+    expected_calls.push(expected(tinybox_bus::names::START_EXEC, spawn.clone()));
+
+    let jail = tinybox_bus::NativeJailConfig {
+        read_only: vec!["/usr".into()],
+        read_write: vec!["/workspace".into()],
+        allow_net: false,
+        allow_subprocess: false,
+        enforcement: tinybox_bus::JailEnforcement::Enforced,
+        require_process_isolation: true,
+        deny_read: vec!["/home/user/.ssh".into()],
+    };
+    assert_eq!(
+        client
+            .start_jailed_exec(spawn.clone(), jail.clone())
+            .await?
+            .process,
+        process
+    );
+    expected_calls.push(expected_args(
+        tinybox_bus::names::START_JAILED_EXEC,
+        (spawn, jail),
+    ));
+
+    let shell = tinybox_bus::ShellExecRequest {
+        process: tinybox_bus::ResourceId("process-1".into()),
+        resource: tinybox_bus::ResourceId("resource-1".into()),
+        shell: tinybox_bus::SelectShellRequest {
+            command: "printf hello".into(),
+            preserve_pipeline_status: false,
+            runtime_path: Some("/opt/bin".into()),
+            python_utf8: true,
+        },
+        cwd: Some("/workspace".into()),
+        extra_env: Default::default(),
+        state_dir: "/private/state".into(),
+        timeout_ms: 5_000,
+        stdin: None,
+        jail: None,
+        hide_window: false,
+    };
+    assert_eq!(
+        client
+            .start_native_shell_exec(shell.clone())
+            .await?
+            .process
+            .0,
+        "process-1"
+    );
+    expected_calls.push(expected(tinybox_bus::names::START_NATIVE_SHELL_EXEC, shell));
+
+    let write = tinybox_bus::WriteFileChunkRequest {
+        resource: tinybox_bus::ResourceId("resource-1".into()),
+        transfer: tinybox_bus::ResourceId("write-1".into()),
+        offset: 0,
+        bytes: b"payload".to_vec(),
+    };
+    assert_eq!(client.write_file_chunk(write.clone()).await?.next_offset, 0);
+    expected_calls.push(expected(tinybox_bus::names::WRITE_FILE_CHUNK, write));
+
+    let docker = tinybox_bus::DockerRunRequest {
+        workspace: "/workspace".into(),
+        image: Some("alpine:latest".into()),
+        command: "printf hello".into(),
+        login_shell: false,
+        network: Some("none".into()),
+        memory_limit_mb: Some(128),
+        cpus: Some(1.0),
+        read_only_rootfs: Some(true),
+        read_only_mounts: Vec::new(),
+        extra_cap_drops: Vec::new(),
+        env: Default::default(),
+        label: Some("openhuman.sandbox=true".into()),
+        timeout_ms: 10_000,
+    };
+    assert_eq!(client.run_docker(docker.clone()).await?.stdout, "ok");
+    expected_calls.push(expected(tinybox_bus::names::RUN_DOCKER, docker.clone()));
+    let without_workspace = tinybox_bus::DockerRunRequest {
+        workspace: String::new(),
+        ..docker
+    };
+    assert_eq!(
+        client
+            .run_docker_without_workspace(without_workspace.clone())
+            .await?
+            .exit_code,
+        0
+    );
+    expected_calls.push(expected(
+        tinybox_bus::names::RUN_DOCKER_WITHOUT_WORKSPACE,
+        without_workspace,
+    ));
+
+    assert_eq!(
+        calls
+            .lock()
+            .expect("linked fixture call log lock")
+            .as_slice(),
+        expected_calls
+    );
+    Ok(())
 }
 
 #[test]
