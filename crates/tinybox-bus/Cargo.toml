@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 # The bus boundary contains data only; serialization is its sole dependency.
 serde.workspace = true
+tinystoragedrivers-bus.workspace = true
 
 [dev-dependencies]
 # Round-trip tests pin the serialized public vocabulary.

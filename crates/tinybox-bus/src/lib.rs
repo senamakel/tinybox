@@ -47,6 +47,8 @@ pub use files::{
     FileWriteInfo, FileWriteProgress, FinishFileReadRequest, FinishFileWriteRequest,
     ReadFileChunkRequest, WriteFileChunkRequest,
 };
+mod storage;
+pub use storage::{BOX_COLLECTION, JAIL_INDEX_COLLECTION, STORAGE_NEEDS};
 
 /// Wire vocabulary version, independent of the release workflow's package version.
 ///
