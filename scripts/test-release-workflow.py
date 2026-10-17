@@ -58,7 +58,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 GITHUB_OUTPUT=str(output),
             )
             result = subprocess.run(
-                ["bash", "-c", self.script], env=env, text=True, capture_output=True
+                ["bash", "-c", self.script],
+                cwd=directory,
+                env=env,
+                text=True,
+                capture_output=True,
             )
             return result, output.read_text() if output.exists() else ""
 
@@ -69,6 +73,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         result, output = self.run_resolve()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("release_mode=main", output)
+        self.assertIn("reviewed_pr=0", output)
+
+    def test_resolve_script_runs_without_a_repository_checkout_as_cwd(self):
+        result, output = self.run_resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tag=v1.2.3", output)
+        self.assertIn("version=1.2.3", output)
         self.assertIn("reviewed_pr=0", output)
 
     def test_reviewed_epic_accepts_and_forwards_positive_integer_pr(self):
@@ -113,6 +124,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr) }}", self.workflow)
         self.assertNotIn("inputs.package", self.workflow)
         self.assertNotIn("inputs.repo", self.workflow)
+
+    def test_reviewed_route_uses_the_pinned_canonical_admission_workflow(self):
+        reviewed = job_block(self.workflow, "module-reviewed-epic-release")
+        self.assertRegex(
+            reviewed,
+            r"(?m)^    uses: tinyhumansai/\.github/\.github/workflows/"
+            r"module-reviewed-epic-release\.yml@837d0424c7f38e4293f41c795f12ed5eb5dd7280$",
+        )
+        self.assertIn(
+            "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr) }}",
+            reviewed,
+        )
+        self.assertNotRegex(reviewed, r"(?m)^      - uses: actions/checkout@")
 
     def test_release_routes_are_exclusive_and_permissions_are_minimal(self):
         ordinary = job_block(self.workflow, "module-release")
