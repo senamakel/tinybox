@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use tinystoragedrivers_bus::{CollectionSpec, StorageNeeds};
+pub use tinystoragedrivers_bus::{CollectionSpec, IndexSpec, SearchSpec, StorageNeeds};
 
 /// Collection holding one document per box record, keyed by box id.
 pub const BOX_COLLECTION: &str = "tinybox_boxes";

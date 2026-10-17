@@ -424,6 +424,12 @@ Adding a field to a stored type is a compatibility question: `ports` and
 `stdin` are `#[serde(default)]` so a store written by an earlier build still
 loads. Failing to read it would orphan every box a user already had.
 
+The TinyBus module requests its persisted storage in `tinybox-bus` through the
+canonical `StorageNeeds` contract. It declares `tinybox_boxes` for box records
+and `tinybox_jail_index` for jail registry indexes. The document drivers use
+those same collection schemas when opening their stores; the host remains
+responsible for authorizing the requested resources.
+
 Two things protect the file, and they solve different problems. Writes are
 **atomic** via a temporary file and a rename, so a reader never sees a partial
 document. Read-modify-write sequences are **locked**, because atomicity alone

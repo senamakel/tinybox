@@ -19,10 +19,54 @@
 mod box_store;
 mod index_store;
 
-pub use box_store::{BOX_COLLECTION, DocumentBoxStore};
-pub use index_store::{DocumentIndexStore, JAIL_INDEX_COLLECTION};
+pub use box_store::DocumentBoxStore;
+pub use index_store::DocumentIndexStore;
+pub use tinybox_bus::{BOX_COLLECTION, JAIL_INDEX_COLLECTION};
+
+fn collection_spec(name: &str) -> tinybox_core::Result<tinystoragedrivers_core::CollectionSpec> {
+    let declaration = tinybox_bus::STORAGE_NEEDS
+        .collections
+        .iter()
+        .find(|declaration| declaration.name == name)
+        .ok_or_else(|| tinybox_core::Error::Store {
+            operation: "open",
+            message: format!("storage needs do not declare collection `{name}`"),
+        })?;
+
+    Ok(to_driver_collection_spec(declaration))
+}
+
+fn to_driver_collection_spec(
+    declaration: &tinybox_bus::CollectionSpec,
+) -> tinystoragedrivers_core::CollectionSpec {
+    tinystoragedrivers_core::CollectionSpec {
+        name: declaration.name.clone(),
+        indexes: declaration
+            .indexes
+            .iter()
+            .map(|index| {
+                let spec = tinystoragedrivers_core::IndexSpec::new(
+                    index.name.clone(),
+                    index.fields.clone(),
+                );
+                if index.unique { spec.unique() } else { spec }
+            })
+            .collect(),
+        ttl_field: declaration.ttl_field.clone(),
+        search: declaration
+            .search
+            .as_ref()
+            .map(|search| tinystoragedrivers_core::SearchSpec {
+                fields: search.fields.clone(),
+            }),
+    }
+}
 
 #[cfg(test)]
 #[path = "faulty_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod faulty;
+
+#[cfg(test)]
+#[path = "storage_needs_tests.rs"]
+mod storage_needs_tests;

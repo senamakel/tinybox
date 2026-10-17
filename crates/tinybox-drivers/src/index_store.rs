@@ -5,12 +5,9 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tinybox_jail::IndexStore;
-use tinystoragedrivers_core::{
-    Blocking, CollectionSpec, DocumentStore, ErrorKind, Precondition, StorageError,
-};
+use tinystoragedrivers_core::{Blocking, DocumentStore, ErrorKind, Precondition, StorageError};
 
-/// The collection that holds one index document per registry.
-pub const JAIL_INDEX_COLLECTION: &str = "tinybox_jail_index";
+use crate::JAIL_INDEX_COLLECTION;
 
 /// A jail registry's index as one document, `tinybox_jail_index/<registry>`.
 ///
@@ -41,13 +38,12 @@ impl DocumentIndexStore {
     /// Returns an error when the bridge cannot start or the backend refuses
     /// the collection.
     pub fn new(documents: Arc<dyn DocumentStore>, registry: impl Into<String>) -> io::Result<Self> {
+        let collection = crate::collection_spec(JAIL_INDEX_COLLECTION)
+            .map_err(|error| io::Error::other(error.to_string()))?;
         let bridge = Blocking::new().map_err(|e| to_io(&e))?;
         let docs = Arc::clone(&documents);
         bridge
-            .run(async move {
-                docs.ensure_collection(&CollectionSpec::new(JAIL_INDEX_COLLECTION))
-                    .await
-            })
+            .run(async move { docs.ensure_collection(&collection).await })
             .and_then(|inner| inner)
             .map_err(|e| to_io(&e))?;
         Ok(Self {

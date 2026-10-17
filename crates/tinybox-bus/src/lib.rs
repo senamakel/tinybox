@@ -48,7 +48,10 @@ pub use files::{
     ReadFileChunkRequest, WriteFileChunkRequest,
 };
 mod storage;
-pub use storage::{BOX_COLLECTION, JAIL_INDEX_COLLECTION, STORAGE_NEEDS};
+pub use storage::{
+    BOX_COLLECTION, CollectionSpec, IndexSpec, JAIL_INDEX_COLLECTION, SearchSpec, STORAGE_NEEDS,
+    StorageNeeds,
+};
 
 /// Wire vocabulary version, independent of the release workflow's package version.
 ///
