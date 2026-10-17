@@ -1,4 +1,4 @@
-//! Typed host calls to the TinyBox TinyBus module.
+//! Typed host calls to the TinyBox `TinyBus` module.
 //!
 //! Hosts construct and configure a [`tinybus::module::ModuleClient`], then
 //! create a [`TinyBoxClient`] from it. This crate owns TinyBox member names,
@@ -28,7 +28,7 @@ use tinybus::module::{ModuleCallError, ModuleClient};
 
 pub use tinybox_bus as contract;
 
-/// Stable TinyBus module identifier used by the TinyBox release registry.
+/// Stable `TinyBus` module identifier used by the TinyBox release registry.
 pub const MODULE_ID: &str = "tinybox";
 
 /// Additional transport time allowed after a bounded Docker operation.
@@ -41,7 +41,7 @@ pub type Result<T> = std::result::Result<T, ModuleCallError>;
 ///
 /// Construction reads the module's capabilities once and refuses an
 /// incompatible wire contract before exposing the operations. The wrapped
-/// TinyBus client is supplied by the host, so its configured default timeout
+/// `TinyBus` client is supplied by the host, so its configured default timeout
 /// remains in force for every operation without an operation-specific bound.
 #[derive(Clone)]
 pub struct TinyBoxClient {
@@ -68,7 +68,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module is unavailable,
+    /// Returns a sanitized `TinyBus` call error when the module is unavailable,
     /// its capabilities cannot be read, or its contract is incompatible.
     pub async fn new(client: ModuleClient) -> Result<Self> {
         let capabilities: contract::ModuleCapabilities = client
@@ -84,19 +84,16 @@ impl TinyBoxClient {
     }
 
     /// Return the capabilities captured during construction.
-    ///
-    /// # Errors
-    ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
-    pub async fn capabilities(&self) -> Result<contract::ModuleCapabilities> {
-        Ok(self.capabilities.clone())
+    #[must_use]
+    pub fn capabilities(&self) -> &contract::ModuleCapabilities {
+        &self.capabilities
     }
 
     /// Describe the loaded TinyBox module.
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn describe(&self) -> Result<String> {
         self.call(contract::names::DESCRIBE, (), false).await
     }
@@ -105,7 +102,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn jail_status(&self) -> Result<contract::JailStatus> {
         self.call(contract::names::JAIL_STATUS, (), false).await
     }
@@ -114,7 +111,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn reserve(&self, request: contract::ReserveRequest) -> Result<contract::ResourceId> {
         self.call(contract::names::RESERVE, (request,), false).await
     }
@@ -123,7 +120,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn create(&self, request: contract::CreateRequest) -> Result<contract::ResourceInfo> {
         self.call(contract::names::CREATE, (request,), true).await
     }
@@ -132,7 +129,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn exec(&self, request: contract::ExecRequest) -> Result<contract::ExecOutput> {
         self.call(contract::names::EXEC, (request,), true).await
     }
@@ -141,7 +138,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn inspect(&self, resource: contract::ResourceId) -> Result<contract::ResourceInfo> {
         self.call(contract::names::INSPECT, (resource,), false)
             .await
@@ -151,7 +148,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn close(&self, resource: contract::ResourceId) -> Result<()> {
         self.call(contract::names::CLOSE, (resource,), false).await
     }
@@ -160,7 +157,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn shutdown(&self) -> Result<()> {
         self.call(contract::names::SHUTDOWN, (), false).await
     }
@@ -169,7 +166,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn spawn(&self, request: contract::SpawnRequest) -> Result<contract::ProcessRef> {
         self.call(contract::names::SPAWN, (request,), true).await
     }
@@ -178,7 +175,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn start_exec(
         &self,
         request: contract::SpawnRequest,
@@ -191,7 +188,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn start_jailed_exec(
         &self,
         request: contract::SpawnRequest,
@@ -208,7 +205,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn select_shell(
         &self,
         request: contract::SelectShellRequest,
@@ -224,7 +221,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn start_native_shell_exec(
         &self,
         request: contract::ShellExecRequest,
@@ -237,7 +234,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn validate_docker_policy(
         &self,
         request: contract::DockerPolicyRequest,
@@ -253,7 +250,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn resolve_local_grants(
         &self,
         request: contract::ResolveLocalGrantsRequest,
@@ -270,7 +267,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn run_docker(
         &self,
         request: contract::DockerRunRequest,
@@ -284,7 +281,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn run_docker_without_workspace(
         &self,
         request: contract::DockerRunRequest,
@@ -303,7 +300,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn docker_status(
         &self,
         request: contract::DockerStatusRequest,
@@ -317,7 +314,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn cleanup_docker(
         &self,
         request: contract::CleanupDockerRequest,
@@ -331,7 +328,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn read_output(
         &self,
         process: contract::ProcessRef,
@@ -345,7 +342,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn release_output(&self, process: contract::ProcessRef) -> Result<()> {
         self.call(contract::names::RELEASE_OUTPUT, (process,), false)
             .await
@@ -355,7 +352,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn is_running(&self, process: contract::ProcessRef) -> Result<bool> {
         self.call(contract::names::IS_RUNNING, (process,), false)
             .await
@@ -365,7 +362,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn cancel(&self, process: contract::ProcessRef) -> Result<()> {
         self.call(contract::names::CANCEL, (process,), false).await
     }
@@ -374,7 +371,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn forward(
         &self,
         request: contract::ForwardRequest,
@@ -386,7 +383,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn close_forward(&self, request: contract::CloseForwardRequest) -> Result<()> {
         self.call(contract::names::CLOSE_FORWARD, (request,), false)
             .await
@@ -396,7 +393,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn analyze_shell(&self, command: String) -> Result<contract::ShellAnalysis> {
         self.call(contract::names::ANALYZE_SHELL, (command,), false)
             .await
@@ -406,7 +403,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn analyze_command(&self, command: String) -> Result<contract::CommandAnalysis> {
         self.call(contract::names::ANALYZE_COMMAND, (command,), false)
             .await
@@ -416,7 +413,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn begin_file_read(
         &self,
         request: contract::BeginFileReadRequest,
@@ -429,7 +426,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn read_file_chunk(
         &self,
         request: contract::ReadFileChunkRequest,
@@ -442,7 +439,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn finish_file_read(&self, request: contract::FinishFileReadRequest) -> Result<()> {
         self.call(contract::names::FINISH_FILE_READ, (request,), false)
             .await
@@ -452,7 +449,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn begin_file_write(
         &self,
         request: contract::BeginFileWriteRequest,
@@ -465,7 +462,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn write_file_chunk(
         &self,
         request: contract::WriteFileChunkRequest,
@@ -478,7 +475,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn finish_file_write(
         &self,
         request: contract::FinishFileWriteRequest,
@@ -491,7 +488,7 @@ impl TinyBoxClient {
     ///
     /// # Errors
     ///
-    /// Returns a sanitized TinyBus call error when the module call fails.
+    /// Returns a sanitized `TinyBus` call error when the module call fails.
     pub async fn abort_file_write(&self, request: contract::AbortFileWriteRequest) -> Result<()> {
         self.call(contract::names::ABORT_FILE_WRITE, (request,), false)
             .await
