@@ -279,9 +279,9 @@ async fn attested_fixture() -> std::result::Result<
     );
     let calls = Arc::new(Mutex::new(Vec::new()));
     LINKED_CAPTURES
-        .get_or_init(HashMap::new)
+        .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .map_err(std::io::Error::other)?
+        .map_err(|_| std::io::Error::other("linked fixture capture registry is poisoned"))?
         .insert(capture_id.clone(), Arc::clone(&calls));
 
     let bus = MemoryBus::new();
