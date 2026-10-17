@@ -19,6 +19,13 @@ esac
 python3 scripts/test-e2e-version.py
 cargo test --locked --workspace
 cargo test --locked --workspace --all-features
+pure_consumer=crates/tinybox-bus/pure-consumer/Cargo.toml
+cargo check --locked --manifest-path "$pure_consumer" --target-dir target
+dependency_tree="$(cargo tree --locked --manifest-path "$pure_consumer" -e normal)"
+if printf '%s\n' "$dependency_tree" | grep -Eq '(^|[[:space:]])tinybus v'; then
+  echo "tinybox-bus pure consumer unexpectedly depends on TinyBus" >&2
+  exit 1
+fi
 case "${RUNNER_OS:-$(uname -s)}" in
   Windows|MINGW*|MSYS*|CYGWIN*) ;;
   *)
