@@ -336,7 +336,7 @@ fn expected_args<Args: Serialize>(member: &str, args: Args) -> (String, Value) {
 #[tokio::test]
 async fn construction_checks_compatibility_once_across_typed_calls()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
+    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
     assert_eq!(client.describe().await?, "tinybox fixture");
     assert_eq!(
         client
@@ -363,13 +363,12 @@ async fn construction_checks_compatibility_once_across_typed_calls()
 }
 
 #[tokio::test]
-async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn std::error::Error>>
-{
+async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let version = (
         tinybox_bus::CONTRACT_VERSION.0,
         tinybox_bus::CONTRACT_VERSION.1 + 1,
     );
-    let (_service, client, calls) = fixture(version).await;
+    let (_service, client, calls) = fixture(version).await?;
     assert_eq!(client.capabilities().contract_version, version);
     assert_eq!(
         calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(),
@@ -380,7 +379,7 @@ async fn a_newer_minor_contract_is_accepted() -> std::result::Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn incompatible_contracts_are_rejected_before_any_typed_operation() {
+async fn incompatible_contracts_are_rejected_before_any_typed_operation() -> std::result::Result<(), Box<dyn std::error::Error>> {
     for version in [
         (
             tinybox_bus::CONTRACT_VERSION.0,
@@ -391,57 +390,49 @@ async fn incompatible_contracts_are_rejected_before_any_typed_operation() {
             tinybox_bus::CONTRACT_VERSION.1,
         ),
     ] {
-        let (_service, calls) = incompatible_fixture(version).await;
+        let (_service, calls) = incompatible_fixture(version).await?;
         assert_eq!(calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(), 1);
     }
+    Ok(())
 }
 
 async fn incompatible_fixture(
     version: (u32, u32),
-) -> (Connection, Arc<Mutex<Vec<(String, Value)>>>) {
+) -> std::result::Result<(Connection, Calls), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
-    let service = Connection::connect(bus.connect().await.expect("service transport"))
-        .await
-        .expect("service connection");
+    let service = Connection::connect(bus.connect().await?).await?;
     let calls = Arc::new(Mutex::new(Vec::new()));
     service
         .serve_at(
-            ObjectPath::new(tinybox_bus::OBJECT_PATH).expect("valid `TinyBox` path"),
+            ObjectPath::new(tinybox_bus::OBJECT_PATH)?,
             MockTinyBox {
                 contract_version: version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
             },
         )
-        .await
-        .expect("serve mock `TinyBox`");
-    service
-        .request_name(tinybox_bus::INTERFACE)
-        .await
-        .expect("request `TinyBox` name");
-    let caller = Connection::connect(bus.connect().await.expect("client transport"))
-        .await
-        .expect("client connection");
+        .await?;
+    service.request_name(tinybox_bus::INTERFACE).await?;
+    let caller = Connection::connect(bus.connect().await?).await?;
     let proxy = caller
         .proxy(
             tinybox_bus::INTERFACE,
             tinybox_bus::OBJECT_PATH,
             tinybox_bus::INTERFACE,
-        )
-        .expect("`TinyBox` proxy");
+        )?;
     let module = ModuleClient::new(FixtureAccess {
         reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
     })
     .with_fixture(proxy);
     assert!(TinyBoxClient::new(module).await.is_err());
-    (service, calls)
+    Ok((service, calls))
 }
 
 #[tokio::test]
 async fn ordinary_wrappers_preserve_canonical_members_typed_replies_and_wire_arguments()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
+    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
     let resource = tinybox_bus::ResourceId("resource-1".into());
     let process = tinybox_bus::ProcessRef {
         resource: resource.clone(),
