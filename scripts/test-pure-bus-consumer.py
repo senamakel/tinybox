@@ -82,7 +82,7 @@ class PureBusConsumerProofTests(unittest.TestCase):
             validate_lockfile(lockfile("1.5.0", f"git+{STORAGE_URL}?rev={wrong_rev}#{wrong_rev}"))
 
     def test_rejects_missing_or_duplicate_lock_resolution_evidence(self):
-        with self.assertRaisesRegex(ProofError, "missing"):
+        with self.assertRaisesRegex(ProofError, "resolution evidence"):
             validate_lockfile("version = 4\n")
         duplicated = lockfile() + lockfile().split("[[package]]\n", 2)[-1]
         with self.assertRaisesRegex(ProofError, "exactly one"):
