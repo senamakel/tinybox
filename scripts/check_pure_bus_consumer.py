@@ -3,7 +3,6 @@
 from pathlib import Path
 import re
 import sys
-import tomllib
 
 STORAGE_BUS_NAME = "tinystoragedrivers-bus"
 STORAGE_BUS_VERSION = "1.5.0"
@@ -25,21 +24,46 @@ class ProofError(ValueError):
     """The pure consumer did not resolve to the reviewed contract graph."""
 
 
-def _load_toml(contents: str, label: str) -> dict:
+def _inline_value(value: str):
+    value = value.strip()
+    if value in {"true", "false"}:
+        return value == "true"
+    match = re.fullmatch(r'"([^"\\]*)"', value)
+    if match is None:
+        raise ProofError("pure consumer manifest contains an unsupported dependency value")
+    return match.group(1)
+
+
+def _dependency_table(contents: str) -> dict:
+    lines = contents.splitlines()
     try:
-        value = tomllib.loads(contents)
-    except (tomllib.TOMLDecodeError, TypeError) as error:
-        raise ProofError(f"{label} is missing or malformed TOML") from error
-    if not isinstance(value, dict):
-        raise ProofError(f"{label} is missing or malformed TOML")
-    return value
+        start = lines.index("[dependencies]") + 1
+    except ValueError as error:
+        raise ProofError("pure consumer manifest has no direct dependencies") from error
+    dependencies = {}
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            break
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*=\s*\{(.*)\}\s*", stripped)
+        if match is None or match.group(1) in dependencies:
+            raise ProofError("pure consumer manifest has an unsupported or duplicate dependency entry")
+        values = {}
+        for assignment in match.group(2).split(","):
+            field = re.fullmatch(r"\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*", assignment)
+            if field is None or field.group(1) in values:
+                raise ProofError("pure consumer manifest has a malformed dependency table")
+            values[field.group(1)] = _inline_value(field.group(2))
+        dependencies[match.group(1)] = values
+    return dependencies
 
 
 def validate_manifest(contents: str) -> None:
     """Require a direct dependency on the canonical data-only storage bus."""
-    manifest = _load_toml(contents, "pure consumer manifest")
-    dependencies = manifest.get("dependencies")
-    if not isinstance(dependencies, dict) or set(dependencies) != {
+    dependencies = _dependency_table(contents)
+    if set(dependencies) != {
         "tinybox-bus", STORAGE_BUS_NAME,
     }:
         raise ProofError("pure consumer direct dependencies are not the exact bus pair")
@@ -57,16 +81,24 @@ def validate_manifest(contents: str) -> None:
 
 def validate_lockfile(contents: str) -> None:
     """Require one lock resolution with the exact canonical source identity."""
-    lockfile = _load_toml(contents, "pure consumer lockfile")
-    packages = lockfile.get("package")
-    if not isinstance(packages, list):
+    blocks = re.split(r"(?m)^\[\[package\]\]\s*$", contents)
+    if len(blocks) < 2:
         raise ProofError("pure consumer lockfile has no package resolution evidence")
-    matches = [package for package in packages
-               if isinstance(package, dict) and package.get("name") == STORAGE_BUS_NAME]
+    matches = []
+    for block in blocks[1:]:
+        names = re.findall(r'(?m)^name\s*=\s*"([^"\\]*)"\s*$', block)
+        if len(names) != 1:
+            raise ProofError("pure consumer lockfile has malformed package resolution evidence")
+        if names[0] == STORAGE_BUS_NAME:
+            matches.append(block)
     if len(matches) != 1:
         raise ProofError("pure consumer lockfile must resolve exactly one storage bus package")
     package = matches[0]
-    if package.get("version") != STORAGE_BUS_VERSION or package.get("source") != STORAGE_BUS_SOURCE:
+    versions = re.findall(r'(?m)^version\s*=\s*"([^"\\]*)"\s*$', package)
+    sources = re.findall(r'(?m)^source\s*=\s*"([^"\\]*)"\s*$', package)
+    if len(versions) != 1 or len(sources) != 1:
+        raise ProofError("pure consumer lockfile is missing storage bus source resolution evidence")
+    if versions[0] != STORAGE_BUS_VERSION or sources[0] != STORAGE_BUS_SOURCE:
         raise ProofError("pure consumer lockfile storage bus version and source do not match the published pin")
 
 
