@@ -84,7 +84,8 @@ class PureBusConsumerProofTests(unittest.TestCase):
     def test_rejects_missing_or_duplicate_lock_resolution_evidence(self):
         with self.assertRaisesRegex(ProofError, "resolution evidence"):
             validate_lockfile("version = 4\n")
-        duplicated = lockfile() + lockfile().split("[[package]]\n", 2)[-1]
+        duplicate_package = lockfile().split("[[package]]\n")[2]
+        duplicated = lockfile() + "\n[[package]]\n" + duplicate_package
         with self.assertRaisesRegex(ProofError, "exactly one"):
             validate_lockfile(duplicated)
 
