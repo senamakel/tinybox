@@ -32,6 +32,12 @@ digest in the adjacent allowlist. After publishing, it downloads the Ubuntu
 x86_64 archive through TinyBus's GitHub release API and calls `Describe` over an
 in-memory bus.
 
+The standalone `tinybox-bus/pure-consumer` workspace has its own committed lock
+because workspace feature unification would hide dependencies enabled by other
+TinyBox crates. Refresh that lock when the workspace version or storage
+metadata pin changes; CI runs the consumer with `--locked` and rejects runtime,
+transport, storage implementation, or TinyBox implementation dependencies.
+
 ## Additive resource interface
 
 `tinybox-bus` supplies the serialized vocabulary without TinyBus, Tokio, native
