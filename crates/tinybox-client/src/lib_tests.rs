@@ -197,7 +197,7 @@ impl Interface for MockTinyBox {
             tinybox_bus::names::RESOLVE_LOCAL_GRANTS => json!({
                 "read_only": [], "read_write": []
             }),
-            tinybox_bus::names::VALIDATE_DOCKER_POLICY => json!({}),
+            tinybox_bus::names::VALIDATE_DOCKER_POLICY => json!({ "issues": [] }),
             tinybox_bus::names::RUN_DOCKER | tinybox_bus::names::RUN_DOCKER_WITHOUT_WORKSPACE => {
                 json!({
                     "exit_code": 0, "stdout": "ok", "stderr": "", "timed_out": false
