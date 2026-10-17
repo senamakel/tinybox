@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tinybus::broker::Broker;
 use tinybus::module::{
     AccessFuture, FailureReport, FailureReporter, FailureSink, ModuleAccess, ModuleClient,
-    ProxyFailure, Reason, ReleaseRecord,
+    ProxyFailure, ReleaseRecord,
 };
 use tinybus::service::Interface;
 use tinybus::transport::memory::MemoryBus;
