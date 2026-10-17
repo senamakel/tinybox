@@ -596,11 +596,11 @@ async fn workspace_file_wrappers_preserve_typed_wire_calls()
 }
 
 #[tokio::test]
-async fn confidential_operations_fail_closed_without_ordinary_retry() {
-    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await;
+async fn confidential_operations_fail_closed_without_ordinary_retry()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
     let secret = "/private/marker";
-    let create = tinybox_bus::CreateRequest::default();
-    assert!(client.create(create).await.is_err());
+    assert!(client.create(tinybox_bus::CreateRequest::default()).await.is_err());
     let exec = tinybox_bus::ExecRequest {
         resource: tinybox_bus::ResourceId("resource-1".into()),
         argv: vec!["cat".into(), secret.into()],
@@ -608,21 +608,9 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         env: std::collections::BTreeMap::new(),
         stdin: None,
     };
-    let error = client
-        .exec(exec)
-        .await
-        .expect_err("confidential execution requires attestation");
-    assert!(!error.to_string().contains(secret));
-    let spawn = tinybox_bus::SpawnRequest {
-        process: tinybox_bus::ResourceId("process-1".into()),
-        command: tinybox_bus::ExecRequest {
-            resource: tinybox_bus::ResourceId("resource-1".into()),
-            argv: vec!["echo".into(), secret.into()],
-            cwd: None,
-            env: std::collections::BTreeMap::new(),
-            stdin: None,
-        },
-    };
+    let error = client.exec(exec).await.err();
+    assert!(error.as_ref().is_some_and(|error| !error.to_string().contains(secret)));
+    let spawn = spawn_request(secret);
     assert!(client.spawn(spawn.clone()).await.is_err());
     assert!(client.start_exec(spawn.clone()).await.is_err());
     let jail = tinybox_bus::NativeJailConfig {
@@ -635,24 +623,8 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         deny_read: Vec::new(),
     };
     assert!(client.start_jailed_exec(spawn, jail).await.is_err());
-    let shell_exec = tinybox_bus::ShellExecRequest {
-        process: tinybox_bus::ResourceId("process-1".into()),
-        resource: tinybox_bus::ResourceId("resource-1".into()),
-        shell: tinybox_bus::SelectShellRequest {
-            command: format!("echo {secret}"),
-            preserve_pipeline_status: false,
-            runtime_path: None,
-            python_utf8: false,
-        },
-        cwd: None,
-        extra_env: std::collections::BTreeMap::new(),
-        state_dir: "/private/state".into(),
-        timeout_ms: 1000,
-        stdin: None,
-        jail: None,
-        hide_window: false,
-    };
-    assert!(client.start_native_shell_exec(shell_exec).await.is_err());
+    let shell = shell_exec_request(secret);
+    assert!(client.start_native_shell_exec(shell).await.is_err());
     let write = tinybox_bus::WriteFileChunkRequest {
         resource: tinybox_bus::ResourceId("resource-1".into()),
         transfer: tinybox_bus::ResourceId("write-1".into()),
@@ -660,10 +632,56 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         bytes: secret.as_bytes().to_vec(),
     };
     assert!(client.write_file_chunk(write).await.is_err());
-    let docker = tinybox_bus::DockerRunRequest {
+    let docker = docker_request(format!("echo {secret}"));
+    assert!(client.run_docker(docker.clone()).await.is_err());
+    assert!(client.run_docker_without_workspace(tinybox_bus::DockerRunRequest {
+        workspace: String::new(),
+        ..docker
+    }).await.is_err());
+    let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert_eq!(calls.len(), 1, "only the construction probe reaches an un-attested fixture");
+    assert_eq!(calls[0].0, tinybox_bus::names::CAPABILITIES);
+    Ok(())
+}
+
+fn spawn_request(command: &str) -> tinybox_bus::SpawnRequest {
+    tinybox_bus::SpawnRequest {
+        process: tinybox_bus::ResourceId("process-1".into()),
+        command: tinybox_bus::ExecRequest {
+            resource: tinybox_bus::ResourceId("resource-1".into()),
+            argv: vec!["echo".into(), command.into()],
+            cwd: None,
+            env: std::collections::BTreeMap::new(),
+            stdin: None,
+        },
+    }
+}
+
+fn shell_exec_request(command: &str) -> tinybox_bus::ShellExecRequest {
+    tinybox_bus::ShellExecRequest {
+        process: tinybox_bus::ResourceId("process-1".into()),
+        resource: tinybox_bus::ResourceId("resource-1".into()),
+        shell: tinybox_bus::SelectShellRequest {
+            command: format!("echo {command}"),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir: "/private/state".into(),
+        timeout_ms: 1_000,
+        stdin: None,
+        jail: None,
+        hide_window: false,
+    }
+}
+
+fn docker_request(command: String) -> tinybox_bus::DockerRunRequest {
+    tinybox_bus::DockerRunRequest {
         workspace: "/workspace".into(),
         image: None,
-        command: format!("echo {secret}"),
+        command,
         login_shell: false,
         network: None,
         memory_limit_mb: None,
@@ -674,38 +692,18 @@ async fn confidential_operations_fail_closed_without_ordinary_retry() {
         env: std::collections::BTreeMap::new(),
         label: None,
         timeout_ms: 1_000,
-    };
-    assert!(client.run_docker(docker.clone()).await.is_err());
-    assert!(
-        client
-            .run_docker_without_workspace(tinybox_bus::DockerRunRequest {
-                workspace: String::new(),
-                ..docker
-            })
-            .await
-            .is_err()
-    );
-    let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert_eq!(
-        calls.len(),
-        1,
-        "only the construction capability probe reaches the un-attested fixture"
-    );
-    assert_eq!(calls[0].0, tinybox_bus::names::CAPABILITIES);
+    }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn attested_linked_module_accepts_every_confidential_wrapper()
--> std::result::Result<(), Box<dyn std::error::Error>> {
-    let (_host, _caller, client, calls) = attested_fixture().await;
+async fn exercise_confidential_resource_wrappers(
+    client: &TinyBoxClient,
+    expected_calls: &mut Vec<(String, Value)>,
+) -> tinybus::module::ModuleCallResult<()> {
     let resource = tinybox_bus::ResourceId("resource-1".into());
     let process = tinybox_bus::ResourceId("process-1".into());
-    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
-
     let create = tinybox_bus::CreateRequest::default();
     assert_eq!(client.create(create.clone()).await?.backend, "docker");
     expected_calls.push(expected(tinybox_bus::names::CREATE, create));
-
     let exec = tinybox_bus::ExecRequest {
         resource: resource.clone(),
         argv: vec!["printf".into(), "hello".into()],
@@ -715,22 +713,11 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
     };
     assert_eq!(client.exec(exec.clone()).await?.exit_code, 0);
     expected_calls.push(expected(tinybox_bus::names::EXEC, exec));
-
-    let spawn = tinybox_bus::SpawnRequest {
-        process: process.clone(),
-        command: tinybox_bus::ExecRequest {
-            resource: resource.clone(),
-            argv: vec!["printf".into(), "hello".into()],
-            cwd: None,
-            env: std::collections::BTreeMap::new(),
-            stdin: None,
-        },
-    };
+    let spawn = spawn_request("printf hello");
     assert_eq!(client.spawn(spawn.clone()).await?.process, process);
     expected_calls.push(expected(tinybox_bus::names::SPAWN, spawn.clone()));
     assert_eq!(client.start_exec(spawn.clone()).await?.resource, resource);
     expected_calls.push(expected(tinybox_bus::names::START_EXEC, spawn.clone()));
-
     let jail = tinybox_bus::NativeJailConfig {
         read_only: vec!["/usr".into()],
         read_write: vec!["/workspace".into()],
@@ -740,45 +727,18 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
         require_process_isolation: true,
         deny_read: vec!["/home/user/.ssh".into()],
     };
-    assert_eq!(
-        client
-            .start_jailed_exec(spawn.clone(), jail.clone())
-            .await?
-            .process,
-        process
-    );
-    expected_calls.push(expected_args(
-        tinybox_bus::names::START_JAILED_EXEC,
-        (spawn, jail),
-    ));
+    assert_eq!(client.start_jailed_exec(spawn.clone(), jail.clone()).await?.process, process);
+    expected_calls.push(expected_args(tinybox_bus::names::START_JAILED_EXEC, (spawn, jail)));
+    Ok(())
+}
 
-    let shell = tinybox_bus::ShellExecRequest {
-        process: tinybox_bus::ResourceId("process-1".into()),
-        resource: tinybox_bus::ResourceId("resource-1".into()),
-        shell: tinybox_bus::SelectShellRequest {
-            command: "printf hello".into(),
-            preserve_pipeline_status: false,
-            runtime_path: Some("/opt/bin".into()),
-            python_utf8: true,
-        },
-        cwd: Some("/workspace".into()),
-        extra_env: std::collections::BTreeMap::new(),
-        state_dir: "/private/state".into(),
-        timeout_ms: 5_000,
-        stdin: None,
-        jail: None,
-        hide_window: false,
-    };
-    assert_eq!(
-        client
-            .start_native_shell_exec(shell.clone())
-            .await?
-            .process
-            .0,
-        "process-1"
-    );
+async fn exercise_confidential_shell_and_write_wrappers(
+    client: &TinyBoxClient,
+    expected_calls: &mut Vec<(String, Value)>,
+) -> tinybus::module::ModuleCallResult<()> {
+    let shell = shell_exec_request("printf hello");
+    assert_eq!(client.start_native_shell_exec(shell.clone()).await?.process.0, "process-1");
     expected_calls.push(expected(tinybox_bus::names::START_NATIVE_SHELL_EXEC, shell));
-
     let write = tinybox_bus::WriteFileChunkRequest {
         resource: tinybox_bus::ResourceId("resource-1".into()),
         transfer: tinybox_bus::ResourceId("write-1".into()),
@@ -787,40 +747,33 @@ async fn attested_linked_module_accepts_every_confidential_wrapper()
     };
     assert_eq!(client.write_file_chunk(write.clone()).await?.next_offset, 0);
     expected_calls.push(expected(tinybox_bus::names::WRITE_FILE_CHUNK, write));
+    Ok(())
+}
 
-    let docker = tinybox_bus::DockerRunRequest {
-        workspace: "/workspace".into(),
-        image: Some("alpine:latest".into()),
-        command: "printf hello".into(),
-        login_shell: false,
-        network: Some("none".into()),
-        memory_limit_mb: Some(128),
-        cpus: Some(1.0),
-        read_only_rootfs: Some(true),
-        read_only_mounts: Vec::new(),
-        extra_cap_drops: Vec::new(),
-        env: std::collections::BTreeMap::new(),
-        label: Some("openhuman.sandbox=true".into()),
-        timeout_ms: 10_000,
-    };
+async fn exercise_confidential_docker_wrappers(
+    client: &TinyBoxClient,
+    expected_calls: &mut Vec<(String, Value)>,
+) -> tinybus::module::ModuleCallResult<()> {
+    let docker = docker_request("printf hello".into());
     assert_eq!(client.run_docker(docker.clone()).await?.stdout, "ok");
     expected_calls.push(expected(tinybox_bus::names::RUN_DOCKER, docker.clone()));
     let without_workspace = tinybox_bus::DockerRunRequest {
         workspace: String::new(),
         ..docker
     };
-    assert_eq!(
-        client
-            .run_docker_without_workspace(without_workspace.clone())
-            .await?
-            .exit_code,
-        0
-    );
-    expected_calls.push(expected(
-        tinybox_bus::names::RUN_DOCKER_WITHOUT_WORKSPACE,
-        without_workspace,
-    ));
+    assert_eq!(client.run_docker_without_workspace(without_workspace.clone()).await?.exit_code, 0);
+    expected_calls.push(expected(tinybox_bus::names::RUN_DOCKER_WITHOUT_WORKSPACE, without_workspace));
+    Ok(())
+}
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attested_linked_module_accepts_every_confidential_wrapper()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let (_host, _caller, client, calls) = attested_fixture().await?;
+    let mut expected_calls = vec![(tinybox_bus::names::CAPABILITIES.to_owned(), json!([]))];
+    exercise_confidential_resource_wrappers(&client, &mut expected_calls).await?;
+    exercise_confidential_shell_and_write_wrappers(&client, &mut expected_calls).await?;
+    exercise_confidential_docker_wrappers(&client, &mut expected_calls).await?;
     assert_eq!(
         calls
             .lock()
