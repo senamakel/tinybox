@@ -167,6 +167,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
             client["dev-dependencies"]["tinybus-module"]["path"],
             "../../vendor/tinybus/crates/tinybus-module",
         )
+        gitlink = subprocess.run(
+            ["git", "ls-files", "-s", "vendor/tinybus"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.split()
+        self.assertGreaterEqual(len(gitlink), 3)
+        self.assertEqual(gitlink[1], "207a9a7df15e44fdba00a807d0f7eaf21904ba0e")
 
     def test_release_caller_keeps_ordinary_route_and_pins_current_reviewed_route(self):
         ordinary = "4adc1080fb495098e7af1aade82ed7e6e3c69bb7"
