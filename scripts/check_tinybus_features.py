@@ -44,9 +44,14 @@ def check() -> None:
         ">=0.3.3, <0.4.0", EXPECTED_GIT, EXPECTED_REV
     ):
         raise AssertionError("module SDK must retain its canonical compatible source pin")
-    patches = workspace["patch"][EXPECTED_GIT]
-    if set(patches) != {"tinybus", "tinybus-module"}:
-        raise AssertionError("canonical TinyBus source patch must continue unifying both SDK crates")
+    expected_patches = {
+        "tinybus": {"path": "vendor/tinybus/crates/tinybus"},
+        "tinybus-module": {"path": "vendor/tinybus/crates/tinybus-module"},
+    }
+    if workspace["patch"].get("crates-io") != expected_patches:
+        raise AssertionError("standalone crates.io patches must continue unifying both SDK crates")
+    if workspace["patch"].get(EXPECTED_GIT) != expected_patches:
+        raise AssertionError("canonical TinyBus source patches must continue unifying both SDK crates")
 
 
 if __name__ == "__main__":
