@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 
@@ -140,6 +141,40 @@ class ReleaseWorkflowTests(unittest.TestCase):
             reviewed,
         )
         self.assertNotRegex(reviewed, r"(?m)^      - uses: actions/checkout@")
+
+    def test_sdk_and_release_versions_are_exactly_pinned(self):
+        workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
+        client = tomllib.loads((ROOT / "crates/tinybox-client/Cargo.toml").read_text())
+        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.39")
+        self.assertEqual(
+            workspace["workspace"]["dependencies"]["tinybox-client"],
+            {"path": "crates/tinybox-client", "version": "0.1.39"},
+        )
+        self.assertEqual(
+            workspace["workspace"]["dependencies"]["tinybus"]["version"], "=0.3.3"
+        )
+        self.assertEqual(
+            workspace["workspace"]["dependencies"]["tinybus-module"], "=0.3.3"
+        )
+        for table_name in ("dependencies", "dev-dependencies"):
+            dependencies = client[table_name]
+            self.assertEqual(dependencies["tinybus"]["version"], "=0.3.3")
+            self.assertEqual(dependencies["tinybus"]["path"], "../../vendor/tinybus/crates/tinybus")
+        self.assertEqual(
+            client["dev-dependencies"]["tinybus-module"]["version"], "=0.3.3"
+        )
+        self.assertEqual(
+            client["dev-dependencies"]["tinybus-module"]["path"],
+            "../../vendor/tinybus/crates/tinybus-module",
+        )
+
+    def test_release_caller_keeps_ordinary_route_and_pins_current_reviewed_route(self):
+        ordinary = "4adc1080fb495098e7af1aade82ed7e6e3c69bb7"
+        reviewed = "6ed83b04aab2d8977ec62e966cb914531e534fa4"
+        self.assertIn(f"module-ci.yml@{ordinary}", (ROOT / ".github/workflows/ci.yml").read_text())
+        self.assertIn(f"module-release.yml@{ordinary}", self.workflow)
+        self.assertIn(f"module-reviewed-epic-release.yml@{reviewed}", self.workflow)
+        self.assertNotIn("837d0424c7f38e4293f41c795f12ed5eb5dd7280", self.workflow)
 
     def test_release_routes_are_exclusive_and_permissions_are_minimal(self):
         ordinary = job_block(self.workflow, "module-release")

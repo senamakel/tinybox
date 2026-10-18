@@ -119,7 +119,7 @@ class PureBusConsumerProofTests(unittest.TestCase):
             VALID_TREE + "tinybox-bus v0.1.36\n",
         ):
             with self.subTest(tree=tree), self.assertRaises(ProofError):
-                validate_dependency_graph(tree, "0.1.38")
+                validate_dependency_graph(tree, "0.1.39")
 
     def test_proof_command_covers_normal_build_edges_and_enabled_features(self):
         script = (ROOT / "scripts/test-pure-bus-consumer.sh").read_text()
