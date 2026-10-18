@@ -145,7 +145,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertNotRegex(reviewed, r"(?m)^      - uses: actions/checkout@")
 
-    def test_sdk_and_release_versions_are_exactly_pinned(self):
+    def test_sdk_source_identity_release_floor_and_gitlink_are_pinned(self):
         workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
         client = tomllib.loads((ROOT / "crates/tinybox-client/Cargo.toml").read_text())
         self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.39")
@@ -164,6 +164,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
             client["dev-dependencies"]["tinybus-module"],
             {"workspace": True, "features": ["static-link"]},
         )
+        module = tomllib.loads((ROOT / "crates/tinybox-module/Cargo.toml").read_text())
+        self.assertEqual(module["dependencies"]["tinybus"], {"workspace": True})
+        self.assertEqual(module["dependencies"]["tinybus-module"], {"workspace": True})
         self.assertEqual(
             workspace["patch"][TINYBUS_URL]["tinybus"]["path"],
             "vendor/tinybus/crates/tinybus",

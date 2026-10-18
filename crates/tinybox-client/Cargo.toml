@@ -10,14 +10,14 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 tinybox-bus.workspace = true
-tinybus = { path = "../../vendor/tinybus/crates/tinybus", version = "=0.3.3", default-features = false }
+tinybus.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-tinybus = { path = "../../vendor/tinybus/crates/tinybus", version = "=0.3.3", default-features = false, features = ["macros", "modules"] }
-tinybus-module = { path = "../../vendor/tinybus/crates/tinybus-module", version = "=0.3.3", features = ["static-link"] }
+tinybus.workspace = true
+tinybus-module = { workspace = true, features = ["static-link"] }
 
 [lints]
 workspace = true
