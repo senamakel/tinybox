@@ -36,8 +36,9 @@ keywords = ["tinybus", "sandbox", "container", "workspace"]
 categories = ["development-tools", "virtualization"]
 
 [workspace.dependencies]
-# TinyBus defines the message types, interface macro, and frozen module ABI used
-# by the bus adapter. Socket and CLI features are unnecessary here.
+# Use TinyBus's canonical Git source so a host workspace can unify these Rust
+# types with its own SDK patch. This workspace's patch below pins standalone
+# builds to the published SDK checkout in vendor/tinybus.
 tinybus = { version = ">=0.3.3, <0.4.0", git = "https://github.com/tinyhumansai/tinybus", rev = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e", default-features = false, features = [
     "macros",
     "modules",
