@@ -40,7 +40,7 @@ static RELEASE: ReleaseRecord = ReleaseRecord {
     id: MODULE_ID,
     bus_name: tinybox_bus::INTERFACE,
     object_path: tinybox_bus::OBJECT_PATH,
-    version: "0.1.38",
+    version: "0.1.39",
     release_url: "https://example.invalid/tinybox",
     assets: &[],
 };

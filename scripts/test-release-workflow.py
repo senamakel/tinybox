@@ -118,7 +118,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "uses: tinyhumansai/.github/.github/workflows/module-reviewed-epic-release.yml@"
-            "837d0424c7f38e4293f41c795f12ed5eb5dd7280",
+            "6ed83b04aab2d8977ec62e966cb914531e534fa4",
             self.workflow,
         )
         self.assertIn(
@@ -133,7 +133,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(
             reviewed,
             r"(?m)^    uses: tinyhumansai/\.github/\.github/workflows/"
-            r"module-reviewed-epic-release\.yml@837d0424c7f38e4293f41c795f12ed5eb5dd7280$",
+            r"module-reviewed-epic-release\.yml@6ed83b04aab2d8977ec62e966cb914531e534fa4$",
         )
         self.assertIn(
             "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr || '0') }}",
