@@ -11,6 +11,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/release.yml"
+TINYBUS_URL = "https://github.com/tinyhumansai/tinybus"
+TINYBUS_REV = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e"
+TINYBUS_VERSION = ">=0.3.3, <0.4.0"
 
 
 def resolve_script(workflow):
@@ -150,22 +153,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
             workspace["workspace"]["dependencies"]["tinybox-client"],
             {"path": "crates/tinybox-client", "version": "0.1.39"},
         )
+        for name in ("tinybus", "tinybus-module"):
+            dependency = workspace["workspace"]["dependencies"][name]
+            self.assertEqual(dependency["version"], TINYBUS_VERSION)
+            self.assertEqual(dependency["git"], TINYBUS_URL)
+            self.assertEqual(dependency["rev"], TINYBUS_REV)
+        self.assertEqual(client["dependencies"]["tinybus"], {"workspace": True})
+        self.assertEqual(client["dev-dependencies"]["tinybus"], {"workspace": True})
         self.assertEqual(
-            workspace["workspace"]["dependencies"]["tinybus"]["version"], "=0.3.3"
+            client["dev-dependencies"]["tinybus-module"],
+            {"workspace": True, "features": ["static-link"]},
         )
         self.assertEqual(
-            workspace["workspace"]["dependencies"]["tinybus-module"], "=0.3.3"
-        )
-        for table_name in ("dependencies", "dev-dependencies"):
-            dependencies = client[table_name]
-            self.assertEqual(dependencies["tinybus"]["version"], "=0.3.3")
-            self.assertEqual(dependencies["tinybus"]["path"], "../../vendor/tinybus/crates/tinybus")
-        self.assertEqual(
-            client["dev-dependencies"]["tinybus-module"]["version"], "=0.3.3"
+            workspace["patch"][TINYBUS_URL]["tinybus"]["path"],
+            "vendor/tinybus/crates/tinybus",
         )
         self.assertEqual(
-            client["dev-dependencies"]["tinybus-module"]["path"],
-            "../../vendor/tinybus/crates/tinybus-module",
+            workspace["patch"][TINYBUS_URL]["tinybus-module"]["path"],
+            "vendor/tinybus/crates/tinybus-module",
         )
         gitlink = subprocess.run(
             ["git", "ls-files", "-s", "vendor/tinybus"],
