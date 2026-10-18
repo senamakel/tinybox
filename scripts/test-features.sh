@@ -17,6 +17,7 @@ case "${RUNNER_OS:-$(uname -s)}" in
     ;;
 esac
 python3 scripts/test-pure-bus-consumer.py
+python3 scripts/check_tinybus_features.py
 python3 scripts/test-e2e-version.py
 cargo test --locked --workspace
 pure_consumer=crates/tinybox-bus/pure-consumer/Cargo.toml
