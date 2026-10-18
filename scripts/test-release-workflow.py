@@ -159,13 +159,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertEqual(dependency["git"], TINYBUS_URL)
             self.assertEqual(dependency["rev"], TINYBUS_REV)
         self.assertEqual(client["dependencies"]["tinybus"], {"workspace": True})
-        self.assertEqual(client["dev-dependencies"]["tinybus"], {"workspace": True})
+        self.assertEqual(
+            client["dev-dependencies"]["tinybus"],
+            {"workspace": True, "features": ["macros", "modules"]},
+        )
         self.assertEqual(
             client["dev-dependencies"]["tinybus-module"],
             {"workspace": True, "features": ["static-link"]},
         )
         module = tomllib.loads((ROOT / "crates/tinybox-module/Cargo.toml").read_text())
-        self.assertEqual(module["dependencies"]["tinybus"], {"workspace": True})
+        self.assertEqual(
+            module["dependencies"]["tinybus"],
+            {"workspace": True, "features": ["macros", "modules"]},
+        )
         self.assertEqual(module["dependencies"]["tinybus-module"], {"workspace": True})
         self.assertEqual(
             workspace["patch"][TINYBUS_URL]["tinybus"]["path"],
