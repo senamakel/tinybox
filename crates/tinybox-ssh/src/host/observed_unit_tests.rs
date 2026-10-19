@@ -1,5 +1,6 @@
 //! Process-group membership checks for observed SSH cleanup.
 
+#[cfg(unix)]
 use super::*;
 
 #[cfg(unix)]
