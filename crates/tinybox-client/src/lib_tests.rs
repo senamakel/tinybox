@@ -521,21 +521,15 @@ async fn discovery_and_resource_wrappers_preserve_typed_wire_calls()
         config: tinybox_bus::LocalGrantConfig::default(),
         protected: tinybox_bus::ProtectedPaths::default(),
     };
-    assert!(
-        client
-            .resolve_local_grants(grants.clone())
-            .await?
-            .read_only
-            .is_empty()
+    assert_eq!(
+        client.resolve_local_grants(grants.clone()).await?.read_only,
+        Vec::<String>::new()
     );
     expected_calls.push(expected(tinybox_bus::names::RESOLVE_LOCAL_GRANTS, grants));
     let policy = tinybox_bus::DockerPolicyRequest::default();
-    assert!(
-        client
-            .validate_docker_policy(policy.clone())
-            .await?
-            .issues
-            .is_empty()
+    assert_eq!(
+        client.validate_docker_policy(policy.clone()).await?.issues,
+        Vec::<String>::new()
     );
     expected_calls.push(expected(tinybox_bus::names::VALIDATE_DOCKER_POLICY, policy));
     assert_recorded(&calls, &expected_calls);
@@ -616,12 +610,9 @@ async fn workspace_file_wrappers_preserve_typed_wire_calls()
         offset: 0,
         max_bytes: 10,
     };
-    assert!(
-        client
-            .read_file_chunk(read_chunk.clone())
-            .await?
-            .bytes
-            .is_empty()
+    assert_eq!(
+        client.read_file_chunk(read_chunk.clone()).await?.bytes,
+        Vec::<u8>::new()
     );
     expected_calls.push(expected(tinybox_bus::names::READ_FILE_CHUNK, read_chunk));
     let finish_read = tinybox_bus::FinishFileReadRequest {
