@@ -434,7 +434,13 @@ async fn wait_until_serving(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("module service did not start before deadline: {error}"),
+        )
+    })??;
     Ok(())
 }
 
@@ -453,7 +459,13 @@ async fn wait_until_idle(modules: &ModuleHost) -> Result<(), Box<dyn std::error:
             }
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("module service did not become idle before deadline: {error}"),
+        )
+    })??;
     Ok(())
 }
 
@@ -500,7 +512,13 @@ async fn verify_live_output(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("output process did not exit before deadline: {error}"),
+        )
+    })??;
     assert_eq!(batch.state, ExecutionState::Exited { exit_code: 7 });
     let stdout: Vec<u8> = batch
         .chunks
@@ -564,7 +582,13 @@ async fn verify_live_output(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("cancellation process did not publish output before deadline: {error}"),
+        )
+    })??;
     assert!(
         proxy
             .call::<()>("ReleaseOutput", (process.clone(),))
@@ -621,7 +645,13 @@ async fn verify_binary_stdin(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("stdin process did not exit before deadline: {error}"),
+        )
+    })??;
     assert_eq!(batch.state, ExecutionState::Exited { exit_code: 0 });
     assert_eq!(
         batch
