@@ -296,7 +296,10 @@ async fn compiled_module_streams_ssh_output_and_acknowledges_remote_cancellation
     // Give this independently loaded module its own native-library identity;
     // another artifact fixture may load the original path concurrently.
     let artifact_directory = tempfile::tempdir()?;
-    let isolated_artifact = artifact_directory.path().join(
+    // The module host checks every ancestor with symlink_metadata, so preserve
+    // the real path rather than tempfile's possibly symlinked TMPDIR spelling.
+    let artifact_directory_path = artifact_directory.path().canonicalize()?;
+    let isolated_artifact = artifact_directory_path.join(
         std::path::Path::new(&artifact)
             .file_name()
             .ok_or("module filename is required")?,
@@ -365,7 +368,10 @@ async fn compiled_module_streams_docker_output_and_acknowledges_container_cancel
     // Give this independently loaded module its own native-library identity;
     // another artifact fixture may load the original path concurrently.
     let artifact_directory = tempfile::tempdir()?;
-    let isolated_artifact = artifact_directory.path().join(
+    // The module host checks every ancestor with symlink_metadata, so preserve
+    // the real path rather than tempfile's possibly symlinked TMPDIR spelling.
+    let artifact_directory_path = artifact_directory.path().canonicalize()?;
+    let isolated_artifact = artifact_directory_path.join(
         std::path::Path::new(&artifact)
             .file_name()
             .ok_or("module filename is required")?,
