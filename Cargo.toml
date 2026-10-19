@@ -26,7 +26,7 @@ members = [
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.1.39"
+version = "0.1.41"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-only"
@@ -58,7 +58,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 # Internal path dependencies between workspace members.
 tinybox-bus = { path = "crates/tinybox-bus", version = "0.1.25" }
-tinybox-client = { path = "crates/tinybox-client", version = "0.1.39" }
+tinybox-client = { path = "crates/tinybox-client", version = "0.1.41" }
 tinybox-core = { path = "crates/tinybox-core", version = "0.1.25" }
 tinybox-host = { path = "crates/tinybox-host", version = "0.1.25" }
 tinybox-jail = { path = "crates/tinybox-jail", version = "0.1.25" }
