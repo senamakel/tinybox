@@ -437,7 +437,7 @@ fn dropping_the_store_lock_guard_releases_the_lock_with_a_cloned_handle() -> Res
     let (store, _dir) = store()?;
     let guard = store.lock()?;
     let duplicate = guard
-        ._file
+        .file
         .try_clone()
         .map_err(|error| Error::io("clone lock descriptor", &error))?;
     let second = std::fs::File::options()

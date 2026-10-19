@@ -156,7 +156,7 @@ impl FileStore {
             operation: "lock",
             message: error.to_string(),
         })?;
-        Ok(Lock { _file: file })
+        Ok(Lock { file })
     }
 
     /// Read the whole document.
@@ -224,11 +224,20 @@ impl Store for FileStore {
 
 /// An exclusive advisory lock, released when this is dropped.
 ///
-/// The file handle is the lock: closing it releases, which is also what the
-/// kernel does if the process dies holding it.
+/// Dropping this guard explicitly unlocks the file so the lock's lifetime
+/// follows the guard even if another descriptor refers to the same open file
+/// description. Closing the file remains the fallback if the process exits.
 #[derive(Debug)]
 struct Lock {
-    _file: File,
+    file: File,
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        // Drop cannot report an unlock failure. Closing the descriptor below
+        // still releases the lock when it is the last reference.
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
 }
 
 #[cfg(test)]
