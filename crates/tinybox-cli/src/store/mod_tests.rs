@@ -431,3 +431,24 @@ fn the_store_lock_is_exclusive_and_released_when_its_guard_drops() -> Result<()>
     );
     Ok(())
 }
+
+#[test]
+fn dropping_the_store_lock_guard_releases_the_lock_with_a_cloned_handle() -> Result<()> {
+    let (store, _dir) = store()?;
+    let guard = store.lock()?;
+    let duplicate = guard
+        ._file
+        .try_clone()
+        .map_err(|error| Error::io("clone lock descriptor", &error))?;
+    let second = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(store.path().with_extension("lock"))
+        .map_err(|error| Error::io("open competing lock", &error))?;
+
+    drop(guard);
+    fs2::FileExt::try_lock_exclusive(&second)
+        .map_err(|error| Error::io("acquire released lock", &error))?;
+    drop(duplicate);
+    Ok(())
+}
