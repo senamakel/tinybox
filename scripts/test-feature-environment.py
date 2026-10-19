@@ -90,9 +90,15 @@ class WindowsFeatureEnvironmentTests(unittest.TestCase):
                 path = tools / name
                 path.write_text(source)
                 path.chmod(0o755)
+            bash_env = root / "bash-env"
+            bash_env.write_text(
+                'python3() { "$FIXTURE_TOOL_DIR/python3" "$@"; }\n'
+                'cargo() { "$FIXTURE_TOOL_DIR/cargo" "$@"; }\n'
+            )
             env = dict(os.environ, RUNNER_OS="Windows", FIXTURE_BIN="C:/Git/usr/bin",
                        FIXTURE_READY=str(ready), FIXTURE_CALLS=str(calls),
                        FIXTURE_WORKSPACE_VERSION=workspace_version(),
+                       FIXTURE_TOOL_DIR=str(tools), BASH_ENV=str(bash_env),
                        PATH=str(tools) + os.pathsep + "/usr/bin:/bin")
             result = subprocess.run(["bash", str(ROOT / "scripts/test-features.sh")],
                                     env=env, text=True, capture_output=True)
