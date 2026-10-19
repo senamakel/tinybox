@@ -296,7 +296,10 @@ async fn compiled_module_streams_ssh_output_and_acknowledges_remote_cancellation
     // Give this independently loaded module its own native-library identity;
     // another artifact fixture may load the original path concurrently.
     let artifact_directory = tempfile::tempdir()?;
-    let isolated_artifact = artifact_directory.path().join(
+    // The module host checks every ancestor with symlink_metadata, so preserve
+    // the real path rather than tempfile's possibly symlinked TMPDIR spelling.
+    let artifact_directory_path = artifact_directory.path().canonicalize()?;
+    let isolated_artifact = artifact_directory_path.join(
         std::path::Path::new(&artifact)
             .file_name()
             .ok_or("module filename is required")?,
@@ -365,7 +368,10 @@ async fn compiled_module_streams_docker_output_and_acknowledges_container_cancel
     // Give this independently loaded module its own native-library identity;
     // another artifact fixture may load the original path concurrently.
     let artifact_directory = tempfile::tempdir()?;
-    let isolated_artifact = artifact_directory.path().join(
+    // The module host checks every ancestor with symlink_metadata, so preserve
+    // the real path rather than tempfile's possibly symlinked TMPDIR spelling.
+    let artifact_directory_path = artifact_directory.path().canonicalize()?;
+    let isolated_artifact = artifact_directory_path.join(
         std::path::Path::new(&artifact)
             .file_name()
             .ok_or("module filename is required")?,
@@ -428,7 +434,13 @@ async fn wait_until_serving(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("module service did not start before deadline: {error}"),
+        )
+    })??;
     Ok(())
 }
 
@@ -447,7 +459,13 @@ async fn wait_until_idle(modules: &ModuleHost) -> Result<(), Box<dyn std::error:
             }
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("module service did not become idle before deadline: {error}"),
+        )
+    })??;
     Ok(())
 }
 
@@ -494,7 +512,13 @@ async fn verify_live_output(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("output process did not exit before deadline: {error}"),
+        )
+    })??;
     assert_eq!(batch.state, ExecutionState::Exited { exit_code: 7 });
     let stdout: Vec<u8> = batch
         .chunks
@@ -558,7 +582,13 @@ async fn verify_live_output(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("cancellation process did not publish output before deadline: {error}"),
+        )
+    })??;
     assert!(
         proxy
             .call::<()>("ReleaseOutput", (process.clone(),))
@@ -615,7 +645,13 @@ async fn verify_binary_stdin(
             tokio::task::yield_now().await;
         }
     })
-    .await??;
+    .await
+    .map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("stdin process did not exit before deadline: {error}"),
+        )
+    })??;
     assert_eq!(batch.state, ExecutionState::Exited { exit_code: 0 });
     assert_eq!(
         batch

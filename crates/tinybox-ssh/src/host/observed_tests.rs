@@ -1713,7 +1713,10 @@ fn generated_supervisor_keeps_grace_period_when_group_inspection_fails() -> Resu
         &fake_ps,
         r#"#!/bin/sh
 group=$(cat "$TINYBOX_TEST_GROUP_FILE") || exit 2
-caller_group=$(awk '{print $5}' "/proc/$$/stat") || exit 2
+# Production runs `ps` under `setsid`, so this observer's own process group is
+# not the group of the shell that requested the inspection. Classify by that
+# logical caller instead.
+caller_group=$(awk '{print $5}' "/proc/$PPID/stat") || exit 2
 if [ "$caller_group" = "$group" ]; then
   printf '%s\n' "$PPID" >> "$TINYBOX_TEST_PS_CALLS.child"
 else

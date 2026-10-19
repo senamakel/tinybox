@@ -4,10 +4,30 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 const MEMBERS_REMAIN_FUNCTION: &str = "members_remain() { \
-    if ! command -v ps >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then return 0; fi; \
-    listing=$(ps -e -o pid= -o pgid= 2>/dev/null) || return 0; \
-    state=$(printf '%s\\n' \"$listing\" | awk -v group=\"$group\" 'NF == 0 { next } $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ { bad=1; next } $2 == group && $1 != group { found=1 } END { if (bad) print \"unknown\"; else if (found) print \"present\"; else print \"absent\" }') || return 0; \
-    case \"$state\" in absent) return 1;; present|unknown|'') return 0;; *) return 0;; esac; \
+    if ! command -v ps >/dev/null 2>&1 || ! command -v setsid >/dev/null 2>&1; then return 0; fi; \
+    _tinybox_members_group=$group; \
+    case \"$_tinybox_members_group\" in ''|*[!0-9]*) return 0;; esac; \
+    _tinybox_members_snapshot=\"$dir/members.$$\"; \
+    _tinybox_members_restore_noclobber=0; \
+    case $- in *C*) ;; *) set -C; _tinybox_members_restore_noclobber=1;; esac; \
+    if ! setsid ps -e -o pid= -o pgid= > \"$_tinybox_members_snapshot\" 2>/dev/null; then \
+      if [ \"$_tinybox_members_restore_noclobber\" -eq 1 ]; then set +C; fi; \
+      rm -f \"$_tinybox_members_snapshot\" 2>/dev/null || true; return 0; \
+    fi; \
+    if [ \"$_tinybox_members_restore_noclobber\" -eq 1 ]; then set +C; fi; \
+    _tinybox_members_bad=0; _tinybox_members_found=0; _tinybox_members_seen=0; \
+    while IFS=' ' read -r _tinybox_members_pid _tinybox_members_pgid _tinybox_members_extra || \
+      [ -n \"$_tinybox_members_pid$_tinybox_members_pgid$_tinybox_members_extra\" ]; do \
+      [ -n \"$_tinybox_members_pid$_tinybox_members_pgid$_tinybox_members_extra\" ] || continue; \
+      _tinybox_members_seen=1; \
+      if [ -z \"$_tinybox_members_pid\" ] || [ -z \"$_tinybox_members_pgid\" ] || [ -n \"$_tinybox_members_extra\" ]; then _tinybox_members_bad=1; break; fi; \
+      case \"$_tinybox_members_pid$_tinybox_members_pgid\" in *[!0-9]*) _tinybox_members_bad=1; break;; esac; \
+      if [ \"$_tinybox_members_pgid\" = \"$_tinybox_members_group\" ] && [ \"$_tinybox_members_pid\" != \"$_tinybox_members_group\" ]; then _tinybox_members_found=1; break; fi; \
+    done < \"$_tinybox_members_snapshot\"; \
+    if ! rm -f \"$_tinybox_members_snapshot\" 2>/dev/null; then return 0; fi; \
+    if [ \"$_tinybox_members_bad\" -ne 0 ] || [ \"$_tinybox_members_seen\" -eq 0 ]; then return 0; fi; \
+    if [ \"$_tinybox_members_found\" -eq 0 ]; then return 1; fi; \
+    return 0; \
 }";
 
 use async_trait::async_trait;
@@ -429,3 +449,7 @@ impl ExecutionObserver for Bridge {
         let _ = self.cleanup().await;
     }
 }
+
+#[cfg(test)]
+#[path = "observed_unit_tests.rs"]
+mod tests;

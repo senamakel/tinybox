@@ -5,11 +5,15 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/release.yml"
+TINYBUS_URL = "https://github.com/tinyhumansai/tinybus"
+TINYBUS_REV = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e"
+TINYBUS_VERSION = ">=0.3.3, <0.4.0"
 
 
 def resolve_script(workflow):
@@ -118,7 +122,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "uses: tinyhumansai/.github/.github/workflows/module-reviewed-epic-release.yml@"
-            "837d0424c7f38e4293f41c795f12ed5eb5dd7280",
+            "6ed83b04aab2d8977ec62e966cb914531e534fa4",
             self.workflow,
         )
         self.assertIn(
@@ -133,13 +137,67 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(
             reviewed,
             r"(?m)^    uses: tinyhumansai/\.github/\.github/workflows/"
-            r"module-reviewed-epic-release\.yml@837d0424c7f38e4293f41c795f12ed5eb5dd7280$",
+            r"module-reviewed-epic-release\.yml@6ed83b04aab2d8977ec62e966cb914531e534fa4$",
         )
         self.assertIn(
             "reviewed-pr: ${{ fromJSON(needs.resolve.outputs.reviewed_pr || '0') }}",
             reviewed,
         )
         self.assertNotRegex(reviewed, r"(?m)^      - uses: actions/checkout@")
+
+    def test_sdk_source_identity_release_floor_and_gitlink_are_pinned(self):
+        workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
+        client = tomllib.loads((ROOT / "crates/tinybox-client/Cargo.toml").read_text())
+        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.39")
+        self.assertEqual(
+            workspace["workspace"]["dependencies"]["tinybox-client"],
+            {"path": "crates/tinybox-client", "version": "0.1.39"},
+        )
+        for name in ("tinybus", "tinybus-module"):
+            dependency = workspace["workspace"]["dependencies"][name]
+            self.assertEqual(dependency["version"], TINYBUS_VERSION)
+            self.assertEqual(dependency["git"], TINYBUS_URL)
+            self.assertEqual(dependency["rev"], TINYBUS_REV)
+        self.assertEqual(client["dependencies"]["tinybus"], {"workspace": True})
+        self.assertEqual(
+            client["dev-dependencies"]["tinybus"],
+            {"workspace": True, "features": ["macros", "modules"]},
+        )
+        self.assertEqual(
+            client["dev-dependencies"]["tinybus-module"],
+            {"workspace": True, "features": ["static-link"]},
+        )
+        module = tomllib.loads((ROOT / "crates/tinybox-module/Cargo.toml").read_text())
+        self.assertEqual(
+            module["dependencies"]["tinybus"],
+            {"workspace": True, "features": ["macros", "modules"]},
+        )
+        self.assertEqual(module["dependencies"]["tinybus-module"], {"workspace": True})
+        self.assertEqual(
+            workspace["patch"][TINYBUS_URL]["tinybus"]["path"],
+            "vendor/tinybus/crates/tinybus",
+        )
+        self.assertEqual(
+            workspace["patch"][TINYBUS_URL]["tinybus-module"]["path"],
+            "vendor/tinybus/crates/tinybus-module",
+        )
+        gitlink = subprocess.run(
+            ["git", "ls-files", "-s", "vendor/tinybus"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.split()
+        self.assertGreaterEqual(len(gitlink), 3)
+        self.assertEqual(gitlink[1], "207a9a7df15e44fdba00a807d0f7eaf21904ba0e")
+
+    def test_release_caller_keeps_ordinary_route_and_pins_current_reviewed_route(self):
+        ordinary = "4adc1080fb495098e7af1aade82ed7e6e3c69bb7"
+        reviewed = "6ed83b04aab2d8977ec62e966cb914531e534fa4"
+        self.assertIn(f"module-ci.yml@{ordinary}", (ROOT / ".github/workflows/ci.yml").read_text())
+        self.assertIn(f"module-release.yml@{ordinary}", self.workflow)
+        self.assertIn(f"module-reviewed-epic-release.yml@{reviewed}", self.workflow)
+        self.assertNotIn("837d0424c7f38e4293f41c795f12ed5eb5dd7280", self.workflow)
 
     def test_release_routes_are_exclusive_and_permissions_are_minimal(self):
         ordinary = job_block(self.workflow, "module-release")

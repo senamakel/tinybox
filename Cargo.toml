@@ -6,6 +6,7 @@ resolver = "3"
 # scaffolded until they do something — an empty crate is a placeholder.
 members = [
     "crates/tinybox-bus",
+    "crates/tinybox-client",
     "crates/tinybox-cli",
     "crates/tinybox-core",
     "crates/tinybox-docker",
@@ -25,7 +26,7 @@ members = [
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.1.37"
+version = "0.1.39"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-only"
@@ -35,15 +36,13 @@ keywords = ["tinybus", "sandbox", "container", "workspace"]
 categories = ["development-tools", "virtualization"]
 
 [workspace.dependencies]
-# TinyBus defines the message types, interface macro, and frozen module ABI used
-# by the bus adapter. Socket and CLI features are unnecessary here.
-tinybus = { version = ">=0.1.7, <0.2", default-features = false, features = [
-    "macros",
-    "modules",
-] }
+# Use TinyBus's canonical Git source so a host workspace can unify these Rust
+# types with its own SDK patch. This workspace's patch below pins standalone
+# builds to the published SDK checkout in vendor/tinybus.
+tinybus = { version = ">=0.3.3, <0.4.0", git = "https://github.com/tinyhumansai/tinybus", rev = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e", default-features = false }
 # The module-side SDK owns the isolated runtime and exports the ABI entrypoints
 # required by TinyBus's dynamic loader.
-tinybus-module = ">=0.1.7, <0.2"
+tinybus-module = { version = ">=0.3.3, <0.4.0", git = "https://github.com/tinyhumansai/tinybus", rev = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e" }
 
 # Derive macros for the crate-wide error type in `tinybox-core`.
 thiserror = "2"
@@ -59,6 +58,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 # Internal path dependencies between workspace members.
 tinybox-bus = { path = "crates/tinybox-bus", version = "0.1.25" }
+tinybox-client = { path = "crates/tinybox-client", version = "0.1.39" }
 tinybox-core = { path = "crates/tinybox-core", version = "0.1.25" }
 tinybox-host = { path = "crates/tinybox-host", version = "0.1.25" }
 tinybox-jail = { path = "crates/tinybox-jail", version = "0.1.25" }
