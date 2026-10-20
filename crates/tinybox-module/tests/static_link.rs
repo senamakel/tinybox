@@ -11,7 +11,7 @@ use tinybus::{
 };
 use tinystoragedrivers_busproxy::{
     AuditEvent, AuditSink, Environment, GovernedEndpointLimits, GovernedStorage, GrantPolicy,
-    HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
+    HostContext, HostFailure, ResolvedStorage, StorageGrant,
 };
 use tinystoragedrivers_client::StorageServer;
 use tinystoragedrivers_core::{DocumentStoreExt, MemoryStorage, Scope, StorageBackend};
