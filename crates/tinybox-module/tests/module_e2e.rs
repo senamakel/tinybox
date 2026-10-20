@@ -1013,6 +1013,14 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         .map(std::path::PathBuf::from)
         .ok_or("TINYBOX_TEST_MODULE must point at libtinybox")?;
     let fixture = load_compiled_migration_fixture(&source).await?;
+    fixture
+        .modules
+        .reinitialize("tinybox-module", serde_json::Value::Null)
+        .await?;
+    fixture
+        .modules
+        .reinitialize("tinybox-module", serde_json::json!({}))
+        .await?;
     let (backend, _storage) = migrate_legacy_box(fixture.module).await?;
 
     let outsider_migration = fixture.outsider.proxy(
