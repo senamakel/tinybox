@@ -45,6 +45,7 @@ tinybus-module.workspace = true
 tinybox-drivers.workspace = true
 tinystoragedrivers-core.workspace = true
 tinystoragedrivers-busproxy.workspace = true
+tinystoragedrivers-tinybus = { workspace = true, features = ["migration-delivery"] }
 log = "0.4"
 
 # Private shell scratch is owned until supervised process cleanup completes.
