@@ -28,6 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broker_task = broker.spawn(bus.clone());
     let module_host = ModuleHost::new(broker);
     let info = module_host.load_file(&module)?;
+    module_host
+        .ensure_ready(info.manifest.bus_name.as_str())
+        .await?;
 
     if info.name != env!("CARGO_PKG_NAME") {
         return Err(io::Error::other(format!(

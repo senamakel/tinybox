@@ -1186,6 +1186,13 @@ async fn migrate_legacy_box(
         .await?;
     registry.check_ready_in(&migration_scope, "box.boxes")?;
     registry.check_ready_in(&migration_scope, "box.jail_index")?;
+    assert_migrated_owner_rows(&storage).await?;
+    Ok((backend, storage))
+}
+
+async fn assert_migrated_owner_rows(
+    storage: &tinystoragedrivers_core::ScopedStorage,
+) -> Result<(), Box<dyn std::error::Error>> {
     let migrated = storage
         .documents()
         .get("box.boxes", "build-1")
@@ -1200,7 +1207,7 @@ async fn migrate_legacy_box(
             .get("tinybox_boxes", "build-1")
             .await?
             .is_none(),
-        "legacy source rows are removed after the owner conversion succeeds"
+        "legacy Box rows are removed after the owner conversion succeeds"
     );
     let migrated_index = storage
         .documents()
@@ -1223,5 +1230,5 @@ async fn migrate_legacy_box(
             .is_none(),
         "legacy jail-index rows are removed after the owner conversion succeeds"
     );
-    Ok((backend, storage))
+    Ok(())
 }
