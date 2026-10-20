@@ -217,7 +217,7 @@ fn args_directory_candidates_resolving_inside_a_grant_are_rejected() -> io::Resu
 }
 
 #[test]
-fn args_file_candidates_under_baseline_readable_roots_are_rejected() -> io::Result<()> {
+fn args_file_xdg_candidate_under_baseline_readable_roots_is_rejected() -> io::Result<()> {
     let safe_temp = tempfile::tempdir()?;
     let baseline_candidate = PathBuf::from("/usr");
     assert!(baseline_candidate.is_dir());
@@ -228,7 +228,13 @@ fn args_file_candidates_under_baseline_readable_roots_are_rejected() -> io::Resu
         safe_temp.path().to_path_buf(),
     )?;
     assert_eq!(chosen, safe_temp.path());
+    Ok(())
+}
 
+#[test]
+fn args_file_temp_candidate_under_baseline_readable_roots_is_refused() -> io::Result<()> {
+    let baseline_candidate = PathBuf::from("/usr");
+    assert!(baseline_candidate.is_dir());
     let error = base_dir(&[], None, baseline_candidate)
         .err()
         .ok_or_else(|| io::Error::other("TMPDIR under a baseline-readable mount was accepted"))?;
