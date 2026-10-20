@@ -1064,10 +1064,10 @@ async fn exercise_profile_switches(
     fixture: &CompiledMigrationFixture,
     backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
     registration: &BoxStorageRegistration,
-    proxy: &tinybus::Proxy<'_>,
+    proxy: &tinybus::Proxy,
     descriptor_a: tinystoragedrivers_busproxy::StorageDescriptor,
-    lease_a: tinystoragedrivers_tinybus::StorageLease,
-    resource_a: &str,
+    lease_a: tinystoragedrivers_busproxy::StorageLease,
+    resource_a: &tinybox_bus::ResourceId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::ResourceInfo;
 
@@ -1083,10 +1083,10 @@ async fn exercise_profile_switches(
     reinitialize_box(&fixture.modules, descriptor_b.clone()).await?;
     assert_eq!(
         proxy
-            .call::<ResourceInfo>("Inspect", (resource_a.to_owned(),))
+            .call::<ResourceInfo>("Inspect", (resource_a.clone(),))
             .await?
             .resource,
-        resource_a,
+        resource_a.clone(),
         "resource A remains in the shared module registry after binding B"
     );
     let workspace_b = tempfile::tempdir()?;
@@ -1150,9 +1150,9 @@ async fn exercise_revocation_and_shutdown(
     fixture: &CompiledMigrationFixture,
     backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
     registration: &BoxStorageRegistration,
-    proxy: &tinybus::Proxy<'_>,
+    proxy: &tinybus::Proxy,
     descriptor_b: tinystoragedrivers_busproxy::StorageDescriptor,
-    lease_a: tinystoragedrivers_tinybus::StorageLease,
+    lease_a: tinystoragedrivers_busproxy::StorageLease,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
     use tinystoragedrivers_tinybus::migration::{
