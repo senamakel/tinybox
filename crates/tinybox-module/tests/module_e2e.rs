@@ -1144,10 +1144,25 @@ async fn migrate_legacy_box(
         .await?;
     storage
         .documents()
+        .ensure_collection(&tinystoragedrivers_core::CollectionSpec::new(
+            "tinybox_jail_index",
+        ))
+        .await?;
+    storage
+        .documents()
         .put(
             "tinybox_boxes",
             "build-1",
             legacy_v1_box(),
+            Precondition::Absent,
+        )
+        .await?;
+    storage
+        .documents()
+        .put(
+            "tinybox_jail_index",
+            "main",
+            legacy_v1_jail_index(),
             Precondition::Absent,
         )
         .await?;
@@ -1171,6 +1186,27 @@ async fn migrate_legacy_box(
             .await?
             .is_none(),
         "legacy source rows are removed after the owner conversion succeeds"
+    );
+    let migrated_index = storage
+        .documents()
+        .get("box.jail_index", "main")
+        .await?
+        .ok_or("migration did not write the TinyBox jail-index target")?;
+    assert_eq!(
+        migrated_index.doc["records"]["j1"]["created_ms"],
+        1_700_000_000_000_i64
+    );
+    assert_eq!(
+        migrated_index.doc["records"]["j1"]["updated_ms"],
+        1_700_000_060_000_i64
+    );
+    assert!(
+        storage
+            .documents()
+            .get("tinybox_jail_index", "main")
+            .await?
+            .is_none(),
+        "legacy jail-index rows are removed after the owner conversion succeeds"
     );
     Ok((backend, storage))
 }
