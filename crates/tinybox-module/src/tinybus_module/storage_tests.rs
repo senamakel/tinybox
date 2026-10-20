@@ -45,13 +45,13 @@ impl tinystoragedrivers_busproxy::Environment<DescriptorContext> for DescriptorE
             .for_scope(&scope)
             .map_err(|_| tinystoragedrivers_busproxy::HostFailure::Denied("storage-unavailable"))?;
         let collections = [
-            CollectionSpec {
+            tinybox_bus::CollectionSpec {
                 name: tinybox_drivers::BOX_COLLECTION.to_owned(),
                 indexes: Vec::new(),
                 ttl_field: None,
                 search: None,
             },
-            CollectionSpec {
+            tinybox_bus::CollectionSpec {
                 name: tinybox_drivers::JAIL_INDEX_COLLECTION.to_owned(),
                 indexes: Vec::new(),
                 ttl_field: None,
