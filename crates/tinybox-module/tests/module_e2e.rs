@@ -1053,13 +1053,7 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         &registration,
         &proxy,
     );
-    exercise_profile_switches(
-        exercise,
-        descriptor_a,
-        lease_a,
-        &resource_a.resource,
-    )
-    .await?;
+    exercise_profile_switches(exercise, descriptor_a, lease_a, &resource_a.resource).await?;
     registration.shutdown().await?;
     fixture.modules.shutdown(Duration::from_secs(5)).await;
     Ok(())
@@ -1090,7 +1084,7 @@ async fn exercise_profile_switches(
         module_peer,
     )
     .await?;
-    migrate_empty_box_profile(&backend, profile_b, migration_b).await?;
+    migrate_empty_box_profile(backend, profile_b, migration_b).await?;
     let (_lease_b, descriptor_b) = register_box_lease(registration, module_peer, profile_b).await?;
     reinitialize_box(modules, descriptor_b.clone()).await?;
     assert_eq!(
@@ -1102,9 +1096,9 @@ async fn exercise_profile_switches(
         "resource A remains in the shared module registry after binding B"
     );
     let workspace_b = tempfile::tempdir()?;
-    let resource_b = create_passthrough_resource(&proxy, workspace_b.path()).await?;
-    assert_eq!(box_record_count(&backend, "local").await?, 2);
-    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+    let resource_b = create_passthrough_resource(proxy, workspace_b.path()).await?;
+    assert_eq!(box_record_count(backend, "local").await?, 2);
+    assert_eq!(box_record_count(backend, profile_b).await?, 1);
 
     let (_invalid_lease, descriptor_invalid) =
         register_box_lease(registration, module_peer, "box-invalid-profile").await?;
@@ -1140,8 +1134,8 @@ async fn exercise_profile_switches(
     );
     let workspace_a2 = tempfile::tempdir()?;
     let resource_a2 = create_passthrough_resource(proxy, workspace_a2.path()).await?;
-    assert_eq!(box_record_count(&backend, "local").await?, 3);
-    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+    assert_eq!(box_record_count(backend, "local").await?, 3);
+    assert_eq!(box_record_count(backend, profile_b).await?, 1);
 
     proxy.call::<()>("Close", (resource_a.to_owned(),)).await?;
     proxy
@@ -1150,20 +1144,10 @@ async fn exercise_profile_switches(
     proxy
         .call::<()>("Close", (resource_b.resource.clone(),))
         .await?;
-    assert_eq!(box_record_count(&backend, "local").await?, 1);
-    assert_eq!(box_record_count(&backend, profile_b).await?, 0);
+    assert_eq!(box_record_count(backend, "local").await?, 1);
+    assert_eq!(box_record_count(backend, profile_b).await?, 0);
 
-    exercise_revocation_and_shutdown(
-        modules,
-        controller,
-        module_peer,
-        backend,
-        registration,
-        proxy,
-        descriptor_b,
-        lease_a,
-    )
-    .await
+    exercise_revocation_and_shutdown(exercise, descriptor_b, lease_a).await
 }
 
 async fn exercise_revocation_and_shutdown(
