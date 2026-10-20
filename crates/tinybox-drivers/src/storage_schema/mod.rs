@@ -37,6 +37,10 @@ pub(crate) const V1_JAIL_INDEX_COLLECTION: &str = "tinybox_jail_index";
 /// The body version both collections are declared at.
 pub(crate) const BODY_VERSION: u32 = 2;
 
+const MIGRATION_TRANSFORM_VERSION: u32 = 1;
+const BOX_MIGRATION_OPERATION: &str = "box.rename_boxes";
+const JAIL_INDEX_MIGRATION_OPERATION: &str = "box.rename_jail_index";
+
 /// Everything tinybox stores, with the v1 to v2 migration steps.
 ///
 /// # Panics
@@ -77,11 +81,11 @@ pub fn storage_schema_declaration() -> Result<SchemaDeclaration> {
     let schema = storage_schema();
     declaration_from_schema(&schema, |step| {
         let operation = match step.id {
-            "rename_boxes" => "box.rename_boxes",
-            "rename_jail_index" => "box.rename_jail_index",
+            "rename_boxes" => BOX_MIGRATION_OPERATION,
+            "rename_jail_index" => JAIL_INDEX_MIGRATION_OPERATION,
             _ => return None,
         };
-        Some((operation.to_owned(), 1))
+        Some((operation.to_owned(), MIGRATION_TRANSFORM_VERSION))
     })
 }
 
@@ -90,11 +94,34 @@ pub fn storage_schema_declaration() -> Result<SchemaDeclaration> {
 pub struct TinyBoxMigrationHandler;
 
 impl MigrationPayloadHandler for TinyBoxMigrationHandler {
-    fn transform(&self, _payload: MigrationPayload) -> MigrationPayloadReply {
-        MigrationPayloadReply::Documents(Err(TransformError {
-            kind: TransformErrorKind::UnsupportedOperation,
-            message: "unsupported TinyBox migration payload".to_owned(),
-        }))
+    fn transform(&self, payload: MigrationPayload) -> MigrationPayloadReply {
+        match payload {
+            MigrationPayload::Documents(request) => {
+                MigrationPayloadReply::Documents(transform_documents(request))
+            }
+            MigrationPayload::BlobTarget(_) => {
+                MigrationPayloadReply::BlobTarget(Err(unsupported_transform()))
+            }
+            MigrationPayload::StreamPlan(_) => {
+                MigrationPayloadReply::StreamPlan(Err(unsupported_transform()))
+            }
+            MigrationPayload::StreamEntries(_) => {
+                MigrationPayloadReply::StreamEntries(Err(unsupported_transform()))
+            }
+        }
+    }
+}
+
+fn transform_documents(
+    _request: tinystoragedrivers_core::schema::DocumentsTransformRequest,
+) -> std::result::Result<Vec<TargetRecord>, TransformError> {
+    Err(unsupported_transform())
+}
+
+fn unsupported_transform() -> TransformError {
+    TransformError {
+        kind: TransformErrorKind::UnsupportedOperation,
+        message: "unsupported TinyBox migration operation".to_owned(),
     }
 }
 

@@ -3,7 +3,10 @@
 use super::*;
 use serde_json::{Value, json};
 use tinystoragedrivers_core::CollectionSpec;
-use tinystoragedrivers_core::schema::{Item, MigrateOptions, Registry};
+use tinystoragedrivers_core::schema::{
+    DocumentsTransformRequest, Item, MigrateOptions, MigrationPayload, MigrationPayloadReply,
+    Registry, SourceRecord,
+};
 use tinystoragedrivers_core::{MemoryStorage, Precondition, Scope, ScopedStorage, StorageBackend};
 
 /// A box as the v1 store wrote it: `BoxInfo` serialized by serde, keyed by id.
@@ -93,6 +96,113 @@ fn the_schema_declares_the_box_collections_for_the_module_scope() {
 #[test]
 fn the_schema_composes() {
     Registry::compose([storage_schema()]).expect("compose");
+}
+
+#[test]
+fn module_migration_declaration_copies_owner_schema_and_explicit_operations() {
+    let schema = storage_schema();
+    let declaration = storage_schema_declaration().expect("declaration");
+    assert_eq!(declaration.owner, schema.owner);
+    assert_eq!(declaration.items, schema.items);
+    assert_eq!(declaration.steps.len(), schema.steps.len());
+    assert_eq!(declaration.steps[0].id, "rename_boxes");
+    assert_eq!(declaration.steps[0].item, BOX_COLLECTION);
+    assert_eq!(declaration.steps[0].from, 1);
+    assert_eq!(declaration.steps[0].to, 2);
+    assert_eq!(
+        declaration.steps[0].source.as_deref(),
+        Some(V1_BOX_COLLECTION)
+    );
+    assert_eq!(
+        declaration.steps[0].transform.operation,
+        BOX_MIGRATION_OPERATION
+    );
+    assert_eq!(declaration.steps[0].transform.version, MIGRATION_TRANSFORM_VERSION);
+    assert_eq!(declaration.steps[1].id, "rename_jail_index");
+    assert_eq!(declaration.steps[1].item, JAIL_INDEX_COLLECTION);
+    assert_eq!(
+        declaration.steps[1].source.as_deref(),
+        Some(V1_JAIL_INDEX_COLLECTION)
+    );
+    assert_eq!(
+        declaration.steps[1].transform.operation,
+        JAIL_INDEX_MIGRATION_OPERATION
+    );
+    Registry::compose_with_declarations(Vec::new(), [declaration])
+        .expect("owner declaration composes for remote transforms");
+}
+
+#[test]
+fn module_migration_handler_reuses_the_v1_box_transform() {
+    let reply = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
+        DocumentsTransformRequest {
+            operation: BOX_MIGRATION_OPERATION.to_owned(),
+            version: MIGRATION_TRANSFORM_VERSION,
+            records: vec![SourceRecord {
+                id: "build-1".to_owned(),
+                body: v1_box(),
+                meta: Default::default(),
+            }],
+        },
+    ));
+    let MigrationPayloadReply::Documents(Ok(records)) = reply else {
+        panic!("the box transform returns document records");
+    };
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].collection, BOX_COLLECTION);
+    assert_eq!(records[0].id, "build-1");
+    assert_eq!(records[0].body["state"], "ready");
+    assert_eq!(records[0].body["created_ms"], 1_700_000_000_005_i64);
+    assert_eq!(records[0].body["spec"]["source"]["kind"], "local_dir");
+    assert_eq!(records[0].body["spec"]["lifecycle"]["ttl_ms"], 3_600_000);
+}
+
+#[test]
+fn module_migration_handler_rejects_unsupported_operations_and_payload_families() {
+    let unknown_operation = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
+        DocumentsTransformRequest {
+            operation: "box.unrecognized".to_owned(),
+            version: MIGRATION_TRANSFORM_VERSION,
+            records: Vec::new(),
+        },
+    ));
+    assert!(matches!(
+        unknown_operation,
+        MigrationPayloadReply::Documents(Err(TransformError {
+            kind: TransformErrorKind::UnsupportedOperation,
+            ..
+        }))
+    ));
+
+    let unsupported_version = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
+        DocumentsTransformRequest {
+            operation: BOX_MIGRATION_OPERATION.to_owned(),
+            version: MIGRATION_TRANSFORM_VERSION + 1,
+            records: Vec::new(),
+        },
+    ));
+    assert!(matches!(
+        unsupported_version,
+        MigrationPayloadReply::Documents(Err(TransformError {
+            kind: TransformErrorKind::UnsupportedVersion,
+            ..
+        }))
+    ));
+
+    let unsupported_family = TinyBoxMigrationHandler.transform(MigrationPayload::StreamPlan(
+        tinystoragedrivers_core::schema::StreamPlanRequest {
+            operation: "box.events".to_owned(),
+            version: MIGRATION_TRANSFORM_VERSION,
+            source: "legacy/events".to_owned(),
+        },
+    ));
+    assert!(matches!(
+        unsupported_family,
+        MigrationPayloadReply::StreamPlan(Err(TransformError {
+            kind: TransformErrorKind::UnsupportedOperation,
+            ..
+        }))
+    ));
 }
 
 #[test]
