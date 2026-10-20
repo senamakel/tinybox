@@ -41,7 +41,7 @@ spawns, never the core process itself.
 | `crates/tinybox-jail/src/jail.rs` | Core types: the `Jail` description struct (builder plus `canonicalize`/`canonicalize_or_log`) and the `JailBackend` trait (`name`/`is_available`/`spawn`). |
 | `crates/tinybox-jail/src/detect.rs` | `pick_backend()`: first available OS backend, else an unsupported backend that fails closed. |
 | `crates/tinybox-jail/src/noop.rs` | `NoopBackend`: no enforcement, plain `Command::spawn`. Always available. |
-| `crates/tinybox-jail/src/bwrap/` | Bubblewrap backend (Linux only): user/pid/ipc/uts (+net) namespaces, grants as bind mounts, `deny_read` masked, `--die-with-parent`. `isolation()` is the minimum over configurations (`Process` with `--disable-userns`, else `None`); `Kernel` only per jail without `allow_net` (`isolation_for` / `is_suitable_for_untrusted_jail`; hosts must use the per-jail form). Never looks `bwrap` up on `PATH`; the probe is a sanity check, not authentication, and `with_program` skips the ownership check. The caller's environment and credentials travel in a private `--args` file, not in argv or any host process environment (`launcher.rs`), and inherited descriptors above 2 are closed by that launcher. No seccomp filter and no resource limits yet. Landlock is the fallback. Landlock is not layered inside because the kernel denies `mount` to a Landlock-restricted thread. |
+| `crates/tinybox-jail/src/bwrap/` | Bubblewrap backend (Linux only): user/pid/ipc/uts (+net) namespaces, grants as bind mounts, existing-file `deny_read` masks, `--die-with-parent`. Directory denials and denials intersecting mandatory private mounts are rejected. `isolation()` is the minimum over configurations (`Process` with `--disable-userns`, else `None`); `Kernel` only per jail without `allow_net` (`isolation_for` / `is_suitable_for_untrusted_jail`; hosts must use the per-jail form). Never looks `bwrap` up on `PATH`; the probe is a sanity check, not authentication, and `with_program` skips the ownership check. Explicit command environment values travel in a private `--args` file, not in argv or any host process environment (`launcher.rs`), and inherited descriptors above 2 are closed by that launcher. No seccomp filter and no resource limits yet. Landlock is the fallback. Landlock is not layered inside because the kernel denies `mount` to a Landlock-restricted thread. |
 | `crates/tinybox-jail/src/linux.rs` | Landlock backend (Linux only, `landlock` feature, on by default). Applies the ruleset to a dedicated spawn thread so no `unsafe` `pre_exec` is needed. |
 | `crates/tinybox-jail/src/macos.rs` | Seatbelt backend via `sandbox-exec`. Compiled on every host so the profile renderer is unit-tested everywhere; selected only on macOS. |
 | `crates/tinybox-jail/src/windows.rs` | AppContainer implementation; **not compiled**: it needs `unsafe` FFI the workspace forbids and cannot return a waitable `std::process::Child` yet. |
@@ -127,11 +127,12 @@ not import that module.
   returns `io::ErrorKind::Unsupported`. See the TODO in `windows.rs`. The
   Windows path is compile-checked but flagged as needing real-hardware
   testing.
-- macOS forwards only variables explicitly supplied with `Command::env` or
-  `Command::envs`. The launcher clears the inherited environment because Rust
-  exposes no getter for `Command::env_clear`; this prevents restoring parent
-  credentials a caller deliberately removed. Supply required variables such
-  as `PATH` explicitly. Linux preserves the original command environment.
+- macOS and Linux forward only variables explicitly supplied with
+  `Command::env` or `Command::envs`; neither backend forwards the inherited
+  process environment. macOS clears it because Rust exposes no getter for
+  `Command::env_clear`, while Linux uses bubblewrap's `--clearenv`. This avoids
+  restoring parent credentials a caller deliberately removed. Supply required
+  variables such as `PATH` explicitly.
 - macOS stdio is inherited: the Seatbelt wrapper cannot re-apply the
   original command's `Stdio` config, so it uses `sandbox-exec` defaults
   (inherit). The profile re-allows writes under the canonicalized `root` and

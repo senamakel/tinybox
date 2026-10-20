@@ -84,14 +84,25 @@ pub(super) fn base_dir(
     xdg_runtime_dir: Option<PathBuf>,
     temp_dir: PathBuf,
 ) -> io::Result<PathBuf> {
+    let resolved_grants: Vec<PathBuf> = grants
+        .iter()
+        .filter_map(|grant| grant.canonicalize().ok())
+        .collect();
     xdg_runtime_dir
         .into_iter()
         .chain(std::iter::once(temp_dir))
-        .find(|dir| dir.is_dir() && !grants.iter().any(|grant| dir.starts_with(grant)))
+        .find_map(|dir| {
+            let canonical_dir = dir.canonicalize().ok()?;
+            (canonical_dir.is_dir()
+                && !resolved_grants
+                    .iter()
+                    .any(|grant| canonical_dir.starts_with(grant)))
+            .then_some(canonical_dir)
+        })
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "no private directory outside the jail's grants for the bwrap argument file",
+                "no private directory outside the jail's readable grants for the bwrap argument file",
             )
         })
 }

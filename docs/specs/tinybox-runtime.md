@@ -367,7 +367,7 @@ of tinybox's own. It declares `IsolationLevel::Kernel`, and nothing else.
 | Root filesystem | `/usr` read-only plus merged-`/usr` symlinks, a fresh `/proc`, a `/dev`, and a `tmpfs` `/tmp` |
 | Host configuration | Four files, not all of `/etc`: `passwd`, `group`, `resolv.conf`, `ssl/certs`. Binding the whole directory would hand the box every credential and host key the user can read. |
 | Workspace | The one writable bind, mounted at `/workspace`, which is also the working directory |
-| Environment | Cleared, then rebuilt from the box's and the command's. The caller's environment routinely holds tokens. |
+| Environment | Cleared, then rebuilt only from values explicitly supplied on the command. The caller's inherited environment routinely holds tokens. |
 | Limits | `systemd-run --user --scope`, the only route an unprivileged process has to a delegated cgroup — and therefore opt-in |
 | Sources | `LocalDir` only. There is no image machinery: this backend binds a directory the caller already has. |
 
@@ -424,11 +424,11 @@ Adding a field to a stored type is a compatibility question: `ports` and
 `stdin` are `#[serde(default)]` so a store written by an earlier build still
 loads. Failing to read it would orphan every box a user already had.
 
-The TinyBus module requests its persisted storage in `tinybox-bus` through the
-canonical `StorageNeeds` contract. It declares `tinybox_boxes` for box records
-and `tinybox_jail_index` for jail registry indexes. The document drivers use
-those same collection schemas when opening their stores; the host remains
-responsible for authorizing the requested resources.
+The TinyBus module requests persisted storage through the canonical
+`StorageNeeds` contract. `tinybox-bus` declares the `box.boxes` collection for
+box records and `box.jail_index` for jail registry indexes; the owning
+`tinybox-drivers` crate declares their schemas and performs legacy migrations.
+The host remains responsible for authorizing the requested resources.
 
 Two things protect the file, and they solve different problems. Writes are
 **atomic** via a temporary file and a rename, so a reader never sees a partial

@@ -159,7 +159,9 @@ fn baseline_mounts() -> Vec<Mount> {
 ///   below a writable grant that a nested grant goes through, for a grant that is `/`, `/tmp`, or at or under `/proc` or
 ///   `/dev` (it would replace a private mount and expose the host's), and for
 ///   a `deny_read` entry nested more than one level inside a writable mount
-///   (the child could rename a parent directory and walk around the mask).
+///   (the child could rename a parent directory and walk around the mask), for
+///   directory denials (a writable tmpfs would not enforce read denial), and
+///   for denials that would affect a mandatory private mount.
 pub(super) fn jail_args(
     jail: &Jail,
     cwd: Option<&Path>,
@@ -217,6 +219,15 @@ pub(super) fn jail_args(
     // the link points (`/usr/bin/sh`): the sandbox mounts the target, not the
     // link.
     let denied = effective_denials(&jail.deny_read, &mounts);
+    if denied
+        .iter()
+        .any(|deny| intersects_private_mount(deny, &mounts))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "deny_read intersects a mandatory private mount (/proc, /dev, /tmp)",
+        ));
+    }
     // A mount at or below a denied path is never mounted.
     mounts.retain(|m| !denied.iter().any(|deny| m.path.starts_with(deny)));
     mounts.sort_by_key(Mount::order);
@@ -291,6 +302,23 @@ fn effective_denials(deny_read: &[PathBuf], mounts: &[Mount]) -> Vec<PathBuf> {
     denied
 }
 
+/// Whether a denial would apply to a mandatory private mount rather than an
+/// explicit bind mounted over it. A grant strictly above the denial shadows
+/// the private mount at that path; a grant equal to or below the denial is
+/// removed by the denial and cannot make it safe.
+fn intersects_private_mount(deny: &Path, mounts: &[Mount]) -> bool {
+    ["/proc", "/dev", "/tmp"].iter().any(|private| {
+        let private = Path::new(private);
+        if !deny.starts_with(private) && !private.starts_with(deny) {
+            return false;
+        }
+
+        !mounts
+            .iter()
+            .any(|mount| mount.is_bind() && deny.starts_with(&mount.path) && mount.path != deny)
+    })
+}
+
 /// Arguments that subtract `deny_read` from the surviving mounts.
 fn deny_masks(denied: &[PathBuf], mounts: &[Mount]) -> io::Result<Vec<OsString>> {
     let mut argv: Vec<OsString> = Vec::new();
@@ -317,7 +345,13 @@ fn deny_masks(denied: &[PathBuf], mounts: &[Mount]) -> io::Result<Vec<OsString>>
         }
         match std::fs::metadata(deny) {
             Ok(meta) if meta.is_dir() => {
-                argv.extend([os("--tmpfs"), deny.clone().into_os_string()]);
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "deny_read directory {} cannot be safely masked by bubblewrap",
+                        deny.display()
+                    ),
+                ));
             }
             Ok(_) => argv.extend([
                 os("--ro-bind"),

@@ -179,22 +179,28 @@ fn args_directory_candidates_resolving_inside_a_grant_are_rejected() -> io::Resu
     use std::os::unix::fs::symlink;
 
     let parent = tempfile::tempdir()?;
-    let grant = parent.path().join("readable-grant");
-    std::fs::create_dir(&grant)?;
+    // Read-only grants are readable by the sandbox, so the host-side args file
+    // must live outside them too.
+    let read_only_grant = parent.path().join("readable-grant");
+    std::fs::create_dir(&read_only_grant)?;
     let detour = parent.path().join("detour");
     std::fs::create_dir(&detour)?;
     let safe_temp = tempfile::tempdir()?;
 
     // The lexical XDG path is outside the grant, but its symlink target is inside.
     let xdg_alias = parent.path().join("runtime-link");
-    symlink(&grant, &xdg_alias)?;
-    let chosen = base_dir(&[&grant], Some(xdg_alias), safe_temp.path().to_path_buf())?;
+    symlink(&read_only_grant, &xdg_alias)?;
+    let chosen = base_dir(
+        &[&read_only_grant],
+        Some(xdg_alias),
+        safe_temp.path().to_path_buf(),
+    )?;
     assert_eq!(chosen, safe_temp.path());
 
     // A path containing `..` can disguise the same readable-grant overlap.
     let dotdot_alias = detour.join("..").join("readable-grant");
     let chosen = base_dir(
-        &[&grant],
+        &[&read_only_grant],
         Some(dotdot_alias),
         safe_temp.path().to_path_buf(),
     )?;
@@ -202,8 +208,8 @@ fn args_directory_candidates_resolving_inside_a_grant_are_rejected() -> io::Resu
 
     // TMPDIR has the same risk when there is no acceptable XDG candidate.
     let temp_alias = parent.path().join("temp-link");
-    symlink(&grant, &temp_alias)?;
-    let error = base_dir(&[&grant], None, temp_alias)
+    symlink(&read_only_grant, &temp_alias)?;
+    let error = base_dir(&[&read_only_grant], None, temp_alias)
         .err()
         .ok_or_else(|| io::Error::other("unsafe temporary directory was accepted"))?;
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
