@@ -1032,12 +1032,8 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .contains("migration authority unavailable")
     );
 
-    let registration = attach_box_storage(
-        &fixture.modules,
-        &fixture.controller,
-        Arc::clone(&backend),
-    )
-    .await?;
+    let registration =
+        attach_box_storage(&fixture.modules, &fixture.controller, Arc::clone(&backend)).await?;
     let (lease_a, descriptor_a) =
         register_box_lease(&registration, &fixture.module_peer, "local").await?;
     reinitialize_box(&fixture.modules, descriptor_a.clone()).await?;
