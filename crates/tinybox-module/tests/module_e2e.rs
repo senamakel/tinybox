@@ -1034,57 +1034,140 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .contains("migration authority unavailable")
     );
 
-    let registration = attach_storage(
-        &fixture.modules,
-        &fixture.controller,
-        GovernedStorage::new(
-            Arc::new(BoxStorageEnvironment {
-                backend: Arc::clone(&backend),
-            }),
-            Arc::new(BoxTestAudit),
-            GovernedEndpointLimits::default(),
-        ),
-        tokio::runtime::Handle::current(),
-    )
-    .await
-    .map_err(|_| std::io::Error::other("governed storage registration failed"))?;
-    let (_lease, descriptor) = registration
-        .register_lease(
-            HostStorageContext::new(BoxStorageContext("local".to_owned())),
-            fixture.module_peer.clone(),
-        )
-        .await
-        .map_err(|_| std::io::Error::other("governed storage lease registration failed"))?;
-    fixture
-        .modules
-        .reinitialize(
-            "tinybox-module",
-            serde_json::json!({"storage_descriptor": descriptor}),
-        )
-        .await?;
+    let registration = attach_box_storage(&fixture, Arc::clone(&backend)).await?;
+    let (lease_a, descriptor_a) =
+        register_box_lease(&registration, &fixture.module_peer, "local").await?;
+    reinitialize_box(&fixture.modules, descriptor_a.clone()).await?;
     let proxy = fixture.controller.proxy(BUS_NAME, OBJECT_PATH, BUS_NAME)?;
-    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
-    let workspace = tempfile::tempdir()?;
-    let _: ResourceInfo = proxy
-        .call(
-            "Create",
-            (CreateRequest {
-                resource,
-                backend: "passthrough".into(),
-                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
-                ..Default::default()
-            },),
-        )
-        .await?;
+    let workspace_a = tempfile::tempdir()?;
+    let resource_a = create_passthrough_resource(&proxy, workspace_a.path()).await?;
     assert_eq!(
-        storage
-            .documents()
-            .query_all("box.boxes", &Query::all())
-            .await?
-            .len(),
+        box_record_count(&backend, "local").await?,
         2,
         "TinyBox opens its ordinary storage path only after host migration completes"
     );
+
+    let profile_b = "box-other-profile";
+    let migration_b = tinystoragedrivers_tinybus::migration::MigrationModuleClient::discover(
+        &fixture.controller,
+        &fixture.module_peer,
+    )
+    .await?;
+    migrate_empty_box_profile(&backend, profile_b, migration_b).await?;
+    let (lease_b, descriptor_b) =
+        register_box_lease(&registration, &fixture.module_peer, profile_b).await?;
+    reinitialize_box(&fixture.modules, descriptor_b.clone()).await?;
+    assert_eq!(
+        proxy
+            .call::<ResourceInfo>("Inspect", (resource_a.resource.clone(),))
+            .await?
+            .resource,
+        resource_a.resource,
+        "resource A remains in the shared module registry after binding B"
+    );
+    let workspace_b = tempfile::tempdir()?;
+    let resource_b = create_passthrough_resource(&proxy, workspace_b.path()).await?;
+    assert_eq!(box_record_count(&backend, "local").await?, 2);
+    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+
+    let (_invalid_lease, descriptor_invalid) = register_box_lease(
+        &registration,
+        &fixture.module_peer,
+        "box-invalid-profile",
+    )
+    .await?;
+    let mut forged_descriptor = serde_json::to_value(&descriptor_invalid)?;
+    forged_descriptor["registration_id"] = serde_json::json!(u64::MAX);
+    assert!(fixture
+        .modules
+        .reinitialize(
+            "tinybox-module",
+            serde_json::json!({"storage_descriptor": forged_descriptor}),
+        )
+        .await
+        .is_err(), "a malformed descriptor must fail before service replacement");
+    assert_eq!(
+        proxy
+            .call::<ResourceInfo>("Inspect", (resource_b.resource.clone(),))
+            .await?
+            .resource,
+        resource_b.resource,
+        "failed reinitialization leaves B's active service and resource live"
+    );
+
+    reinitialize_box(&fixture.modules, descriptor_a).await?;
+    assert_eq!(
+        proxy
+            .call::<ResourceInfo>("Inspect", (resource_b.resource.clone(),))
+            .await?
+            .resource,
+        resource_b.resource,
+        "resource B keeps its original store after reinitializing A"
+    );
+    let workspace_a2 = tempfile::tempdir()?;
+    let resource_a2 = create_passthrough_resource(&proxy, workspace_a2.path()).await?;
+    assert_eq!(box_record_count(&backend, "local").await?, 3);
+    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+
+    proxy
+        .call::<()>("Close", (resource_a.resource.clone(),))
+        .await?;
+    proxy
+        .call::<()>("Close", (resource_a2.resource.clone(),))
+        .await?;
+    proxy
+        .call::<()>("Close", (resource_b.resource.clone(),))
+        .await?;
+    assert_eq!(box_record_count(&backend, "local").await?, 1);
+    assert_eq!(box_record_count(&backend, profile_b).await?, 0);
+
+    assert!(registration.revoke(&lease_a).await);
+    let workspace_revoked = tempfile::tempdir()?;
+    let failed_resource = proxy.call::<ResourceInfo>(
+        "Create",
+        (CreateRequest {
+            resource: proxy.call("Reserve", (ReserveRequest::Resource,)).await?,
+            backend: "passthrough".into(),
+            workspace: Workspace::Directory(
+                workspace_revoked.path().to_string_lossy().into_owned(),
+            ),
+            ..Default::default()
+        },),
+    )
+    .await
+    .err()
+    .ok_or("a revoked current-only lease unexpectedly created a resource")?;
+    assert_eq!(failed_resource.wire_name(), tinybox_bus::BACKEND_ERROR);
+    assert_eq!(box_record_count(&backend, "local").await?, 1);
+
+    reinitialize_box(&fixture.modules, descriptor_b).await?;
+    let workspace_b2 = tempfile::tempdir()?;
+    let _resource_b2 = create_passthrough_resource(&proxy, workspace_b2.path()).await?;
+    assert_eq!(box_record_count(&backend, "local").await?, 1);
+    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+
+    let (lease_revoked, descriptor_revoked) = register_box_lease(
+        &registration,
+        &fixture.module_peer,
+        "box-revoked-profile",
+    )
+    .await?;
+    assert!(registration.revoke(&lease_revoked).await);
+    assert!(fixture
+        .modules
+        .reinitialize(
+            "tinybox-module",
+            serde_json::json!({"storage_descriptor": descriptor_revoked}),
+        )
+        .await
+        .is_err(), "a revoked descriptor must fail before service replacement");
+    let workspace_b3 = tempfile::tempdir()?;
+    let _resource_b3 = create_passthrough_resource(&proxy, workspace_b3.path()).await?;
+    assert_eq!(box_record_count(&backend, profile_b).await?, 2);
+
+    proxy.call::<()>("Shutdown", ()).await?;
+    assert_eq!(box_record_count(&backend, "local").await?, 1);
+    assert_eq!(box_record_count(&backend, profile_b).await?, 0);
     assert_eq!(
         fixture
             .controller
@@ -1172,6 +1255,106 @@ struct BoxTestAudit;
 
 impl AuditSink for BoxTestAudit {
     fn record(&self, _event: AuditEvent) {}
+}
+
+type BoxStorageRegistration = tinystoragedrivers_tinybus::StorageRegistration<
+    BoxStorageEnvironment,
+    BoxTestAudit,
+    BoxStorageContext,
+>;
+
+async fn register_box_lease(
+    registration: &BoxStorageRegistration,
+    peer: &tinybus::BusName,
+    profile: &str,
+) -> Result<
+    (
+        tinystoragedrivers_busproxy::StorageLease,
+        tinystoragedrivers_busproxy::StorageDescriptor,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    registration
+        .register_lease(
+            HostStorageContext::new(BoxStorageContext(profile.to_owned())),
+            peer.clone(),
+        )
+        .await
+        .map_err(|_| std::io::Error::other("governed Box lease registration failed").into())
+}
+
+async fn reinitialize_box(
+    modules: &ModuleHost,
+    descriptor: tinystoragedrivers_busproxy::StorageDescriptor,
+) -> tinybus::Result<()> {
+    modules
+        .reinitialize(
+            "tinybox-module",
+            serde_json::json!({"storage_descriptor": descriptor}),
+        )
+        .await
+        .map(|_| ())
+}
+
+async fn create_passthrough_resource(
+    proxy: &tinybus::Proxy,
+    workspace: &std::path::Path,
+) -> tinybus::Result<ResourceInfo> {
+    let resource: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Resource,))
+        .await?;
+    proxy
+        .call(
+            "Create",
+            (CreateRequest {
+                resource,
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await
+}
+
+async fn box_record_count(
+    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
+    profile: &str,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    use tinystoragedrivers_core::{DocumentStoreExt, Query, Scope, StorageBackend};
+
+    let scope = Scope::new(profile)?;
+    let storage = backend.as_ref().for_scope(&scope)?;
+    Ok(storage
+        .documents()
+        .query_all(tinybox_drivers::BOX_COLLECTION, &Query::all())
+        .await?
+        .len())
+}
+
+async fn migrate_empty_box_profile(
+    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
+    profile: &str,
+    migration: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tinystoragedrivers_core::{
+        MigrateOptions, Registry, Scope, StorageBackend,
+        schema::delivery::MigrationDeliveryClient,
+    };
+
+    let scope = Scope::new(profile)?;
+    let registry = Registry::compose_with_declarations(
+        std::iter::empty::<tinystoragedrivers_core::Schema>(),
+        [migration.declaration().clone()],
+    )?;
+    registry.prepare(backend.as_ref()).await?;
+    let storage = backend.as_ref().for_scope(&scope)?;
+    let executor = MigrationDeliveryClient::new(Arc::new(migration));
+    registry
+        .migrate_with_executor(&storage, &MigrateOptions::new(), &executor)
+        .await?;
+    registry.check_ready_in(&scope, tinybox_drivers::BOX_COLLECTION)?;
+    registry.check_ready_in(&scope, tinybox_drivers::JAIL_INDEX_COLLECTION)?;
+    Ok(())
 }
 
 struct CompiledMigrationFixture {
