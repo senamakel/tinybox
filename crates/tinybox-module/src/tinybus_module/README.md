@@ -56,7 +56,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | KillStdio | ProcessRef | () |
 | StdioStatus | ProcessRef | StdioStatus |
 
-Capabilities advertises contract version 1.21; 1.0 denotes the original
+Capabilities advertises contract version 1.22; 1.0 denotes the original
 discovery-only surface. Hosts require equal majors and a module minor at least
 as new as their vocabulary, using `tinybox_bus::is_compatible`. Version 1.1
 added reserved resource/process ownership and terminal shutdown; 1.2 adds host
@@ -65,11 +65,15 @@ facts, and module-owned forwarding. Version 1.3 adds `JailStatus`, which reports
 the detected native directory-jail backend's availability, process isolation,
 and filesystem, network, and subprocess enforcement. The module probes the
 backend; the host applies its own policy to the returned facts. This version is independent of
-package/artifact releases. Version 1.4 adds `AnalyzeCommand`, returning generic
-classification, executor/environment signals, expansion, background execution,
-and literal tokens. Hosts continue to own path resolution, allowlists, approval
-gates, and policy-disabled behavior. `AnalyzeShell` retains its arity and result.
-Describe remains unchanged.
+package/artifact releases. Version 1.4 adds `AnalyzeCommand`, which returns
+command classes and executor and environment-guard signals alongside parsed
+shell structure. The command classes, executor list, environment guard, and
+`AnalyzeShell.hidden_execution` are deprecated policy vocabulary: command
+policy belongs to TinySecurity. Contract 1.22 is the final one-release
+deprecation window for these fields and method. The next contract major removes
+them; hosts must bind to the matching major and must not rely on this legacy
+vocabulary for policy. Generic shell structure scanning and shell transport
+helpers remain. Describe remains unchanged.
 
 Version 1.5 adds bounded file transfer for mounted directory workspaces.
 Reserve `FileRead(resource)` or `FileWrite(resource)` before opening a transfer.
@@ -252,11 +256,14 @@ partial constraints; `Declared` requires an explicit host decision using
 `JailStatus`. Neither mode admits the no-op or unavailable backend. A caller
 requiring the process-isolation security floor sets `require_process_isolation`.
 The host retains approval policy and chooses the credential paths; it sends them
-as `deny_read` (1.20), which the module canonicalizes (dropping paths that do not
-exist) and refuses when a denial covers the root or a writable grant, or lies
-inside the root or a grant on a backend that cannot subtract from grants.
-Seatbelt denies them last in its profile; Landlock and `AppContainer` never grant
-them.
+as `deny_read` (1.20). The module retains prospective paths and resolves them
+against current filesystem aliases both at preflight and immediately before
+spawn. It refuses a denial covering the root or a writable grant. Seatbelt can
+carve a nested denial out of a writable grant; allow-list backends refuse any
+overlap they cannot subtract. Landlock reports its implicit system and device
+baseline grants so credential denials cannot be overridden by those grants;
+direct Landlock backend calls repeat this check at spawn. Paths outside every
+grant remain default-denied on allow-list backends.
 
 The jail owns a separate native collector for each execution. Output replay,
 Cancel, ReleaseOutput, Close and Shutdown use the same retained cleanup barriers
@@ -408,3 +415,10 @@ backpressures the child instead of dropping bytes. `CloseStdin` delivers end of
 input, `StdioStatus` reports `running` and the exit, and `KillStdio` doubles as
 release (an unknown process is already gone). See
 `docs/specs/contract-1-21.md`.
+
+Version 1.22 adds optional `NativeJailConfig::resources` with the same CPU,
+memory, process and writable-disk fields as box resources. Omitted limits retain
+the previous request behavior. Supplying limits makes each one a hard
+preflight requirement; native jail backends currently declare those controls
+unsupported and refuse before starting the child. See
+`docs/specs/contract-1-22.md`.

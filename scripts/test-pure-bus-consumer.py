@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,10 +65,31 @@ VALID_TREE = """tinybox-bus-pure-consumer v0.1.0
 tinybox-bus v0.1.39 [default]
 tinystoragedrivers-bus v1.5.0 []
 serde v1.0.0 [default, derive, std]
+tinybox-bus v0.1.39 [default, storage]
+tinystoragedrivers-bus v1.5.0 []
+serde v1.0.0 [default, derive, std]
 """
 
 
 class PureBusConsumerProofTests(unittest.TestCase):
+    def test_storage_feature_has_no_implementation_dependency_in_any_closure(self):
+        manifest = tomllib.loads((ROOT / "crates/tinybox-bus/Cargo.toml").read_text())
+        dependencies = manifest.get("dependencies", {})
+        dev_dependencies = manifest.get("dev-dependencies", {})
+
+        self.assertNotIn("tinystoragedrivers-core", dependencies)
+        self.assertNotIn("tinystoragedrivers-core", dev_dependencies)
+        self.assertEqual(manifest["features"]["storage"], [])
+
+    def test_schema_and_migrations_are_owned_by_the_driver_crate(self):
+        bus_storage = ROOT / "crates/tinybox-bus/src/storage"
+        self.assertEqual({path.name for path in bus_storage.glob("*.rs")}, {"mod.rs"})
+
+        driver_schema = ROOT / "crates/tinybox-drivers/src/storage_schema/mod.rs"
+        source = driver_schema.read_text()
+        self.assertIn("pub fn storage_schema()", source)
+        self.assertIn("Step::new(", source)
+
     def test_accepts_exact_published_dependency_and_normal_build_feature_graph(self):
         validate_manifest(manifest())
         validate_lockfile(lockfile())
@@ -124,6 +146,12 @@ class PureBusConsumerProofTests(unittest.TestCase):
     def test_proof_command_covers_normal_build_edges_and_enabled_features(self):
         script = (ROOT / "scripts/test-pure-bus-consumer.sh").read_text()
         self.assertIn("--format '{p} {f}' -e normal,build", script)
+        self.assertIn("-p tinybox-bus --all-features", script)
+
+    def test_rejects_an_all_features_graph_that_does_not_enable_storage(self):
+        default_only = VALID_TREE.replace("tinybox-bus v0.1.39 [default, storage]", "tinybox-bus v0.1.39 [default]")
+        with self.assertRaisesRegex(ProofError, "storage feature is missing"):
+            validate_dependency_graph(default_only, "0.1.39")
 
 
 if __name__ == "__main__":

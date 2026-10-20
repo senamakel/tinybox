@@ -15,7 +15,8 @@ if [[ -z "$workspace_version" ]]; then
 fi
 
 dependency_tree="$(cargo tree --locked --manifest-path "$pure_consumer" --prefix none --format '{p} {f}' -e normal,build)"
-printf '%s\n' "$dependency_tree"
+bus_all_features_tree="$(cargo tree --locked -p tinybox-bus --all-features --prefix none --format '{p} {f}' -e normal,build)"
+printf '%s\n%s\n' "$dependency_tree" "$bus_all_features_tree"
 python3 scripts/check_pure_bus_consumer.py \
   "$workspace_version" "$pure_consumer" crates/tinybox-bus/pure-consumer/Cargo.lock \
-  <<< "$dependency_tree"
+  <<< "$(printf '%s\n%s\n' "$dependency_tree" "$bus_all_features_tree")"

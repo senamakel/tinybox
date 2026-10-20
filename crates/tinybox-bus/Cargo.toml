@@ -8,12 +8,18 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# The bus boundary contains data only and uses the canonical storage schema.
 serde.workspace = true
+# The module's storage requirements are data-only contract types; the host owns
+# the storage backend and enforces any grants derived from this declaration.
 tinystoragedrivers-bus.workspace = true
 
+[features]
+default = []
+# Kept as an empty compatibility feature; storage schema execution belongs to
+# tinybox-drivers, while the bus carries only storage names and needs.
+storage = []
+
 [dev-dependencies]
-# Round-trip tests pin the serialized public vocabulary.
 serde_json.workspace = true
 
 [lints]

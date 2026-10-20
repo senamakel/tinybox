@@ -1,4 +1,4 @@
-//! The document drivers persist exactly the schemas declared by tinybox-bus.
+//! The module storage declaration agrees with the host-composed schema.
 
 use super::*;
 use std::sync::Arc;
@@ -7,14 +7,18 @@ use tinybox_core::{
     BoxId, BoxInfo, BoxSpec, BoxState, HostRef, Placement, SandboxRef, Store, WorkspaceSource,
 };
 use tinybox_jail::IndexStore;
+use tinystoragedrivers_core::schema::Registry;
 use tinystoragedrivers_core::{
     Blocking, DocumentStore, IndexSpec as DriverIndexSpec, MemoryStorage, Scope, StorageBackend,
 };
 
-#[test]
-fn stores_create_every_collection_the_bus_declares()
+#[tokio::test]
+async fn stores_use_the_host_schema_and_every_collection_the_bus_declares()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let storage = MemoryStorage::new().for_scope(&Scope::local())?;
+    let registry = Registry::compose([storage_schema()])?;
+    let backend = MemoryStorage::new();
+    registry.prepare(&backend).await?;
+    let storage = backend.for_scope(&Scope::local())?;
     let documents: Arc<dyn DocumentStore> = storage.documents().clone();
     let boxes = DocumentBoxStore::new(Arc::clone(&documents))?;
     let index = DocumentIndexStore::new(Arc::clone(&documents), "main")?;

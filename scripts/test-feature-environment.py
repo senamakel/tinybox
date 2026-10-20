@@ -22,6 +22,7 @@ EXPECTED_CARGO_CALLS = [
     "test --locked --workspace",
     f"run --locked --manifest-path {PURE_CONSUMER} --target-dir target",
     f"tree --locked --manifest-path {PURE_CONSUMER} --prefix none --format {{p}} {{f}} -e normal,build",
+    "tree --locked -p tinybox-bus --all-features --prefix none --format {p} {f} -e normal,build",
     "test --locked --workspace --all-features",
 ]
 
@@ -33,10 +34,19 @@ printf "%s\\n" "$*" >> "$FIXTURE_CALLS"
 case "$1" in
   run) exit 0 ;;
   tree)
-    printf "%s\\n" \\
-      "tinybox-bus-pure-consumer v0.1.0" \\
-      "tinybox-bus v$FIXTURE_WORKSPACE_VERSION" \\
-      "tinystoragedrivers-bus v1.5.0 []"
+    case " $* " in
+      *" -p tinybox-bus --all-features "*)
+        printf "%s\\n" \\
+          "tinybox-bus v$FIXTURE_WORKSPACE_VERSION [default,storage]" \\
+          "tinystoragedrivers-bus v1.5.0 []"
+        ;;
+      *)
+        printf "%s\\n" \\
+          "tinybox-bus-pure-consumer v0.1.0" \\
+          "tinybox-bus v$FIXTURE_WORKSPACE_VERSION [default]" \\
+          "tinystoragedrivers-bus v1.5.0 []"
+        ;;
+    esac
     ;;
   test) ;;
   *) exit 2 ;;
@@ -84,7 +94,7 @@ class WindowsFeatureEnvironmentTests(unittest.TestCase):
                 "cygpath": "#!/bin/sh\n[ \"$*\" = \"-w /usr/bin\" ] || exit 1\nprintf \"%s\\n\" \"$FIXTURE_BIN\"\n",
                 "pwsh": "#!/bin/sh\n[ \"$*\" = \"-NoProfile -File scripts/test-windows-fixtures.ps1\" ] && exit 0\n[ \"$*\" = \"-NoProfile -File scripts/prepare-windows-fixtures.ps1 -PosixBin $FIXTURE_BIN\" ] || exit 1\ntouch \"$FIXTURE_READY\"\n",
                 "python3": "#!/bin/sh\nexit 0\n",
-                "cargo": '#!/bin/sh\nset -eu\n[ -f "$FIXTURE_READY" ] || exit 1\nprintf "%s\\n" "$*" >> "$FIXTURE_CALLS"\ncase "$1" in\n  run) exit 0 ;;\n  tree) printf "%s\\n" "tinybox-bus-pure-consumer v0.1.0" "tinybox-bus v$FIXTURE_WORKSPACE_VERSION" "tinystoragedrivers-bus v1.5.0 []" ;;\n  test) ;;\n  *) exit 2 ;;\nesac\n',
+                "cargo": '#!/bin/sh\nset -eu\n[ -f "$FIXTURE_READY" ] || exit 1\nprintf "%s\\n" "$*" >> "$FIXTURE_CALLS"\ncase "$1" in\n  run) exit 0 ;;\n  tree) case " $* " in *" -p tinybox-bus --all-features "*) printf "%s\\n" "tinybox-bus v$FIXTURE_WORKSPACE_VERSION [default,storage]" "tinystoragedrivers-bus v1.5.0 []" ;; *) printf "%s\\n" "tinybox-bus-pure-consumer v0.1.0" "tinybox-bus v$FIXTURE_WORKSPACE_VERSION [default]" "tinystoragedrivers-bus v1.5.0 []" ;; esac ;;\n  test) ;;\n  *) exit 2 ;;\nesac\n',
             }
             for name, source in fixtures.items():
                 path = tools / name

@@ -4,8 +4,8 @@ use tinybox_bus::{BOX_COLLECTION, JAIL_INDEX_COLLECTION, STORAGE_NEEDS};
 
 #[test]
 fn storage_needs_declare_every_persisted_collection_and_no_other_resources() {
-    assert_eq!(BOX_COLLECTION, "tinybox_boxes");
-    assert_eq!(JAIL_INDEX_COLLECTION, "tinybox_jail_index");
+    assert_eq!(BOX_COLLECTION, "box.boxes");
+    assert_eq!(JAIL_INDEX_COLLECTION, "box.jail_index");
     assert_eq!(
         STORAGE_NEEDS
             .collections

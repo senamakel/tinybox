@@ -1,13 +1,16 @@
-//! Storage resources requested by the `TinyBox` module.
+//! Storage names and needs requested by the `TinyBox` module.
+//!
+//! The needs declaration is available in the default, data-only bus build.
+//! Schema declarations and v1-to-v2 migrations belong to `tinybox-drivers`.
 
 use std::sync::LazyLock;
 
 pub use tinystoragedrivers_bus::{CollectionSpec, IndexSpec, SearchSpec, StorageNeeds};
 
-/// Collection holding one document per box record, keyed by box id.
-pub const BOX_COLLECTION: &str = "tinybox_boxes";
-/// Collection holding one index document per jail registry.
-pub const JAIL_INDEX_COLLECTION: &str = "tinybox_jail_index";
+/// The collection that holds one document per box, keyed by box id.
+pub const BOX_COLLECTION: &str = "box.boxes";
+/// The collection that holds one index document per jail registry.
+pub const JAIL_INDEX_COLLECTION: &str = "box.jail_index";
 
 static COLLECTIONS: LazyLock<[CollectionSpec; 2]> = LazyLock::new(|| {
     [
@@ -28,8 +31,7 @@ static COLLECTIONS: LazyLock<[CollectionSpec; 2]> = LazyLock::new(|| {
 
 /// Storage declarations the `TinyBox` module requests from its host.
 ///
-/// These metadata describe the two persisted resources used by the drivers;
-/// the host still decides whether to grant them to a module instance.
+/// The host decides whether to grant these resources to a module instance.
 pub static STORAGE_NEEDS: LazyLock<StorageNeeds<'static>> = LazyLock::new(|| StorageNeeds {
     collections: &COLLECTIONS[..],
     ..StorageNeeds::default()

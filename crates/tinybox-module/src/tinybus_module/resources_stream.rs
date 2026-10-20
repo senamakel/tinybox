@@ -145,7 +145,10 @@ fn select_collector(
             )
         })?;
         Collector::Jailed(super::super::native_jail::collector(
-            root, config, resolved,
+            root,
+            config,
+            resolved,
+            tinybox_jail::default_backend(),
         )?)
     } else {
         let native = Arc::new(tinybox_host::LimitedLocalHost::new(

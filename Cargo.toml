@@ -69,12 +69,12 @@ tinybox-ssh = { path = "crates/tinybox-ssh", version = "0.1.25" }
 tinybox-sync = { path = "crates/tinybox-sync", version = "0.1.25" }
 # The storage ports only (no database client), by git tag so a host that vendors
 # tinystoragedrivers once can `[patch]` it. Used by `tinybox-drivers`.
-tinystoragedrivers-core = { version = ">=0.8.0, <1", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v0.11.0" }
+tinystoragedrivers-core = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
 # The module reaches the host's storage over the storage bus: the proxy yields
 # the same port traits a linked library gets. The client crate serves them in
 # tests.
-tinystoragedrivers-busproxy = { version = ">=0.8.0, <1", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v0.11.0" }
-tinystoragedrivers-client = { version = ">=0.8.0, <1", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v0.11.0" }
+tinystoragedrivers-busproxy = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
+tinystoragedrivers-client = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
 tinybox-drivers = { path = "crates/tinybox-drivers", version = "0.1.32" }
 # Shared schema types for TinyBox's storage declaration. Disable the default
 # client feature so the data-only contract does not link TinyBus.

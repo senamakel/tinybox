@@ -2,6 +2,9 @@
 //! the in-memory fallback, and connect retry.
 
 use super::*;
+
+use super::super::{INTERFACE, OBJECT_PATH, setup};
+use serde_json::Value;
 use tinybox_core::WorkspaceSource;
 use tinybox_core::{BoxId, BoxInfo, BoxSpec, BoxState, HostRef, Placement, SandboxRef};
 use tinybus::broker::Broker;
@@ -9,7 +12,9 @@ use tinybus::transport::memory::MemoryBus;
 use tinystoragedrivers_busproxy::{PerCallerEndpoint, ServedStorage, serve};
 use tinystoragedrivers_client::StorageServer;
 use tinystoragedrivers_core::{
-    DocumentStoreExt, MemoryStorage, Query, Scope, ScopedStorage, StorageBackend,
+    Capabilities, CollectionSpec, DocumentStore, DocumentStoreExt, Filter, MemoryStorage, Page,
+    Precondition, Query, Scope, ScopedStorage, Sort, StorageBackend, StorageError, Version,
+    Versioned, WriteOptions,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -25,6 +30,10 @@ async fn rig(serve_storage: bool) -> Result<Rig, Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
     let backend = MemoryStorage::new();
+    // The host declares what the module may store from the module's own schema.
+    tinystoragedrivers_core::schema::Registry::compose([tinybox_drivers::storage_schema()])?
+        .prepare(&backend)
+        .await?;
     let host = Connection::connect(bus.connect().await?).await?;
     let served = if serve_storage {
         let bound = backend.clone();
@@ -46,6 +55,290 @@ async fn rig(serve_storage: bool) -> Result<Rig, Box<dyn std::error::Error>> {
     })
 }
 
+/// Document port that exposes exactly the named collection grant and records
+/// every refused collection access.
+#[derive(Debug)]
+struct CurrentOnlyDocuments {
+    inner: Arc<dyn DocumentStore>,
+    allowed: std::collections::HashSet<String>,
+    refused: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl CurrentOnlyDocuments {
+    fn check(&self, collection: &str) -> Result<(), StorageError> {
+        if self.allowed.contains(collection) {
+            return Ok(());
+        }
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(collection.to_owned());
+        Err(StorageError::invalid_input(format!(
+            "collection `{collection}` is outside this module's storage grant"
+        )))
+    }
+}
+
+#[async_trait::async_trait]
+impl DocumentStore for CurrentOnlyDocuments {
+    fn capabilities(&self) -> Capabilities {
+        self.inner.capabilities()
+    }
+
+    async fn ensure_collection(&self, spec: &CollectionSpec) -> Result<(), StorageError> {
+        self.check(&spec.name)?;
+        self.inner.ensure_collection(spec).await
+    }
+
+    async fn validate_collection_spec(
+        &self,
+        required: &CollectionSpec,
+    ) -> Result<(), StorageError> {
+        self.check(&required.name)?;
+        self.inner.validate_collection_spec(required).await
+    }
+
+    async fn get(
+        &self,
+        collection: &str,
+        id: &str,
+    ) -> Result<Option<Versioned<Value>>, StorageError> {
+        self.check(collection)?;
+        self.inner.get(collection, id).await
+    }
+
+    async fn put(
+        &self,
+        collection: &str,
+        id: &str,
+        doc: Value,
+        precondition: Precondition,
+    ) -> Result<Version, StorageError> {
+        self.check(collection)?;
+        self.inner.put(collection, id, doc, precondition).await
+    }
+
+    async fn put_with(
+        &self,
+        collection: &str,
+        id: &str,
+        doc: Value,
+        precondition: Precondition,
+        options: WriteOptions,
+    ) -> Result<Version, StorageError> {
+        self.check(collection)?;
+        self.inner
+            .put_with(collection, id, doc, precondition, options)
+            .await
+    }
+
+    async fn delete(
+        &self,
+        collection: &str,
+        id: &str,
+        precondition: Precondition,
+    ) -> Result<bool, StorageError> {
+        self.check(collection)?;
+        self.inner.delete(collection, id, precondition).await
+    }
+
+    async fn query(
+        &self,
+        collection: &str,
+        query: &Query,
+    ) -> Result<Page<Versioned<Value>>, StorageError> {
+        self.check(collection)?;
+        self.inner.query(collection, query).await
+    }
+
+    async fn count(&self, collection: &str, filter: &Filter) -> Result<u64, StorageError> {
+        self.check(collection)?;
+        self.inner.count(collection, filter).await
+    }
+
+    async fn delete_where(&self, collection: &str, filter: &Filter) -> Result<u64, StorageError> {
+        self.check(collection)?;
+        self.inner.delete_where(collection, filter).await
+    }
+
+    async fn claim(
+        &self,
+        collection: &str,
+        filter: &Filter,
+        sort: &[Sort],
+        patch: &Value,
+    ) -> Result<Option<Versioned<Value>>, StorageError> {
+        self.check(collection)?;
+        self.inner.claim(collection, filter, sort, patch).await
+    }
+
+    async fn drop_collection(&self, collection: &str) -> Result<(), StorageError> {
+        self.check(collection)?;
+        self.inner.drop_collection(collection).await
+    }
+}
+
+struct CurrentOnlyRig {
+    _host: Connection,
+    module: Connection,
+    client: Connection,
+    backend: MemoryStorage,
+    refused: Arc<std::sync::Mutex<Vec<String>>>,
+    _served: ServedStorage,
+}
+
+async fn current_only_rig(allowed: &[&str]) -> Result<CurrentOnlyRig, Box<dyn std::error::Error>> {
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let backend = MemoryStorage::new();
+    tinystoragedrivers_core::schema::Registry::compose([tinybox_drivers::storage_schema()])?
+        .prepare(&backend)
+        .await?;
+    let scope = backend.for_scope(&Scope::local())?;
+    let refused = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let documents: Arc<dyn DocumentStore> = Arc::new(CurrentOnlyDocuments {
+        inner: Arc::clone(scope.documents()),
+        allowed: allowed.iter().map(|name| (*name).to_owned()).collect(),
+        refused: Arc::clone(&refused),
+    });
+    let restricted = ScopedStorage::new(
+        scope.scope().clone(),
+        scope.driver(),
+        documents,
+        Arc::clone(scope.streams()),
+        Arc::clone(scope.blobs()),
+    );
+    let host = Connection::connect(bus.connect().await?).await?;
+    let endpoint =
+        PerCallerEndpoint::new(move |_sender| Some(StorageServer::new(restricted.clone())));
+    let served = serve(&host, Arc::new(endpoint)).await?;
+    let module = Connection::connect(bus.connect().await?).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    Ok(CurrentOnlyRig {
+        _host: host,
+        module,
+        client,
+        backend,
+        refused,
+        _served: served,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn module_operations_succeed_with_only_current_storage_grants() -> TestResult {
+    use tinybox_bus::{CreateRequest, ReserveRequest, ResourceId, ResourceInfo, Workspace};
+
+    let rig = current_only_rig(&[
+        tinybox_drivers::BOX_COLLECTION,
+        tinybox_drivers::JAIL_INDEX_COLLECTION,
+    ])
+    .await?;
+    setup(rig.module.clone()).await?;
+    let proxy = rig.client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    let workspace = tempfile::tempdir()?;
+    let _: ResourceInfo = proxy
+        .call(
+            "Create",
+            (CreateRequest {
+                resource,
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+
+    let storage = ModuleStorage::connected(rig.module.clone());
+    let boxes = storage.box_store().await?;
+    let records = tokio::task::spawn_blocking({
+        let boxes = Arc::clone(&boxes);
+        move || boxes.list()
+    })
+    .await??;
+    assert_eq!(records.len(), 1, "Create wrote a module box record");
+    let record = records[0].clone();
+    let writer = Arc::clone(&boxes);
+    let id = record.id.clone();
+    tokio::task::spawn_blocking(move || writer.set_state(&id, BoxState::Stopped)).await??;
+    let reader = Arc::clone(&boxes);
+    let id = record.id.clone();
+    let updated = tokio::task::spawn_blocking(move || reader.get(&id)).await??;
+    assert_eq!(updated.state, BoxState::Stopped);
+    let remover = Arc::clone(&boxes);
+    let id = record.id.clone();
+    tokio::task::spawn_blocking(move || remover.remove(&id)).await??;
+    let reader = Arc::clone(&boxes);
+    let records = tokio::task::spawn_blocking(move || reader.list()).await??;
+    assert!(records.is_empty(), "box removal must persist on the host");
+
+    let base = tempfile::tempdir()?;
+    let registry = storage
+        .jail_registry(base.path().to_path_buf(), "current-only".into())
+        .await
+        .ok_or("host serves storage")??;
+    let created = tokio::task::spawn_blocking(move || registry.create("scratch")).await??;
+    let reopened = storage
+        .jail_registry(base.path().to_path_buf(), "current-only".into())
+        .await
+        .ok_or("host serves storage")??;
+    let records = tokio::task::spawn_blocking(move || reopened.list()).await?;
+    assert_eq!(
+        records.len(),
+        1,
+        "jail index was read from the current grant"
+    );
+    assert_eq!(records[0].id, created.id);
+    let refused = rig
+        .refused
+        .lock()
+        .map_err(|_| "grant refusal list was poisoned")?;
+    assert!(refused.is_empty(), "module only used its current grants");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_denied_current_collection_fails_module_creation_without_memory_fallback() -> TestResult {
+    use tinybox_bus::{CreateRequest, ReserveRequest, ResourceId, ResourceInfo, Workspace};
+
+    let rig = current_only_rig(&[tinybox_drivers::JAIL_INDEX_COLLECTION]).await?;
+    setup(rig.module.clone()).await?;
+    let proxy = rig.client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    let workspace = tempfile::tempdir()?;
+    let result = proxy
+        .call::<ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource,
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await;
+    assert!(result.is_err(), "a missing current grant must fail closed");
+    {
+        let refused = rig
+            .refused
+            .lock()
+            .map_err(|_| "grant refusal list was poisoned")?;
+        assert!(
+            refused
+                .iter()
+                .any(|name| name == tinybox_drivers::BOX_COLLECTION),
+            "the module must reach the denied current collection"
+        );
+    }
+    assert!(
+        backend_docs(&rig.backend, tinybox_drivers::BOX_COLLECTION)
+            .await?
+            .is_empty(),
+        "denied current writes must not fall back to module memory"
+    );
+    Ok(())
+}
+
 fn info(id: &str) -> Result<BoxInfo, Box<dyn std::error::Error>> {
     let spec = BoxSpec::new(
         Placement::new(HostRef::new("local")?, SandboxRef::new("passthrough")?),
@@ -58,7 +351,14 @@ async fn host_docs(
     rig: &Rig,
     collection: &'static str,
 ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
-    let docs = Arc::clone(rig.backend.for_scope(&Scope::local())?.documents());
+    backend_docs(&rig.backend, collection).await
+}
+
+async fn backend_docs(
+    backend: &MemoryStorage,
+    collection: &'static str,
+) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
+    let docs = Arc::clone(backend.for_scope(&Scope::local())?.documents());
     let all = docs.query_all(collection, &Query::all()).await?;
     Ok(all.into_iter().map(|entry| entry.doc).collect())
 }

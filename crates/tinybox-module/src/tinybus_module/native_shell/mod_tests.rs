@@ -91,6 +91,9 @@ impl tinybox_jail::JailBackend for Backend {
     fn is_suitable_for_untrusted_code(&self) -> bool {
         true
     }
+    fn is_suitable_for_untrusted_jail(&self, _: &tinybox_jail::Jail) -> bool {
+        true
+    }
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
         use tinybox_core::{Constraint, ConstraintSupport, Enforcement};
         if self.full {
@@ -130,6 +133,7 @@ async fn native_shell_jail_adds_owned_scratch_and_refuses_unsupported_constraint
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: false,
         deny_read: Vec::new(),
+        resources: None,
     });
     let shell = ShellContext::prepare_with_backend(
         request.clone(),

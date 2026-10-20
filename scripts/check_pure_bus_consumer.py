@@ -109,6 +109,7 @@ def validate_dependency_graph(contents: str, workspace_version: str) -> None:
         "tinybox-bus": set(),
         STORAGE_BUS_NAME: set(),
     }
+    tinybox_bus_features = set()
     lines = [line for line in contents.splitlines() if line.strip()]
     if not lines:
         raise ProofError("normal/build dependency graph is missing")
@@ -123,6 +124,7 @@ def validate_dependency_graph(contents: str, workspace_version: str) -> None:
             versions[name].add(version)
         elif name == "tinybox-bus":
             versions[name].add(version)
+            tinybox_bus_features.update(features)
         elif name == STORAGE_BUS_NAME:
             versions[name].add(version)
             if "client" in features:
@@ -146,6 +148,8 @@ def validate_dependency_graph(contents: str, workspace_version: str) -> None:
             "normal/build dependency graph is missing or duplicates TinyBox/storage bus "
             "versions: " + repr(versions)
         )
+    if "storage" not in tinybox_bus_features:
+        raise ProofError("TinyBox storage feature is missing from the all-features dependency graph")
 
 
 def main() -> int:

@@ -3,7 +3,7 @@ use crate::faulty::{Faults, Faulty};
 use serde_json::json;
 use tinybox_core::store::insert_new;
 use tinybox_core::{BoxSpec, HostRef, Placement, SandboxRef, WorkspaceSource};
-use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend};
+use tinystoragedrivers_core::{DocumentStore, MemoryStorage, Precondition, Scope, StorageBackend};
 
 fn documents() -> Arc<dyn DocumentStore> {
     MemoryStorage::new()
@@ -193,25 +193,6 @@ fn tokio_rt() -> tokio::runtime::Runtime {
         .expect("runtime")
 }
 
-fn faulty(faults: Faults) -> Arc<dyn DocumentStore> {
-    Faulty::new(documents(), faults)
-}
-
-#[test]
-fn a_backend_that_refuses_the_collection_fails_to_open() {
-    let result = DocumentBoxStore::new(faulty(Faults {
-        ensure: true,
-        ..Faults::default()
-    }));
-    assert!(matches!(
-        result,
-        Err(Error::Store {
-            operation: "open",
-            ..
-        })
-    ));
-}
-
 #[test]
 fn backend_failures_surface_as_store_errors_per_operation() -> Result<()> {
     let seeded = documents();
@@ -235,7 +216,7 @@ fn backend_failures_surface_as_store_errors_per_operation() -> Result<()> {
     assert!(matches!(
         reading.set_state(&record.id, BoxState::Stopped),
         Err(Error::Store {
-            operation: "read",
+            operation: "update",
             ..
         })
     ));
@@ -266,7 +247,7 @@ fn backend_failures_surface_as_store_errors_per_operation() -> Result<()> {
     assert!(matches!(
         writing.set_state(&record.id, BoxState::Stopped),
         Err(Error::Store {
-            operation: "write",
+            operation: "update",
             ..
         })
     ));
@@ -305,7 +286,7 @@ fn set_state_gives_up_when_the_record_never_settles() -> Result<()> {
     assert!(matches!(
         store.set_state(&record.id, BoxState::Stopped),
         Err(Error::Store {
-            operation: "write",
+            operation: "update",
             ..
         })
     ));
@@ -316,5 +297,47 @@ fn set_state_gives_up_when_the_record_never_settles() -> Result<()> {
 fn the_debug_form_does_not_dump_the_backend() -> Result<()> {
     let store = DocumentBoxStore::new(documents())?;
     assert!(format!("{store:?}").starts_with("DocumentBoxStore"));
+    Ok(())
+}
+
+#[test]
+fn a_stored_box_has_the_v2_body_and_schema_version() -> Result<()> {
+    let docs = documents();
+    let store = DocumentBoxStore::new(Arc::clone(&docs))?;
+    store.insert(&info("build-1")?)?;
+    let bridge = Blocking::new().expect("bridge");
+    let reader = Arc::clone(&docs);
+    let stored = bridge
+        .run(async move { reader.get(BOX_COLLECTION, "build-1").await })
+        .expect("bridge")
+        .expect("get")
+        .expect("stored");
+    assert_eq!(stored.meta.schema, 2);
+    assert_eq!(stored.doc["state"], json!("ready"));
+    assert_eq!(stored.doc["spec"]["lifecycle"]["kind"], json!("ephemeral"));
+    assert!(stored.doc.get("id").is_none(), "the id is the document id");
+    Ok(())
+}
+
+#[test]
+fn a_box_missing_from_a_set_state_is_left_missing() -> Result<()> {
+    let docs = documents();
+    let store = DocumentBoxStore::new(Arc::clone(&docs))?;
+    let id = BoxId::new("ghost")?;
+    assert!(matches!(
+        store.set_state(&id, BoxState::Stopped),
+        Err(Error::UnknownBox { .. })
+    ));
+    assert_eq!(store.list()?.len(), 0);
+    Ok(())
+}
+
+#[test]
+fn more_boxes_than_one_page_all_list() -> Result<()> {
+    let store = DocumentBoxStore::new(documents())?;
+    for n in 0..120 {
+        store.insert(&info(&format!("b{n:03}"))?)?;
+    }
+    assert_eq!(store.list()?.len(), 120);
     Ok(())
 }

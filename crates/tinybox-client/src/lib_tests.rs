@@ -688,6 +688,7 @@ async fn confidential_operations_fail_closed_without_ordinary_retry()
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: true,
         deny_read: Vec::new(),
+        resources: None,
     };
     assert!(client.start_jailed_exec(spawn, jail).await.is_err());
     let shell = shell_exec_request(secret);
@@ -804,6 +805,7 @@ async fn exercise_confidential_resource_wrappers(
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: true,
         deny_read: vec!["/home/user/.ssh".into()],
+        resources: None,
     };
     assert_eq!(
         client

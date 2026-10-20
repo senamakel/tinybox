@@ -247,6 +247,7 @@ async fn new_module_operations_dispatch_and_preserve_validation_errors() -> tiny
                 enforcement: tinybox_bus::JailEnforcement::Declared,
                 require_process_isolation: false,
                 deny_read: Vec::new(),
+                resources: None,
             },
         )
         .await;
@@ -1311,6 +1312,7 @@ async fn stdio_members_refuse_unknown_handles_without_starting_anything() -> tin
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
             deny_read: Vec::new(),
+            resources: None,
         },
     };
     assert!(service.start_stdio(start).await.is_err());

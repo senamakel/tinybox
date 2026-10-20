@@ -81,17 +81,7 @@ fn a_registry_keeps_its_jails_across_reopen_without_an_index_file() {
 
 #[test]
 fn backend_failures_surface_as_io_errors() {
-    let refusing = DocumentIndexStore::new(
-        Faulty::new(
-            documents(),
-            Faults {
-                ensure: true,
-                ..Faults::default()
-            },
-        ),
-        "main",
-    );
-    assert!(refusing.is_err());
+    assert!(DocumentIndexStore::new(documents(), "").is_err());
 
     let reading = DocumentIndexStore::new(
         Faulty::new(
@@ -146,4 +136,27 @@ fn storage_error_kinds_map_to_io_kinds() {
 fn the_debug_form_names_the_registry() {
     let store = DocumentIndexStore::new(documents(), "main").expect("store");
     assert!(format!("{store:?}").contains("main"));
+}
+
+#[test]
+fn a_saved_index_is_stored_with_millisecond_times_and_the_v2_schema() {
+    let docs = documents();
+    let store = DocumentIndexStore::new(Arc::clone(&docs), "main").expect("store");
+    store
+        .save(
+            br#"{"records":{"j1":{"id":"j1","created_at_unix":2,"updated_at_unix":3}},"schema_version":1}"#,
+        )
+        .expect("save");
+    let bridge = tinystoragedrivers_core::Blocking::new().expect("bridge");
+    let reader = Arc::clone(&docs);
+    let stored = bridge
+        .run(async move { reader.get(JAIL_INDEX_COLLECTION, "main").await })
+        .expect("bridge")
+        .expect("get")
+        .expect("stored");
+    assert_eq!(stored.meta.schema, 2);
+    assert_eq!(
+        stored.doc,
+        serde_json::json!({"records": {"j1": {"id": "j1", "created_ms": 2000, "updated_ms": 3000}}})
+    );
 }
