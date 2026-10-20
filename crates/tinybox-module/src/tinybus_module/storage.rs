@@ -28,6 +28,7 @@ pub(super) struct ModuleStorage {
 
 impl ModuleStorage {
     /// Storage reached through `connection`.
+    #[cfg(test)]
     pub(super) fn connected(connection: Connection) -> Self {
         Self::with_descriptor(connection, None)
     }
