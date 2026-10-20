@@ -303,9 +303,9 @@ fn effective_denials(deny_read: &[PathBuf], mounts: &[Mount]) -> Vec<PathBuf> {
 }
 
 /// Whether a denial would apply to a mandatory private mount rather than an
-/// explicit bind mounted over it. A grant strictly above the denial shadows
-/// the private mount at that path; a grant below the denial is removed by the
-/// denial and cannot make it safe.
+/// explicit bind mounted over it. A bind grant at or above the denied path
+/// covers it; a grant below the denial is removed by the denial and cannot
+/// make it safe.
 fn intersects_private_mount(deny: &Path, mounts: &[Mount]) -> bool {
     ["/proc", "/dev", "/tmp"].iter().any(|private| {
         let private = Path::new(private);

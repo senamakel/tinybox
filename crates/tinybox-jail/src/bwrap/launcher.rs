@@ -74,8 +74,8 @@ pub(super) fn pick_shell(exists: impl Fn(&str) -> bool) -> &'static str {
 
 /// Where the args file may live: `$XDG_RUNTIME_DIR` (a private per-user
 /// directory) when set, else the temp directory. A candidate that lies under
-/// any of the jail's mounts is refused, since the jailed program could then
-/// read or replace the file.
+/// any readable grant is refused, since the jailed program could then read or
+/// replace the file.
 ///
 /// # Errors
 /// `PermissionDenied` when no candidate is outside the jail's grants.
