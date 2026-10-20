@@ -4,7 +4,7 @@ from pathlib import Path
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_REV = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e"
+EXPECTED_REV = "9e14f65666b11782ec1054aba576114026d180f8"
 EXPECTED_GIT = "https://github.com/tinyhumansai/tinybus"
 
 
@@ -22,7 +22,7 @@ def check() -> None:
     if tinybus.get("default-features") is not False or tinybus.get("features", []):
         raise AssertionError("shared TinyBus dependency must disable defaults and enable no optional features")
     if (tinybus.get("version"), tinybus.get("git"), tinybus.get("rev")) != (
-        ">=0.3.3, <0.4.0", EXPECTED_GIT, EXPECTED_REV
+        "=0.3.11", EXPECTED_GIT, EXPECTED_REV
     ):
         raise AssertionError("shared TinyBus dependency must retain its canonical compatible source pin")
 
@@ -41,7 +41,7 @@ def check() -> None:
 
     module_sdk = workspace["workspace"]["dependencies"]["tinybus-module"]
     if (module_sdk.get("version"), module_sdk.get("git"), module_sdk.get("rev")) != (
-        ">=0.3.3, <0.4.0", EXPECTED_GIT, EXPECTED_REV
+        "=0.3.11", EXPECTED_GIT, EXPECTED_REV
     ):
         raise AssertionError("module SDK must retain its canonical compatible source pin")
     expected_patches = {
