@@ -113,9 +113,29 @@ impl MigrationPayloadHandler for TinyBoxMigrationHandler {
 }
 
 fn transform_documents(
-    _request: tinystoragedrivers_core::schema::DocumentsTransformRequest,
+    request: tinystoragedrivers_core::schema::DocumentsTransformRequest,
 ) -> std::result::Result<Vec<TargetRecord>, TransformError> {
-    Err(unsupported_transform())
+    if request.version != MIGRATION_TRANSFORM_VERSION {
+        return Err(TransformError {
+            kind: TransformErrorKind::UnsupportedVersion,
+            message: "unsupported TinyBox migration operation version".to_owned(),
+        });
+    }
+    let transform: fn(SourceRecord) -> Result<TargetRecord> = match request.operation.as_str() {
+        BOX_MIGRATION_OPERATION => box_to_v2,
+        JAIL_INDEX_MIGRATION_OPERATION => jail_index_to_v2,
+        _ => return Err(unsupported_transform()),
+    };
+    request
+        .records
+        .into_iter()
+        .map(|record| {
+            transform(record).map_err(|_| TransformError {
+                kind: TransformErrorKind::InvalidInput,
+                message: "TinyBox rejected an invalid migration record".to_owned(),
+            })
+        })
+        .collect()
 }
 
 fn unsupported_transform() -> TransformError {

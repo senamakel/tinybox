@@ -117,7 +117,10 @@ fn module_migration_declaration_copies_owner_schema_and_explicit_operations() {
         declaration.steps[0].transform.operation,
         BOX_MIGRATION_OPERATION
     );
-    assert_eq!(declaration.steps[0].transform.version, MIGRATION_TRANSFORM_VERSION);
+    assert_eq!(
+        declaration.steps[0].transform.version,
+        MIGRATION_TRANSFORM_VERSION
+    );
     assert_eq!(declaration.steps[1].id, "rename_jail_index");
     assert_eq!(declaration.steps[1].item, JAIL_INDEX_COLLECTION);
     assert_eq!(
@@ -134,8 +137,8 @@ fn module_migration_declaration_copies_owner_schema_and_explicit_operations() {
 
 #[test]
 fn module_migration_handler_reuses_the_v1_box_transform() {
-    let reply = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
-        DocumentsTransformRequest {
+    let reply =
+        TinyBoxMigrationHandler.transform(MigrationPayload::Documents(DocumentsTransformRequest {
             operation: BOX_MIGRATION_OPERATION.to_owned(),
             version: MIGRATION_TRANSFORM_VERSION,
             records: vec![SourceRecord {
@@ -143,8 +146,7 @@ fn module_migration_handler_reuses_the_v1_box_transform() {
                 body: v1_box(),
                 meta: Default::default(),
             }],
-        },
-    ));
+        }));
     let MigrationPayloadReply::Documents(Ok(records)) = reply else {
         panic!("the box transform returns document records");
     };
@@ -159,13 +161,12 @@ fn module_migration_handler_reuses_the_v1_box_transform() {
 
 #[test]
 fn module_migration_handler_rejects_unsupported_operations_and_payload_families() {
-    let unknown_operation = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
-        DocumentsTransformRequest {
+    let unknown_operation =
+        TinyBoxMigrationHandler.transform(MigrationPayload::Documents(DocumentsTransformRequest {
             operation: "box.unrecognized".to_owned(),
             version: MIGRATION_TRANSFORM_VERSION,
             records: Vec::new(),
-        },
-    ));
+        }));
     assert!(matches!(
         unknown_operation,
         MigrationPayloadReply::Documents(Err(TransformError {
@@ -174,13 +175,12 @@ fn module_migration_handler_rejects_unsupported_operations_and_payload_families(
         }))
     ));
 
-    let unsupported_version = TinyBoxMigrationHandler.transform(MigrationPayload::Documents(
-        DocumentsTransformRequest {
+    let unsupported_version =
+        TinyBoxMigrationHandler.transform(MigrationPayload::Documents(DocumentsTransformRequest {
             operation: BOX_MIGRATION_OPERATION.to_owned(),
             version: MIGRATION_TRANSFORM_VERSION + 1,
             records: Vec::new(),
-        },
-    ));
+        }));
     assert!(matches!(
         unsupported_version,
         MigrationPayloadReply::Documents(Err(TransformError {
