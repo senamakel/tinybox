@@ -401,6 +401,30 @@ async fn store_calls_on_the_only_worker_do_not_deadlock() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bound_descriptor_fails_closed_without_its_service_peer() -> TestResult {
+    let rig = rig(false).await?;
+    let descriptor = serde_json::from_value::<tinystoragedrivers_busproxy::StorageDescriptor>(
+        serde_json::json!({
+            "service_peer": ":1.999",
+            "registration_id": 1,
+            "object_root": "/org/tinystoragedrivers/Leases/1",
+        }),
+    )?;
+    let storage = ModuleStorage::with_descriptor(rig.module, Some(descriptor));
+
+    for error in [storage.validate_configured().await.err(), storage.box_store().await.err()] {
+        assert!(matches!(
+            error,
+            Some(tinybox_core::Error::Store {
+                operation: "connect",
+                ref message,
+            }) if message == "governed storage route unavailable"
+        ));
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn without_a_storage_host_box_records_stay_in_memory() -> TestResult {
     let rig = rig(false).await?;
     let storage = ModuleStorage::connected(rig.module.clone());
