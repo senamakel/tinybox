@@ -1,7 +1,12 @@
 //! Unconditional compiled-artifact admission and local grant discovery proof.
 
 use std::time::Duration;
-use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
+use tinybus::{
+    Connection,
+    broker::Broker,
+    module::ModuleHost,
+    transport::memory::{MemoryBus, MemoryTransport},
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compiled_manifest_admits_and_executes_grant_and_shell_discovery()
@@ -26,10 +31,16 @@ async fn compiled_manifest_admits_and_executes_grant_and_shell_discovery()
         artifact.display()
     );
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let (broker_transport, controller_transport) = MemoryTransport::pair();
+    broker.attach_module_controller(std::sync::Arc::new(broker_transport))?;
+    let _controller = Connection::connect(Box::new(controller_transport)).await?;
     let broker_task = broker.spawn(bus.clone());
     let modules = ModuleHost::new(broker);
     let loaded = modules.load_file(&artifact)?;
+    modules
+        .ensure_ready(loaded.manifest.bus_name.as_str())
+        .await?;
     let declared: Vec<_> = loaded
         .manifest
         .provides
