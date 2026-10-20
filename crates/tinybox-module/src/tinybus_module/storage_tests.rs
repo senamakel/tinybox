@@ -412,7 +412,10 @@ async fn a_bound_descriptor_fails_closed_without_its_service_peer() -> TestResul
     )?;
     let storage = ModuleStorage::with_descriptor(rig.module, Some(descriptor));
 
-    for error in [storage.validate_configured().await.err(), storage.box_store().await.err()] {
+    for error in [
+        storage.validate_configured().await.err(),
+        storage.box_store().await.err(),
+    ] {
         assert!(matches!(
             error,
             Some(tinybox_core::Error::Store {
