@@ -17,13 +17,15 @@ from check_pure_bus_consumer import (  # noqa: E402
 
 
 STORAGE_URL = "https://github.com/tinyhumansai/tinystoragedrivers"
-STORAGE_REV = "c9ea6ff1615b77b55d7269403af5fd11bedc9ce8"
+STORAGE_VERSION = "1.9.0"
+STORAGE_REV = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b"
+PREVIOUS_STORAGE_REV = "c9ea6ff1615b77b55d7269403af5fd11bedc9ce8"
 STORAGE_SOURCE = f"git+{STORAGE_URL}?rev={STORAGE_REV}#{STORAGE_REV}"
 
 
 def manifest(storage_dependency=None):
     storage_dependency = storage_dependency or {
-        "version": "1.5.0",
+        "version": STORAGE_VERSION,
         "git": STORAGE_URL,
         "rev": STORAGE_REV,
         "default-features": False,
@@ -43,7 +45,7 @@ tinystoragedrivers-bus = {{ version = "{storage_dependency['version']}", git = "
 '''
 
 
-def lockfile(version="1.5.0", source=STORAGE_SOURCE):
+def lockfile(version=STORAGE_VERSION, source=STORAGE_SOURCE):
     return f'''version = 4
 
 [[package]]
@@ -63,10 +65,10 @@ source = "{source}"
 
 VALID_TREE = """tinybox-bus-pure-consumer v0.1.0
 tinybox-bus v0.1.39 [default]
-tinystoragedrivers-bus v1.5.0 []
+tinystoragedrivers-bus v1.9.0 []
 serde v1.0.0 [default, derive, std]
 tinybox-bus v0.1.39 [default, storage]
-tinystoragedrivers-bus v1.5.0 []
+tinystoragedrivers-bus v1.9.0 []
 serde v1.0.0 [default, derive, std]
 """
 
@@ -95,14 +97,15 @@ class PureBusConsumerProofTests(unittest.TestCase):
         validate_lockfile(lockfile())
         validate_dependency_graph(VALID_TREE, "0.1.39")
 
-    def test_rejects_old_published_release_even_when_it_was_the_previous_expected_pin(self):
+    def test_rejects_previous_published_release_even_when_its_revision_was_once_pinned(self):
         with self.assertRaisesRegex(ProofError, "version and source"):
-            validate_lockfile(lockfile("1.3.0", "git+" + STORAGE_URL + "?rev=08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168#08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168"))
+            previous_source = f"git+{STORAGE_URL}?rev={PREVIOUS_STORAGE_REV}#{PREVIOUS_STORAGE_REV}"
+            validate_lockfile(lockfile("1.5.0", previous_source))
 
     def test_rejects_wrong_revision_with_the_correct_version_and_url(self):
         wrong_rev = "a" * 40
         with self.assertRaisesRegex(ProofError, "version and source"):
-            validate_lockfile(lockfile("1.5.0", f"git+{STORAGE_URL}?rev={wrong_rev}#{wrong_rev}"))
+            validate_lockfile(lockfile(STORAGE_VERSION, f"git+{STORAGE_URL}?rev={wrong_rev}#{wrong_rev}"))
 
     def test_rejects_missing_or_duplicate_lock_resolution_evidence(self):
         with self.assertRaisesRegex(ProofError, "resolution evidence"):
@@ -114,18 +117,18 @@ class PureBusConsumerProofTests(unittest.TestCase):
 
     def test_rejects_noncanonical_or_featureful_direct_manifest_dependency(self):
         for dependency in (
-            {"version": "1.5.0", "git": STORAGE_URL + ".git", "rev": STORAGE_REV, "default-features": False},
-            {"version": "1.5.0", "git": STORAGE_URL, "rev": "08caa16d1d4e3c6b8d649e4f26fe1a426ee1d168", "default-features": False},
-            {"version": "1.5.0", "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": True},
-            {"version": "1.5.0", "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": False, "features": ["client"]},
+            {"version": STORAGE_VERSION, "git": STORAGE_URL + ".git", "rev": STORAGE_REV, "default-features": False},
+            {"version": STORAGE_VERSION, "git": STORAGE_URL, "rev": PREVIOUS_STORAGE_REV, "default-features": False},
+            {"version": STORAGE_VERSION, "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": True},
+            {"version": STORAGE_VERSION, "git": STORAGE_URL, "rev": STORAGE_REV, "default-features": False, "features": ["client"]},
         ):
             with self.subTest(dependency=dependency), self.assertRaises(ProofError):
                 validate_manifest(manifest(dependency))
 
     def test_rejects_client_feature_and_implementation_runtime_or_database_nodes(self):
         bad_trees = (
-            VALID_TREE.replace("tinystoragedrivers-bus v1.5.0 []", "tinystoragedrivers-bus v1.5.0 [client]"),
-            VALID_TREE + "tinystoragedrivers-client v1.5.0\n",
+            VALID_TREE.replace("tinystoragedrivers-bus v1.9.0 []", "tinystoragedrivers-bus v1.9.0 [client]"),
+            VALID_TREE + "tinystoragedrivers-client v1.9.0\n",
             VALID_TREE + "tinybox-module v0.1.39\n",
             VALID_TREE + "tokio v1.0.0 [rt]\n",
             VALID_TREE + "sqlx v0.8.0\n",
@@ -137,7 +140,7 @@ class PureBusConsumerProofTests(unittest.TestCase):
     def test_rejects_missing_duplicate_or_wrong_versions_in_the_resolved_graph(self):
         for tree in (
             "tinybox-bus-pure-consumer v0.1.0\ntinybox-bus v0.1.39\n",
-            VALID_TREE + "tinystoragedrivers-bus v1.3.0\n",
+            VALID_TREE + "tinystoragedrivers-bus v1.8.0\n",
             VALID_TREE + "tinybox-bus v0.1.36\n",
         ):
             with self.subTest(tree=tree), self.assertRaises(ProofError):
