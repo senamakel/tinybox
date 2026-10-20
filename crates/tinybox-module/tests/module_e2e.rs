@@ -11,12 +11,12 @@ use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::{ModuleHost, ModuleState};
 use tinybus::transport::memory::MemoryBus;
-use tinystoragedrivers_core::StorageBackend;
 use tinystoragedrivers_busproxy::{
     AuditEvent, AuditSink, Environment, GovernedEndpointLimits, GovernedStorage, GrantPolicy,
     HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
 };
 use tinystoragedrivers_client::StorageServer;
+use tinystoragedrivers_core::StorageBackend;
 
 const BUS_NAME: &str = "ai.tinyhumans.tinybox.Box";
 const OBJECT_PATH: &str = "/ai/tinyhumans/tinybox/Box";

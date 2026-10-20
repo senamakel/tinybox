@@ -1551,6 +1551,7 @@ dependencies = [
  "tinybox-ssh",
  "tinybus",
  "tinybus-module",
+ "tinystoragedrivers-bus",
  "tinystoragedrivers-busproxy",
  "tinystoragedrivers-client",
  "tinystoragedrivers-core",
