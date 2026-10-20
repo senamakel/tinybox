@@ -27,7 +27,7 @@ mod storage_schema;
 
 pub use box_store::DocumentBoxStore;
 pub use index_store::DocumentIndexStore;
-pub use storage_schema::storage_schema;
+pub use storage_schema::{TinyBoxMigrationHandler, storage_schema, storage_schema_declaration};
 pub use tinybox_bus::storage::{BOX_COLLECTION, JAIL_INDEX_COLLECTION};
 
 #[cfg(test)]

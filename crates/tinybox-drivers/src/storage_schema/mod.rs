@@ -15,8 +15,11 @@
 //! decoders as well as the migrations that invoke them.
 
 use super::{BOX_COLLECTION, JAIL_INDEX_COLLECTION};
+use tinystoragedrivers_core::schema::declaration_from_schema;
+use tinystoragedrivers_core::schema::delivery::MigrationPayloadHandler;
 use tinystoragedrivers_core::schema::{
-    Owner, Schema, ScopeClass, SourceRecord, Step, TargetRecord,
+    MigrationPayload, MigrationPayloadReply, Owner, Schema, SchemaDeclaration, ScopeClass,
+    SourceRecord, Step, TargetRecord, TransformError, TransformErrorKind,
 };
 use tinystoragedrivers_core::{Key, Result, StorageError};
 
@@ -63,6 +66,36 @@ pub fn storage_schema() -> Schema {
             )
             .source(V1_JAIL_INDEX_COLLECTION),
         )
+}
+
+/// Export this owner's existing schema and explicit operation selectors for
+/// confidential module migration delivery.
+///
+/// # Errors
+/// Returns an error if a schema step has no operation mapping.
+pub fn storage_schema_declaration() -> Result<SchemaDeclaration> {
+    let schema = storage_schema();
+    declaration_from_schema(&schema, |step| {
+        let operation = match step.id {
+            "rename_boxes" => "box.rename_boxes",
+            "rename_jail_index" => "box.rename_jail_index",
+            _ => return None,
+        };
+        Some((operation.to_owned(), 1))
+    })
+}
+
+/// Stateless TinyBox owner transforms for the TSD migration exchange.
+#[derive(Debug, Default)]
+pub struct TinyBoxMigrationHandler;
+
+impl MigrationPayloadHandler for TinyBoxMigrationHandler {
+    fn transform(&self, _payload: MigrationPayload) -> MigrationPayloadReply {
+        MigrationPayloadReply::Documents(Err(TransformError {
+            kind: TransformErrorKind::UnsupportedOperation,
+            message: "unsupported TinyBox migration payload".to_owned(),
+        }))
+    }
 }
 
 /// A v1 box row (a serialized `BoxInfo`) as a v2 record under the same id.
