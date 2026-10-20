@@ -40,6 +40,7 @@ tinybox-linux.workspace = true
 tinybox-microvm.workspace = true
 tinybus = { workspace = true, features = ["macros", "modules"] }
 tinybus-module.workspace = true
+serde.workspace = true
 # Box records live on the host's storage ports, reached over the storage bus;
 # the module has no storage backend or file of its own.
 tinybox-drivers.workspace = true

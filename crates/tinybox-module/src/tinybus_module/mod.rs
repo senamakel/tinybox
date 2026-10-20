@@ -9,7 +9,9 @@ use std::future::Future;
 use std::pin::Pin;
 
 use tinybox_core::{IsolationLevel, SandboxCapabilities};
-use tinybus::{Connection, Result as TinyBusResult};
+use tinybus::Result as TinyBusResult;
+#[cfg(test)]
+use tinybus::Connection;
 use tinybus_module::ModuleSetupContext;
 
 use tinybox_bus::{
@@ -630,6 +632,16 @@ async fn setup_with_context(
         .await?;
     connection.request_name(INTERFACE).await?;
     Ok(())
+}
+
+#[cfg(test)]
+async fn setup(connection: Connection) -> TinyBusResult<()> {
+    setup_service(
+        connection.clone(),
+        std::sync::Arc::new(resources::Resources::default()),
+        storage::ModuleStorage::connected(connection),
+    )
+    .await
 }
 
 tinybus_module::module_export_optional_static! {

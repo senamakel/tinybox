@@ -260,7 +260,13 @@ impl Resources {
         Ok(())
     }
 
-    pub(super) async fn create(
+    #[cfg(test)]
+    pub(super) async fn create(&self, request: CreateRequest) -> Result<ResourceInfo> {
+        self.create_with_storage(&super::storage::ModuleStorage::default(), request)
+            .await
+    }
+
+    pub(super) async fn create_with_storage(
         &self,
         storage: &super::storage::ModuleStorage,
         request: CreateRequest,
@@ -269,8 +275,14 @@ impl Resources {
             tinybox_bus::MAX_OUTPUT_BYTES,
         ));
         let host = configured_host(&request.host, collector.clone())?;
-        self.create_with_platform(request, host, Some(collector), super::Platform::current())
-            .await
+        self.create_with_platform(
+            storage,
+            request,
+            host,
+            Some(collector),
+            super::Platform::current(),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -279,7 +291,8 @@ impl Resources {
         request: CreateRequest,
         host: Arc<dyn tinybox_core::Host>,
     ) -> Result<ResourceInfo> {
-        self.create_with_platform(request, host, None, super::Platform::current())
+        let storage = super::storage::ModuleStorage::default();
+        self.create_with_platform(&storage, request, host, None, super::Platform::current())
             .await
     }
 
@@ -290,12 +303,14 @@ impl Resources {
         host: Arc<dyn tinybox_core::Host>,
         platform: super::Platform,
     ) -> Result<ResourceInfo> {
-        self.create_with_platform(request, host, None, platform)
+        let storage = super::storage::ModuleStorage::default();
+        self.create_with_platform(&storage, request, host, None, platform)
             .await
     }
 
     async fn create_with_platform(
         &self,
+        storage: &super::storage::ModuleStorage,
         request: CreateRequest,
         host: Arc<dyn tinybox_core::Host>,
         collector: Option<Arc<tinybox_host::LimitedLocalHost>>,
