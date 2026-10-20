@@ -144,7 +144,7 @@ fn module_migration_handler_reuses_the_v1_box_transform() {
             records: vec![SourceRecord {
                 id: "build-1".to_owned(),
                 body: v1_box(),
-                meta: Default::default(),
+                meta: tinystoragedrivers_core::Meta::default(),
             }],
         }));
     let MigrationPayloadReply::Documents(Ok(records)) = reply else {
