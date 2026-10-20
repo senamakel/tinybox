@@ -985,7 +985,7 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
     use tinystoragedrivers_busproxy::{PerCallerEndpoint, serve};
     use tinystoragedrivers_client::StorageServer;
-    use tinystoragedrivers_core::{DocumentStoreExt, Query};
+    use tinystoragedrivers_core::{DocumentStoreExt, Query, Scope, StorageBackend};
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
     };
