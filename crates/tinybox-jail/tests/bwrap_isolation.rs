@@ -226,13 +226,47 @@ fn deny_read_masks_a_runtime_directory() -> io::Result<()> {
     std::fs::write(dir.join("socket-token"), "token")?;
     let mut j = jail(root.path());
     j.deny_read = vec![dir.clone()];
-    let script = format!("ls '{0}'; cat '{0}/socket-token'", dir.display());
-    let (_, out) = sh(&backend, &j, &script)?;
+    let script = format!(
+        "ls '{0}'; cat '{0}/socket-token'; if touch '{0}/new-file'; then echo WRITE_SUCCEEDED; fi",
+        dir.display()
+    );
+    let out = match sh(&backend, &j, &script) {
+        Ok((_, out)) => out,
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            done("deny-dir-refused", start);
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     assert!(
         !out.contains("socket-token") && !out.contains("token"),
         "{out}"
     );
+    assert!(
+        !out.contains("WRITE_SUCCEEDED"),
+        "denied directory accepted a write: {out}"
+    );
     done("deny-dir", start);
+    Ok(())
+}
+
+#[test]
+fn denials_intersecting_private_mounts_are_refused() -> io::Result<()> {
+    let Some(backend) = backend()? else {
+        return Ok(());
+    };
+    let start = Instant::now();
+    let root = tempfile::tempdir()?;
+    for denied in ["/proc", "/proc/self", "/dev/null", "/tmp"] {
+        let mut j = jail(root.path());
+        j.deny_read = vec![denied.into()];
+        assert_eq!(
+            refused(&backend, &j),
+            Some(io::ErrorKind::InvalidInput),
+            "private-mount denial {denied} was not rejected"
+        );
+    }
+    done("private-mount-denial-refused", start);
     Ok(())
 }
 

@@ -162,23 +162,42 @@ fn a_grant_under_tmp_is_still_allowed() -> io::Result<()> {
 }
 
 #[test]
-fn deny_read_directly_inside_a_grant_is_masked_after_the_binds() -> io::Result<()> {
+fn deny_read_file_inside_a_grant_is_masked_after_the_bind() -> io::Result<()> {
     let root = tempfile::tempdir()?;
-    let secret_dir = root.path().join("secrets");
-    std::fs::create_dir(&secret_dir)?;
     let secret_file = root.path().join("token");
     std::fs::write(&secret_file, "x")?;
     let mut j = jail(root.path());
-    j.deny_read = vec![secret_dir.clone(), secret_file.clone()];
+    j.deny_read = vec![secret_file.clone()];
     let argv = build(&j)?;
     let bind = triple(&argv, "--bind", root.path());
-    let dir_mask = pair(&argv, "--tmpfs", &secret_dir);
     let file = secret_file.display().to_string();
     let file_mask = argv
         .windows(3)
         .position(|w| w[0] == "--ro-bind" && w[1] == "/dev/null" && w[2] == file);
-    assert!(bind.is_some() && dir_mask.is_some() && file_mask.is_some());
-    assert!(bind < dir_mask && bind < file_mask);
+    assert!(bind.is_some() && file_mask.is_some());
+    assert!(bind < file_mask);
+    Ok(())
+}
+
+#[test]
+fn deny_read_directory_is_read_only_or_refused() -> io::Result<()> {
+    let root = tempfile::tempdir()?;
+    let secret_dir = root.path().join("secrets");
+    std::fs::create_dir(&secret_dir)?;
+    std::fs::write(secret_dir.join("token"), "x")?;
+    let mut j = jail(root.path());
+    j.deny_read = vec![secret_dir.clone()];
+
+    match jail_args(&j, None, OPTS) {
+        Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
+        Ok(argv) => {
+            let bind = triple(&argv, "--bind", root.path());
+            let empty_mount = pair(&argv, "--tmpfs", &secret_dir);
+            let readonly = pair(&argv, "--remount-ro", &secret_dir);
+            assert!(bind.is_some() && empty_mount.is_some() && readonly.is_some());
+            assert!(bind < empty_mount && empty_mount < readonly);
+        }
+    }
     Ok(())
 }
 
@@ -208,9 +227,28 @@ fn deny_read_under_a_baseline_mount_is_enforced() -> io::Result<()> {
     let mut j = jail(root.path());
     j.deny_read = vec![PathBuf::from("/usr/bin")];
     if Path::new("/usr/bin").is_dir() {
-        let argv = build(&j)?;
-        assert!(triple(&argv, "--ro-bind-try", Path::new("/usr")).is_some());
-        assert!(pair(&argv, "--tmpfs", Path::new("/usr/bin")).is_some());
+        match jail_args(&j, None, OPTS) {
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
+            Ok(argv) => {
+                let empty_mount = pair(&argv, "--tmpfs", Path::new("/usr/bin"));
+                let readonly = pair(&argv, "--remount-ro", Path::new("/usr/bin"));
+                assert!(triple(&argv, "--ro-bind-try", Path::new("/usr")).is_some());
+                assert!(empty_mount.is_some() && readonly.is_some());
+                assert!(empty_mount < readonly);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn denials_that_intersect_private_mounts_are_refused() -> io::Result<()> {
+    let root = tempfile::tempdir()?;
+    for denied in ["/proc", "/proc/self", "/dev/null", "/tmp"] {
+        let mut j = jail(root.path());
+        j.deny_read = vec![PathBuf::from(denied)];
+        let kind = jail_args(&j, None, OPTS).err().map(|error| error.kind());
+        assert_eq!(kind, Some(io::ErrorKind::InvalidInput), "{denied}");
     }
     Ok(())
 }
@@ -231,7 +269,15 @@ fn deny_read_deeper_than_a_child_of_a_writable_grant_is_refused() -> io::Result<
     std::fs::create_dir_all(&nested)?;
     let mut j = jail(root.path()).add_read_only(ro.path());
     j.deny_read = vec![nested.clone()];
-    assert!(pair(&build(&j)?, "--tmpfs", &nested).is_some());
+    match jail_args(&j, None, OPTS) {
+        Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
+        Ok(argv) => {
+            let empty_mount = pair(&argv, "--tmpfs", &nested);
+            let readonly = pair(&argv, "--remount-ro", &nested);
+            assert!(empty_mount.is_some() && readonly.is_some());
+            assert!(empty_mount < readonly);
+        }
+    }
     Ok(())
 }
 
