@@ -1005,9 +1005,8 @@ fn legacy_v1_jail_index() -> serde_json::Value {
 #[ignore = "requires TINYBOX_TEST_MODULE to point at the built cdylib"]
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
 -> Result<(), Box<dyn std::error::Error>> {
-    use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
     use tinystoragedrivers_tinybus::migration::{
-        EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
+        EXCHANGE_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
     };
 
     let source = std::env::var_os("TINYBOX_TEST_MODULE")
@@ -1046,6 +1045,32 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         "TinyBox opens its ordinary storage path only after host migration completes"
     );
 
+    exercise_profile_switches(
+        &fixture,
+        &backend,
+        &registration,
+        &proxy,
+        descriptor_a,
+        lease_a,
+        &resource_a.resource,
+    )
+    .await?;
+    registration.shutdown().await?;
+    fixture.modules.shutdown(Duration::from_secs(5)).await;
+    Ok(())
+}
+
+async fn exercise_profile_switches(
+    fixture: &CompiledMigrationFixture,
+    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
+    registration: &BoxStorageRegistration,
+    proxy: &tinybus::Proxy<'_>,
+    descriptor_a: tinystoragedrivers_busproxy::StorageDescriptor,
+    lease_a: tinystoragedrivers_tinybus::StorageLease,
+    resource_a: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tinybox_bus::ResourceInfo;
+
     let profile_b = "box-other-profile";
     let migration_b = tinystoragedrivers_tinybus::migration::MigrationModuleClient::discover(
         &fixture.controller,
@@ -1058,10 +1083,10 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     reinitialize_box(&fixture.modules, descriptor_b.clone()).await?;
     assert_eq!(
         proxy
-            .call::<ResourceInfo>("Inspect", (resource_a.resource.clone(),))
+            .call::<ResourceInfo>("Inspect", (resource_a.to_owned(),))
             .await?
             .resource,
-        resource_a.resource,
+        resource_a,
         "resource A remains in the shared module registry after binding B"
     );
     let workspace_b = tempfile::tempdir()?;
@@ -1103,12 +1128,12 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         "resource B keeps its original store after reinitializing A"
     );
     let workspace_a2 = tempfile::tempdir()?;
-    let resource_a2 = create_passthrough_resource(&proxy, workspace_a2.path()).await?;
+    let resource_a2 = create_passthrough_resource(proxy, workspace_a2.path()).await?;
     assert_eq!(box_record_count(&backend, "local").await?, 3);
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
     proxy
-        .call::<()>("Close", (resource_a.resource.clone(),))
+        .call::<()>("Close", (resource_a.to_owned(),))
         .await?;
     proxy
         .call::<()>("Close", (resource_a2.resource.clone(),))
@@ -1119,6 +1144,31 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 0);
 
+    exercise_revocation_and_shutdown(
+        fixture,
+        backend,
+        registration,
+        proxy,
+        descriptor_b,
+        lease_a,
+    )
+    .await
+}
+
+async fn exercise_revocation_and_shutdown(
+    fixture: &CompiledMigrationFixture,
+    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
+    registration: &BoxStorageRegistration,
+    proxy: &tinybus::Proxy<'_>,
+    descriptor_b: tinystoragedrivers_busproxy::StorageDescriptor,
+    lease_a: tinystoragedrivers_tinybus::StorageLease,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
+    use tinystoragedrivers_tinybus::migration::{
+        GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
+    };
+
+    let profile_b = "box-other-profile";
     assert!(registration.revoke(&lease_a).await);
     let workspace_revoked = tempfile::tempdir()?;
     let failed_resource = proxy
@@ -1140,8 +1190,9 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     assert_eq!(box_record_count(&backend, "local").await?, 1);
 
     reinitialize_box(&fixture.modules, descriptor_b).await?;
-    let workspace_b2 = tempfile::tempdir()?;
-    let _resource_b2 = create_passthrough_resource(&proxy, workspace_b2.path()).await?;
+    let workspace_profile_b_retry = tempfile::tempdir()?;
+    let _resource_profile_b_retry =
+        create_passthrough_resource(proxy, workspace_profile_b_retry.path()).await?;
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
@@ -1159,8 +1210,9 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .is_err(),
         "a revoked descriptor must fail before service replacement"
     );
-    let workspace_b3 = tempfile::tempdir()?;
-    let _resource_b3 = create_passthrough_resource(&proxy, workspace_b3.path()).await?;
+    let workspace_profile_b_after_reject = tempfile::tempdir()?;
+    let _resource_profile_b_after_reject =
+        create_passthrough_resource(proxy, workspace_profile_b_after_reject.path()).await?;
     assert_eq!(box_record_count(&backend, profile_b).await?, 2);
 
     proxy.call::<()>("Shutdown", ()).await?;
@@ -1179,8 +1231,6 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         "box",
         "the selected host and module remain live after storage operations"
     );
-    registration.shutdown().await?;
-    fixture.modules.shutdown(Duration::from_secs(5)).await;
     Ok(())
 }
 
