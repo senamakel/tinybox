@@ -284,7 +284,7 @@ fn deny_read_equal_to_an_extra_grant_under_private_tmp_prevents_creation() -> io
 
     let directory = denied.path().display();
     let script = format!(
-        "if mkdir '{directory}/new'; then echo DIRECTORY_CREATED; fi; \
+        "if mkdir '{directory}'; then echo DIRECTORY_CREATED; fi; \
          if touch '{directory}/new-file'; then echo WRITE_SUCCEEDED; fi"
     );
     let (_, output) = sh(&backend, &j, &script)?;
