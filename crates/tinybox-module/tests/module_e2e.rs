@@ -10,7 +10,7 @@ use tinybox_bus::{
 use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::{ModuleHost, ModuleState};
-use tinybus::transport::memory::MemoryBus;
+use tinybus::transport::memory::{MemoryBus, MemoryTransport};
 use tinystoragedrivers_busproxy::{
     AuditEvent, AuditSink, Environment, GovernedEndpointLimits, GovernedStorage, GrantPolicy,
     HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
@@ -38,7 +38,8 @@ async fn compiled_module_transfers_workspace_files_over_a_broker()
     std::fs::write(&input, &payload)?;
 
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let _controller = select_module_controller(&broker).await?;
     let broker_task = broker.spawn(bus.clone());
     let modules = ModuleHost::new(broker);
     let loaded = modules.load_file(artifact)?;
@@ -188,7 +189,8 @@ async fn compiled_module_runs_one_shot_docker_through_a_broker()
     let workspace = tempfile::tempdir()?;
 
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let _controller = select_module_controller(&broker).await?;
     let broker_task = broker.spawn(bus.clone());
     let modules = ModuleHost::new(broker);
     let loaded = modules.load_file(artifact)?;
@@ -313,7 +315,8 @@ async fn compiled_module_streams_ssh_output_and_acknowledges_remote_cancellation
     std::fs::copy(artifact, &isolated_artifact)?;
     let workspace = tempfile::tempdir()?;
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let _controller = select_module_controller(&broker).await?;
     let broker_task = broker.spawn(bus.clone());
     let modules = ModuleHost::new(broker);
     modules.load_file(isolated_artifact)?;
@@ -385,7 +388,8 @@ async fn compiled_module_streams_docker_output_and_acknowledges_container_cancel
     std::fs::copy(artifact, &isolated_artifact)?;
     let workspace = tempfile::tempdir()?;
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let _controller = select_module_controller(&broker).await?;
     let broker_task = broker.spawn(bus.clone());
     let modules = ModuleHost::new(broker);
     modules.load_file(isolated_artifact)?;
@@ -418,6 +422,7 @@ async fn wait_until_serving(
     client: &Connection,
     modules: &ModuleHost,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    modules.ensure_ready(BUS_NAME).await?;
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if client
@@ -448,6 +453,14 @@ async fn wait_until_serving(
         )
     })??;
     Ok(())
+}
+
+async fn select_module_controller(
+    broker: &Broker,
+) -> Result<Connection, Box<dyn std::error::Error>> {
+    let (broker_transport, controller_transport) = MemoryTransport::pair();
+    broker.attach_module_controller(Arc::new(broker_transport))?;
+    Ok(Connection::connect(Box::new(controller_transport)).await?)
 }
 
 async fn wait_until_idle(modules: &ModuleHost) -> Result<(), Box<dyn std::error::Error>> {
