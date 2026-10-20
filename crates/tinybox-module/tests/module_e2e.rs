@@ -1070,22 +1070,21 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     assert_eq!(box_record_count(&backend, "local").await?, 2);
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
-    let (_invalid_lease, descriptor_invalid) = register_box_lease(
-        &registration,
-        &fixture.module_peer,
-        "box-invalid-profile",
-    )
-    .await?;
+    let (_invalid_lease, descriptor_invalid) =
+        register_box_lease(&registration, &fixture.module_peer, "box-invalid-profile").await?;
     let mut forged_descriptor = serde_json::to_value(&descriptor_invalid)?;
     forged_descriptor["registration_id"] = serde_json::json!(u64::MAX);
-    assert!(fixture
-        .modules
-        .reinitialize(
-            "tinybox-module",
-            serde_json::json!({"storage_descriptor": forged_descriptor}),
-        )
-        .await
-        .is_err(), "a malformed descriptor must fail before service replacement");
+    assert!(
+        fixture
+            .modules
+            .reinitialize(
+                "tinybox-module",
+                serde_json::json!({"storage_descriptor": forged_descriptor}),
+            )
+            .await
+            .is_err(),
+        "a malformed descriptor must fail before service replacement"
+    );
     assert_eq!(
         proxy
             .call::<ResourceInfo>("Inspect", (resource_b.resource.clone(),))
@@ -1123,20 +1122,21 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
 
     assert!(registration.revoke(&lease_a).await);
     let workspace_revoked = tempfile::tempdir()?;
-    let failed_resource = proxy.call::<ResourceInfo>(
-        "Create",
-        (CreateRequest {
-            resource: proxy.call("Reserve", (ReserveRequest::Resource,)).await?,
-            backend: "passthrough".into(),
-            workspace: Workspace::Directory(
-                workspace_revoked.path().to_string_lossy().into_owned(),
-            ),
-            ..Default::default()
-        },),
-    )
-    .await
-    .err()
-    .ok_or("a revoked current-only lease unexpectedly created a resource")?;
+    let failed_resource = proxy
+        .call::<ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: proxy.call("Reserve", (ReserveRequest::Resource,)).await?,
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(
+                    workspace_revoked.path().to_string_lossy().into_owned(),
+                ),
+                ..Default::default()
+            },),
+        )
+        .await
+        .err()
+        .ok_or("a revoked current-only lease unexpectedly created a resource")?;
     assert_eq!(failed_resource.wire_name(), tinybox_bus::BACKEND_ERROR);
     assert_eq!(box_record_count(&backend, "local").await?, 1);
 
@@ -1146,21 +1146,20 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
-    let (lease_revoked, descriptor_revoked) = register_box_lease(
-        &registration,
-        &fixture.module_peer,
-        "box-revoked-profile",
-    )
-    .await?;
+    let (lease_revoked, descriptor_revoked) =
+        register_box_lease(&registration, &fixture.module_peer, "box-revoked-profile").await?;
     assert!(registration.revoke(&lease_revoked).await);
-    assert!(fixture
-        .modules
-        .reinitialize(
-            "tinybox-module",
-            serde_json::json!({"storage_descriptor": descriptor_revoked}),
-        )
-        .await
-        .is_err(), "a revoked descriptor must fail before service replacement");
+    assert!(
+        fixture
+            .modules
+            .reinitialize(
+                "tinybox-module",
+                serde_json::json!({"storage_descriptor": descriptor_revoked}),
+            )
+            .await
+            .is_err(),
+        "a revoked descriptor must fail before service replacement"
+    );
     let workspace_b3 = tempfile::tempdir()?;
     let _resource_b3 = create_passthrough_resource(&proxy, workspace_b3.path()).await?;
     assert_eq!(box_record_count(&backend, profile_b).await?, 2);
@@ -1300,9 +1299,7 @@ async fn create_passthrough_resource(
     proxy: &tinybus::Proxy,
     workspace: &std::path::Path,
 ) -> tinybus::Result<ResourceInfo> {
-    let resource: ResourceId = proxy
-        .call("Reserve", (ReserveRequest::Resource,))
-        .await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
     proxy
         .call(
             "Create",
@@ -1337,8 +1334,7 @@ async fn migrate_empty_box_profile(
     migration: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tinystoragedrivers_core::{
-        MigrateOptions, Registry, Scope, StorageBackend,
-        schema::delivery::MigrationDeliveryClient,
+        MigrateOptions, Registry, Scope, StorageBackend, schema::delivery::MigrationDeliveryClient,
     };
 
     let scope = Scope::new(profile)?;
