@@ -87,7 +87,8 @@ pub(super) fn base_dir(
     let baseline_roots = super::args::baseline_readable_roots();
     let resolved_grants: Vec<PathBuf> = baseline_roots
         .iter()
-        .chain(grants.iter())
+        .map(PathBuf::as_path)
+        .chain(grants.iter().copied())
         .filter_map(|grant| grant.canonicalize().ok())
         .collect();
     xdg_runtime_dir
