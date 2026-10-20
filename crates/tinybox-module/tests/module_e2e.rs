@@ -985,19 +985,96 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
     use tinystoragedrivers_busproxy::{PerCallerEndpoint, serve};
     use tinystoragedrivers_client::StorageServer;
-    use tinystoragedrivers_core::{
-        MemoryStorage, Precondition, Query, Scope, StorageBackend,
-        schema::{MigrateOptions, Registry, delivery::MigrationDeliveryClient},
-    };
+    use tinystoragedrivers_core::{DocumentStoreExt, Query};
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
-        MigrationModuleClient,
     };
 
     let source = std::env::var_os("TINYBOX_TEST_MODULE")
         .map(std::path::PathBuf::from)
         .ok_or("TINYBOX_TEST_MODULE must point at libtinybox")?;
-    let (_staging, artifact) = stage_allowlisted_module(&source)?;
+    let fixture = load_compiled_migration_fixture(&source).await?;
+    let (backend, storage) = migrate_legacy_box(fixture.module).await?;
+
+    let outsider_migration = fixture.outsider.proxy(
+        fixture.module_peer.as_str(),
+        MIGRATION_OBJECT_PATH,
+        MIGRATION_INTERFACE,
+    )?;
+    let denied = outsider_migration
+        .call_confidential::<serde_json::Value>(EXCHANGE_MEMBER, serde_json::json!(17))
+        .await
+        .err()
+        .ok_or("outsider's malformed migration exchange unexpectedly succeeded")?;
+    assert!(
+        denied
+            .to_string()
+            .contains("migration authority unavailable")
+    );
+
+    let served_backend = backend.clone();
+    let _storage_host = serve(
+        &fixture.controller,
+        std::sync::Arc::new(PerCallerEndpoint::new(move |_sender| {
+            let scope = served_backend.for_scope(&Scope::local()).ok()?;
+            Some(StorageServer::new(scope))
+        })),
+    )
+    .await?;
+    let proxy = fixture.controller.proxy(BUS_NAME, OBJECT_PATH, BUS_NAME)?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    let workspace = tempfile::tempdir()?;
+    let _: ResourceInfo = proxy
+        .call(
+            "Create",
+            (CreateRequest {
+                resource,
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    assert_eq!(
+        storage
+            .documents()
+            .query_all("box.boxes", &Query::all())
+            .await?
+            .len(),
+        2,
+        "TinyBox opens its ordinary storage path only after host migration completes"
+    );
+    assert_eq!(
+        fixture
+            .controller
+            .proxy(
+                fixture.module_peer.as_str(),
+                MIGRATION_OBJECT_PATH,
+                MIGRATION_INTERFACE,
+            )?
+            .call_confidential::<serde_json::Value>(GET_SCHEMA_MEMBER, ())
+            .await?["declaration"]["owner"],
+        "box",
+        "the selected host and module remain live after storage operations"
+    );
+    Ok(())
+}
+
+struct CompiledMigrationFixture {
+    _staging: tempfile::TempDir,
+    outsider: Connection,
+    controller: Connection,
+    _modules: ModuleHost,
+    module_peer: tinybus::BusName,
+    module: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
+}
+
+async fn load_compiled_migration_fixture(
+    source: &std::path::Path,
+) -> Result<CompiledMigrationFixture, Box<dyn std::error::Error>> {
+    use tinystoragedrivers_tinybus::migration::MigrationModuleClient;
+
+    let (staging, artifact) = stage_allowlisted_module(source)?;
     let broker = Broker::new_restricted_module_control();
     let controller = connect_migration_peer(&broker, true).await?;
     let outsider = connect_migration_peer(&broker, false).await?;
@@ -1011,6 +1088,29 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         .await?
         .ok_or("compiled TinyBox module did not acquire its bus name")?;
     let module = MigrationModuleClient::discover(&controller, &module_peer).await?;
+    Ok(CompiledMigrationFixture {
+        _staging: staging,
+        outsider,
+        controller,
+        _modules: modules,
+        module_peer,
+        module,
+    })
+}
+
+async fn migrate_legacy_box(
+    module: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
+) -> Result<
+    (
+        tinystoragedrivers_core::MemoryStorage,
+        tinystoragedrivers_core::ScopedStorage,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    use tinystoragedrivers_core::{
+        MemoryStorage, Precondition, Scope, StorageBackend,
+        schema::{MigrateOptions, Registry, delivery::MigrationDeliveryClient},
+    };
 
     assert_eq!(module.declaration().owner.as_str(), "box");
     let backend = MemoryStorage::new();
@@ -1055,66 +1155,5 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .is_none(),
         "legacy source rows are removed after the owner conversion succeeds"
     );
-
-    let outsider_migration = outsider.proxy(
-        module_peer.as_str(),
-        MIGRATION_OBJECT_PATH,
-        MIGRATION_INTERFACE,
-    )?;
-    let denied = outsider_migration
-        .call_confidential::<serde_json::Value>(EXCHANGE_MEMBER, serde_json::json!(17))
-        .await
-        .err()
-        .ok_or("outsider's malformed migration exchange unexpectedly succeeded")?;
-    assert!(
-        denied
-            .to_string()
-            .contains("migration authority unavailable")
-    );
-
-    let served_backend = backend.clone();
-    let _storage_host = serve(
-        &controller,
-        std::sync::Arc::new(PerCallerEndpoint::new(move |_sender| {
-            let scope = served_backend.for_scope(&Scope::local()).ok()?;
-            Some(StorageServer::new(scope))
-        })),
-    )
-    .await?;
-    let proxy = controller.proxy(BUS_NAME, OBJECT_PATH, BUS_NAME)?;
-    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
-    let workspace = tempfile::tempdir()?;
-    let _: ResourceInfo = proxy
-        .call(
-            "Create",
-            (CreateRequest {
-                resource,
-                backend: "passthrough".into(),
-                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
-                ..Default::default()
-            },),
-        )
-        .await?;
-    assert_eq!(
-        storage
-            .documents()
-            .query_all("box.boxes", &Query::all())
-            .await?
-            .len(),
-        2,
-        "TinyBox opens its ordinary storage path only after host migration completes"
-    );
-    assert_eq!(
-        controller
-            .proxy(
-                module_peer.as_str(),
-                MIGRATION_OBJECT_PATH,
-                MIGRATION_INTERFACE,
-            )?
-            .call_confidential::<serde_json::Value>(GET_SCHEMA_MEMBER, ())
-            .await?["declaration"]["owner"],
-        "box",
-        "the selected host and module remain live after storage operations"
-    );
-    Ok(())
+    Ok((backend, storage))
 }
