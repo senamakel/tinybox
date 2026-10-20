@@ -1082,8 +1082,7 @@ async fn exercise_profile_switches(
     )
     .await?;
     migrate_empty_box_profile(&backend, profile_b, migration_b).await?;
-    let (_lease_b, descriptor_b) =
-        register_box_lease(registration, module_peer, profile_b).await?;
+    let (_lease_b, descriptor_b) = register_box_lease(registration, module_peer, profile_b).await?;
     reinitialize_box(modules, descriptor_b.clone()).await?;
     assert_eq!(
         proxy
@@ -1192,14 +1191,14 @@ async fn exercise_revocation_and_shutdown(
         .err()
         .ok_or("a revoked current-only lease unexpectedly created a resource")?;
     assert_eq!(failed_resource.wire_name(), tinybox_bus::BACKEND_ERROR);
-    assert_eq!(box_record_count(&backend, "local").await?, 1);
+    assert_eq!(box_record_count(backend, "local").await?, 1);
 
-    reinitialize_box(&fixture.modules, descriptor_b).await?;
+    reinitialize_box(modules, descriptor_b).await?;
     let workspace_profile_b_retry = tempfile::tempdir()?;
     let _resource_profile_b_retry =
         create_passthrough_resource(proxy, workspace_profile_b_retry.path()).await?;
-    assert_eq!(box_record_count(&backend, "local").await?, 1);
-    assert_eq!(box_record_count(&backend, profile_b).await?, 1);
+    assert_eq!(box_record_count(backend, "local").await?, 1);
+    assert_eq!(box_record_count(backend, profile_b).await?, 1);
 
     let (lease_revoked, descriptor_revoked) =
         register_box_lease(registration, module_peer, "box-revoked-profile").await?;
@@ -1217,11 +1216,11 @@ async fn exercise_revocation_and_shutdown(
     let workspace_profile_b_after_reject = tempfile::tempdir()?;
     let _resource_profile_b_after_reject =
         create_passthrough_resource(proxy, workspace_profile_b_after_reject.path()).await?;
-    assert_eq!(box_record_count(&backend, profile_b).await?, 2);
+    assert_eq!(box_record_count(backend, profile_b).await?, 2);
 
     proxy.call::<()>("Shutdown", ()).await?;
-    assert_eq!(box_record_count(&backend, "local").await?, 1);
-    assert_eq!(box_record_count(&backend, profile_b).await?, 0);
+    assert_eq!(box_record_count(backend, "local").await?, 1);
+    assert_eq!(box_record_count(backend, profile_b).await?, 0);
     assert_eq!(
         controller
             .proxy(
