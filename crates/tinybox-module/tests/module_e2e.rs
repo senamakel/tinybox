@@ -1005,9 +1005,8 @@ fn legacy_v1_jail_index() -> serde_json::Value {
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
 -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
-    use tinystoragedrivers_bus::StorageNeeds;
-    use tinystoragedrivers_tinybus::attach_storage;
     use tinystoragedrivers_core::{DocumentStoreExt, Query, Scope, StorageBackend};
+    use tinystoragedrivers_tinybus::attach_storage;
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
     };
@@ -1101,11 +1100,82 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     Ok(())
 }
 
+#[derive(Clone)]
+struct BoxStorageContext(String);
+
+impl HostContext for BoxStorageContext {}
+
+struct BoxStorageEnvironment {
+    backend: Arc<tinystoragedrivers_core::MemoryStorage>,
+}
+
+#[async_trait::async_trait]
+impl Environment<BoxStorageContext> for BoxStorageEnvironment {
+    async fn resolve(
+        &self,
+        context: &BoxStorageContext,
+        _module: &tinybus::module::ModuleId,
+    ) -> Result<ResolvedStorage, HostFailure> {
+        let scope = tinystoragedrivers_core::Scope::new(&context.0)
+            .map_err(|_| HostFailure::Denied("invalid-box-test-scope"))?;
+        let storage = self
+            .backend
+            .for_scope(&scope)
+            .map_err(|_| HostFailure::Denied("box-test-storage-unavailable"))?;
+        let collections = [
+            tinystoragedrivers_bus::CollectionSpec {
+                name: tinybox_bus::BOX_COLLECTION.to_owned(),
+                indexes: Vec::new(),
+                ttl_field: None,
+                search: None,
+            },
+            tinystoragedrivers_bus::CollectionSpec {
+                name: tinybox_bus::JAIL_INDEX_COLLECTION.to_owned(),
+                indexes: Vec::new(),
+                ttl_field: None,
+                search: None,
+            },
+        ];
+        let grant = StorageGrant::from_needs(
+            tinystoragedrivers_bus::StorageNeeds {
+                collections: &collections,
+                ..tinystoragedrivers_bus::StorageNeeds::default()
+            },
+            &GrantPolicy {
+                writable: true,
+                ..GrantPolicy::default()
+            },
+        )
+        .map_err(|_| HostFailure::Denied("invalid-box-test-grant"))?;
+        Ok(ResolvedStorage {
+            backend_identity: format!("tinybox-memory-{}", context.0),
+            binding_epoch: 1,
+            canonical_scope: context.0.clone(),
+            grant,
+            server: Arc::new(StorageServer::new(storage)),
+        })
+    }
+
+    async fn admit_write(
+        &self,
+        _context: &BoxStorageContext,
+        _module: &tinybus::module::ModuleId,
+    ) -> Result<(), HostFailure> {
+        Ok(())
+    }
+}
+
+struct BoxTestAudit;
+
+impl AuditSink for BoxTestAudit {
+    fn record(&self, _event: AuditEvent) {}
+}
+
 struct CompiledMigrationFixture {
     _staging: tempfile::TempDir,
     outsider: Connection,
     controller: Connection,
-    _modules: ModuleHost,
+    modules: ModuleHost,
     module_peer: tinybus::BusName,
     module: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
 }
@@ -1133,7 +1203,7 @@ async fn load_compiled_migration_fixture(
         _staging: staging,
         outsider,
         controller,
-        _modules: modules,
+        modules,
         module_peer,
         module,
     })
@@ -1143,7 +1213,7 @@ async fn migrate_legacy_box(
     module: tinystoragedrivers_tinybus::migration::MigrationModuleClient,
 ) -> Result<
     (
-        tinystoragedrivers_core::MemoryStorage,
+        Arc<tinystoragedrivers_core::MemoryStorage>,
         tinystoragedrivers_core::ScopedStorage,
     ),
     Box<dyn std::error::Error>,
@@ -1168,11 +1238,11 @@ async fn migrate_legacy_box(
             .iter()
             .any(|item| item.name() == tinybox_bus::JAIL_INDEX_COLLECTION)
     );
-    let backend = MemoryStorage::new();
+    let backend = Arc::new(MemoryStorage::new());
     let migration_scope = Scope::local();
     let registry =
         Registry::compose_with_declarations(std::iter::empty(), [module.declaration().clone()])?;
-    registry.prepare(&backend).await?;
+    registry.prepare(backend.as_ref()).await?;
     let storage = backend.for_scope(&migration_scope)?;
     storage
         .documents()
