@@ -271,6 +271,32 @@ fn denials_intersecting_private_mounts_are_refused() -> io::Result<()> {
 }
 
 #[test]
+fn deny_read_equal_to_an_extra_grant_under_private_tmp_prevents_creation() -> io::Result<()> {
+    let Some(backend) = backend()? else {
+        return Ok(());
+    };
+    let start = Instant::now();
+    let root = tempfile::tempdir()?;
+    let denied = tempfile::tempdir()?;
+    std::fs::write(denied.path().join("original"), "hidden")?;
+    let mut j = jail(root.path()).add_read_only(denied.path());
+    j.deny_read = vec![denied.path().to_path_buf()];
+
+    let directory = denied.path().display();
+    let script = format!(
+        "if mkdir '{directory}/new'; then echo DIRECTORY_CREATED; fi; \
+         if touch '{directory}/new-file'; then echo WRITE_SUCCEEDED; fi"
+    );
+    let (_, output) = sh(&backend, &j, &script)?;
+    assert!(
+        !output.contains("DIRECTORY_CREATED") && !output.contains("WRITE_SUCCEEDED"),
+        "denied path under private /tmp remained creatable: {output}"
+    );
+    done("deny-equal-grant-under-tmp", start);
+    Ok(())
+}
+
+#[test]
 fn deny_read_nested_in_a_writable_grant_is_refused() -> io::Result<()> {
     let Some(backend) = backend()? else {
         return Ok(());
