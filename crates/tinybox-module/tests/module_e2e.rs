@@ -1046,7 +1046,9 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     );
 
     exercise_profile_switches(
-        &fixture,
+        &fixture.modules,
+        &fixture.controller,
+        &fixture.module_peer,
         &backend,
         &registration,
         &proxy,
@@ -1061,7 +1063,9 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
 }
 
 async fn exercise_profile_switches(
-    fixture: &CompiledMigrationFixture,
+    modules: &ModuleHost,
+    controller: &Connection,
+    module_peer: &tinybus::BusName,
     backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
     registration: &BoxStorageRegistration,
     proxy: &tinybus::Proxy,
@@ -1073,14 +1077,14 @@ async fn exercise_profile_switches(
 
     let profile_b = "box-other-profile";
     let migration_b = tinystoragedrivers_tinybus::migration::MigrationModuleClient::discover(
-        &fixture.controller,
-        &fixture.module_peer,
+        controller,
+        module_peer,
     )
     .await?;
     migrate_empty_box_profile(&backend, profile_b, migration_b).await?;
     let (_lease_b, descriptor_b) =
-        register_box_lease(&registration, &fixture.module_peer, profile_b).await?;
-    reinitialize_box(&fixture.modules, descriptor_b.clone()).await?;
+        register_box_lease(registration, module_peer, profile_b).await?;
+    reinitialize_box(modules, descriptor_b.clone()).await?;
     assert_eq!(
         proxy
             .call::<ResourceInfo>("Inspect", (resource_a.clone(),))
@@ -1095,12 +1099,11 @@ async fn exercise_profile_switches(
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
     let (_invalid_lease, descriptor_invalid) =
-        register_box_lease(&registration, &fixture.module_peer, "box-invalid-profile").await?;
+        register_box_lease(registration, module_peer, "box-invalid-profile").await?;
     let mut forged_descriptor = serde_json::to_value(&descriptor_invalid)?;
     forged_descriptor["registration_id"] = serde_json::json!(u64::MAX);
     assert!(
-        fixture
-            .modules
+        modules
             .reinitialize(
                 "tinybox-module",
                 serde_json::json!({"storage_descriptor": forged_descriptor}),
@@ -1118,7 +1121,7 @@ async fn exercise_profile_switches(
         "failed reinitialization leaves B's active service and resource live"
     );
 
-    reinitialize_box(&fixture.modules, descriptor_a).await?;
+    reinitialize_box(modules, descriptor_a).await?;
     assert_eq!(
         proxy
             .call::<ResourceInfo>("Inspect", (resource_b.resource.clone(),))
@@ -1142,12 +1145,23 @@ async fn exercise_profile_switches(
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 0);
 
-    exercise_revocation_and_shutdown(fixture, backend, registration, proxy, descriptor_b, lease_a)
-        .await
+    exercise_revocation_and_shutdown(
+        modules,
+        controller,
+        module_peer,
+        backend,
+        registration,
+        proxy,
+        descriptor_b,
+        lease_a,
+    )
+    .await
 }
 
 async fn exercise_revocation_and_shutdown(
-    fixture: &CompiledMigrationFixture,
+    modules: &ModuleHost,
+    controller: &Connection,
+    module_peer: &tinybus::BusName,
     backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
     registration: &BoxStorageRegistration,
     proxy: &tinybus::Proxy,
@@ -1188,11 +1202,10 @@ async fn exercise_revocation_and_shutdown(
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
     let (lease_revoked, descriptor_revoked) =
-        register_box_lease(&registration, &fixture.module_peer, "box-revoked-profile").await?;
+        register_box_lease(registration, module_peer, "box-revoked-profile").await?;
     assert!(registration.revoke(&lease_revoked).await);
     assert!(
-        fixture
-            .modules
+        modules
             .reinitialize(
                 "tinybox-module",
                 serde_json::json!({"storage_descriptor": descriptor_revoked}),
@@ -1210,10 +1223,9 @@ async fn exercise_revocation_and_shutdown(
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 0);
     assert_eq!(
-        fixture
-            .controller
+        controller
             .proxy(
-                fixture.module_peer.as_str(),
+                module_peer.as_str(),
                 MIGRATION_OBJECT_PATH,
                 MIGRATION_INTERFACE,
             )?
