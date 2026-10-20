@@ -404,7 +404,7 @@ async fn store_calls_on_the_only_worker_do_not_deadlock() -> TestResult {
 async fn without_a_storage_host_box_records_stay_in_memory() -> TestResult {
     let rig = rig(false).await?;
     let storage = ModuleStorage::connected(rig.module.clone());
-    assert!(storage.documents().await.is_none());
+    assert!(storage.documents().await?.is_none());
     let store = storage.box_store().await?;
     let record = info("memory-box")?;
     let writer = Arc::clone(&store);
@@ -416,9 +416,9 @@ async fn without_a_storage_host_box_records_stay_in_memory() -> TestResult {
 }
 
 #[tokio::test]
-async fn an_unconnected_module_has_no_documents() {
+async fn an_unconnected_module_has_no_documents() -> TestResult {
     let storage = ModuleStorage::default();
-    assert!(storage.documents().await.is_none());
+    assert!(storage.documents().await?.is_none());
     assert!(
         storage
             .jail_registry(std::env::temp_dir(), "none".into())
@@ -426,6 +426,7 @@ async fn an_unconnected_module_has_no_documents() {
             .is_none()
     );
     assert!(format!("{storage:?}").contains("connected: false"));
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -456,14 +457,14 @@ async fn a_failed_connect_is_retried_when_the_host_starts_serving() -> TestResul
     let host = Connection::connect(bus.connect().await?).await?;
     let module = Connection::connect(bus.connect().await?).await?;
     let storage = ModuleStorage::connected(module);
-    assert!(storage.documents().await.is_none());
+    assert!(storage.documents().await?.is_none());
 
     let backend = MemoryStorage::new();
     let endpoint = PerCallerEndpoint::new(move |_sender| {
         Some(StorageServer::new(backend.for_scope(&Scope::local()).ok()?))
     });
     let _served = serve(&host, Arc::new(endpoint)).await?;
-    assert!(storage.documents().await.is_some());
+    assert!(storage.documents().await?.is_some());
     Ok(())
 }
 
@@ -502,8 +503,8 @@ fn the_wrapper_runs_in_place_without_a_multi_thread_runtime() -> TestResult {
 async fn the_scoped_handle_is_connected_once_and_shared() -> TestResult {
     let rig = rig(true).await?;
     let storage = ModuleStorage::connected(rig.module.clone());
-    assert!(storage.documents().await.is_some());
-    assert!(storage.documents().await.is_some());
+    assert!(storage.documents().await?.is_some());
+    assert!(storage.documents().await?.is_some());
     Ok(())
 }
 
@@ -516,7 +517,7 @@ async fn a_refused_scope_leaves_the_module_on_memory() -> TestResult {
     let endpoint = PerCallerEndpoint::new(move |_sender| None::<StorageServer>);
     let _served = serve(&host, Arc::new(endpoint)).await?;
     let storage = ModuleStorage::connected(module);
-    assert!(storage.documents().await.is_none());
+    assert!(storage.documents().await?.is_none());
     let _memory = storage.box_store().await?;
     Ok(())
 }

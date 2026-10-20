@@ -245,8 +245,10 @@ impl BoxService {
     async fn create(&self, request: CreateRequest) -> TinyBusResult<ResourceInfo> {
         let resources = self.resources.clone();
         let storage = self.storage.clone();
-        finish_operation(tokio::spawn(async move { resources.create(&storage, request).await }))
-            .await
+        finish_operation(tokio::spawn(async move {
+            resources.create(&storage, request).await
+        }))
+        .await
     }
 
     /// Run one unshelled command and collect output.
@@ -591,8 +593,8 @@ struct BoxModuleConfig {
 
 type BoxSetupFuture = Pin<Box<dyn Future<Output = TinyBusResult<()>> + Send + 'static>>;
 
-fn setup_factory_with_context(
-) -> impl Fn(ModuleSetupContext, BoxModuleConfig) -> BoxSetupFuture + Send + Sync + 'static {
+fn setup_factory_with_context()
+-> impl Fn(ModuleSetupContext, BoxModuleConfig) -> BoxSetupFuture + Send + Sync + 'static {
     let resources = std::sync::Arc::new(resources::Resources::default());
     move |context, config| {
         let resources = std::sync::Arc::clone(&resources);
@@ -606,10 +608,8 @@ async fn setup_with_context(
     resources: std::sync::Arc<resources::Resources>,
 ) -> TinyBusResult<()> {
     let connection = context.connection().clone();
-    let storage = storage::ModuleStorage::with_descriptor(
-        connection.clone(),
-        config.storage_descriptor,
-    );
+    let storage =
+        storage::ModuleStorage::with_descriptor(connection.clone(), config.storage_descriptor);
     storage
         .validate_configured()
         .await

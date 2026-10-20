@@ -104,9 +104,7 @@ impl ModuleStorage {
     }
 
     /// The host's document port, when it serves one.
-    pub(super) async fn documents(
-        &self,
-    ) -> tinybox_core::Result<Option<Arc<dyn DocumentStore>>> {
+    pub(super) async fn documents(&self) -> tinybox_core::Result<Option<Arc<dyn DocumentStore>>> {
         Ok(self
             .scoped()
             .await?
