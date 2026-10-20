@@ -1130,6 +1130,20 @@ async fn migrate_legacy_box(
     };
 
     assert_eq!(module.declaration().owner.as_str(), "box");
+    assert!(
+        module
+            .declaration()
+            .items
+            .iter()
+            .any(|item| item.name() == tinybox_bus::BOX_COLLECTION)
+    );
+    assert!(
+        module
+            .declaration()
+            .items
+            .iter()
+            .any(|item| item.name() == tinybox_bus::JAIL_INDEX_COLLECTION)
+    );
     let backend = MemoryStorage::new();
     let migration_scope = Scope::local();
     let registry =
@@ -1171,6 +1185,7 @@ async fn migrate_legacy_box(
         .migrate_with_executor(&storage, &MigrateOptions::new(), &executor)
         .await?;
     registry.check_ready_in(&migration_scope, "box.boxes")?;
+    registry.check_ready_in(&migration_scope, "box.jail_index")?;
     let migrated = storage
         .documents()
         .get("box.boxes", "build-1")
