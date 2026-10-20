@@ -9,9 +9,9 @@ use std::future::Future;
 use std::pin::Pin;
 
 use tinybox_core::{IsolationLevel, SandboxCapabilities};
-use tinybus::Result as TinyBusResult;
 #[cfg(test)]
 use tinybus::Connection;
+use tinybus::Result as TinyBusResult;
 use tinybus_module::ModuleSetupContext;
 
 use tinybox_bus::{
@@ -248,7 +248,7 @@ impl BoxService {
         let resources = self.resources.clone();
         let storage = self.storage.clone();
         finish_operation(tokio::spawn(async move {
-            resources.create(&storage, request).await
+            resources.create_with_storage(&storage, request).await
         }))
         .await
     }
