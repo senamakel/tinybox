@@ -1,6 +1,6 @@
 //! End-to-end proof for the compiled `TinyBox` module's workspace file contract.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use tinybox_bus::{
     BeginFileReadRequest, BeginFileWriteRequest, CreateRequest, FileChunk, FinishFileReadRequest,
@@ -11,6 +11,11 @@ use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::{ModuleHost, ModuleState};
 use tinybus::transport::memory::MemoryBus;
+use tinystoragedrivers_busproxy::{
+    AuditEvent, AuditSink, Environment, GovernedEndpointLimits, GovernedStorage, GrantPolicy,
+    HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
+};
+use tinystoragedrivers_client::StorageServer;
 
 const BUS_NAME: &str = "ai.tinyhumans.tinybox.Box";
 const OBJECT_PATH: &str = "/ai/tinyhumans/tinybox/Box";
@@ -1000,8 +1005,8 @@ fn legacy_v1_jail_index() -> serde_json::Value {
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
 -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
-    use tinystoragedrivers_busproxy::{PerCallerEndpoint, serve};
-    use tinystoragedrivers_client::StorageServer;
+    use tinystoragedrivers_bus::StorageNeeds;
+    use tinystoragedrivers_tinybus::attach_storage;
     use tinystoragedrivers_core::{DocumentStoreExt, Query, Scope, StorageBackend};
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
@@ -1029,15 +1034,32 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .contains("migration authority unavailable")
     );
 
-    let served_backend = backend.clone();
-    let _storage_host = serve(
+    let registration = attach_storage(
+        &fixture.modules,
         &fixture.controller,
-        std::sync::Arc::new(PerCallerEndpoint::new(move |_sender| {
-            let scope = served_backend.for_scope(&Scope::local()).ok()?;
-            Some(StorageServer::new(scope))
-        })),
+        GovernedStorage::new(
+            Arc::new(BoxStorageEnvironment {
+                backend: Arc::clone(&backend),
+            }),
+            Arc::new(BoxTestAudit),
+            GovernedEndpointLimits::default(),
+        ),
+        tokio::runtime::Handle::current(),
     )
     .await?;
+    let (_lease, descriptor) = registration
+        .register_lease(
+            HostStorageContext::new(BoxStorageContext("local".to_owned())),
+            fixture.module_peer.clone(),
+        )
+        .await?;
+    fixture
+        .modules
+        .reinitialize(
+            "tinybox-module",
+            serde_json::json!({"storage_descriptor": descriptor}),
+        )
+        .await?;
     let proxy = fixture.controller.proxy(BUS_NAME, OBJECT_PATH, BUS_NAME)?;
     let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
     let workspace = tempfile::tempdir()?;
@@ -1074,6 +1096,8 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         "box",
         "the selected host and module remain live after storage operations"
     );
+    registration.shutdown().await?;
+    fixture.modules.shutdown(Duration::from_secs(5)).await;
     Ok(())
 }
 
