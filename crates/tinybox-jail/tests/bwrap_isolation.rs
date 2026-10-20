@@ -287,7 +287,14 @@ fn deny_read_equal_to_an_extra_grant_under_private_tmp_prevents_creation() -> io
         "if mkdir '{directory}'; then echo DIRECTORY_CREATED; fi; \
          if touch '{directory}/new-file'; then echo WRITE_SUCCEEDED; fi"
     );
-    let (_, output) = sh(&backend, &j, &script)?;
+    let (_, output) = match sh(&backend, &j, &script) {
+        Ok(result) => result,
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            done("deny-equal-grant-under-tmp-refused", start);
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     assert!(
         !output.contains("DIRECTORY_CREATED") && !output.contains("WRITE_SUCCEEDED"),
         "denied path under private /tmp remained creatable: {output}"

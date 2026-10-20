@@ -143,6 +143,15 @@ fn baseline_mounts() -> Vec<Mount> {
     mounts
 }
 
+/// Baseline bind-mounted roots that the jailed command can read.
+pub(super) fn baseline_readable_roots() -> Vec<PathBuf> {
+    baseline_mounts()
+        .into_iter()
+        .filter(|mount| mount.is_bind())
+        .map(|mount| mount.path)
+        .collect()
+}
+
 /// Everything after the `bwrap` program name and before the `--` separator.
 ///
 /// - new user, pid, ipc, uts (and cgroup where supported) namespaces; a new
@@ -219,6 +228,8 @@ pub(super) fn jail_args(
     // the link points (`/usr/bin/sh`): the sandbox mounts the target, not the
     // link.
     let denied = effective_denials(&jail.deny_read, &mounts);
+    // A mount at or below a denied path is never mounted.
+    mounts.retain(|m| !denied.iter().any(|deny| m.path.starts_with(deny)));
     if denied
         .iter()
         .any(|deny| intersects_private_mount(deny, &mounts))
@@ -228,8 +239,6 @@ pub(super) fn jail_args(
             "deny_read intersects a mandatory private mount (/proc, /dev, /tmp)",
         ));
     }
-    // A mount at or below a denied path is never mounted.
-    mounts.retain(|m| !denied.iter().any(|deny| m.path.starts_with(deny)));
     mounts.sort_by_key(Mount::order);
 
     let mut argv: Vec<OsString> = ["--unshare-user", "--unshare-pid", "--unshare-ipc"]

@@ -74,18 +74,20 @@ pub(super) fn pick_shell(exists: impl Fn(&str) -> bool) -> &'static str {
 
 /// Where the args file may live: `$XDG_RUNTIME_DIR` (a private per-user
 /// directory) when set, else the temp directory. A candidate that lies under
-/// any readable grant is refused, since the jailed program could then read or
-/// replace the file.
+/// any baseline or explicit readable bind mount is refused, since the jailed
+/// program could then read or replace the file.
 ///
 /// # Errors
-/// `PermissionDenied` when no candidate is outside the jail's grants.
+/// `PermissionDenied` when no candidate is outside the jail's readable mounts.
 pub(super) fn base_dir(
     grants: &[&Path],
     xdg_runtime_dir: Option<PathBuf>,
     temp_dir: PathBuf,
 ) -> io::Result<PathBuf> {
-    let resolved_grants: Vec<PathBuf> = grants
+    let baseline_roots = super::args::baseline_readable_roots();
+    let resolved_grants: Vec<PathBuf> = baseline_roots
         .iter()
+        .chain(grants.iter())
         .filter_map(|grant| grant.canonicalize().ok())
         .collect();
     xdg_runtime_dir
@@ -102,7 +104,7 @@ pub(super) fn base_dir(
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "no private directory outside the jail's readable grants for the bwrap argument file",
+                "no private directory outside the jail's readable mounts for the bwrap argument file",
             )
         })
 }
