@@ -1,24 +1,37 @@
-//! Shell facts returned by the compiled module for host-owned execution policy.
+//! Legacy command-analysis vocabulary retained for contract 1.x compatibility.
+//!
+//! Since contract 1.22, hosts must not use these values to make execution-policy,
+//! authorization, allowlist, approval, or protected-path decisions. `TinySecurity`
+//! owns command policy. Contract 2.0 removes this vocabulary; generic shell
+//! transport and structural scanning remain separate capabilities.
 
 use serde::{Deserialize, Serialize};
 
-/// Permission buckets in increasing order; unknown commands are classified as writes.
+/// Legacy command categories retained for contract 1.x wire compatibility.
+///
+/// Deprecated since contract 1.22: this category is not an authorization or
+/// permission result and must not drive host policy. `TinySecurity` owns command
+/// policy. Contract 2.0 removes this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandClass {
-    /// Provably observational command.
+    /// Legacy scanner label; not proof that a command is safe to run.
     Read,
-    /// Changes state or is not provably read-only.
+    /// Legacy scanner label; not a policy decision.
     Write,
-    /// Reaches the network.
+    /// Legacy scanner label; not a policy decision.
     Network,
-    /// Installs a global or system package.
+    /// Legacy scanner label; not a policy decision.
     Install,
-    /// Catastrophic, irreversible, or privileged operation.
+    /// Legacy scanner label; not a policy decision.
     Destructive,
 }
 
-/// Parsed facts for one live shell segment, without a host approval decision.
+/// Legacy analysis fields for one live shell segment, retained for contract 1.x.
+///
+/// Deprecated since contract 1.22. These fields are scanner output, not inputs
+/// for host authorization or execution policy; `TinySecurity` owns command policy.
+/// Contract 2.0 removes this type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandSegment {
     /// Segment with quoted heredoc data removed.
@@ -27,37 +40,42 @@ pub struct CommandSegment {
     pub command: String,
     /// Base command preserving the scanner's original case handling.
     pub basename: String,
-    /// Normalized command name used for classification.
+    /// Legacy normalized command name; do not use it to decide host policy.
     pub normalized_name: String,
-    /// Arguments in the classifier's lower-case vocabulary.
+    /// Arguments in the legacy classifier's lower-case vocabulary.
     pub arguments: Vec<String>,
-    /// Generic command category; hosts decide how to gate it.
+    /// Legacy scanner category; not an authorization or permission result.
     pub class: CommandClass,
-    /// Whether this segment starts with an environment assignment.
+    /// Legacy syntax fact; not a host policy decision.
     pub leading_env_assignment: bool,
-    /// Whether an environment prefix can change command execution.
+    /// Legacy environment-guard fact; not an authorization decision.
     pub dangerous_env_prefix: bool,
-    /// Whether the base is a generic command executor.
+    /// Legacy executor fact; not an authorization decision.
     pub executor: bool,
 }
 
-/// Generic parsing facts for host allowlists, approvals, and protected-path checks.
+/// Legacy command-analysis output retained for contract 1.x compatibility.
+///
+/// Deprecated since contract 1.22. Hosts must not use this output for
+/// allowlists, approvals, protected-path checks, authorization, or other
+/// execution policy. `TinySecurity` owns command policy. Contract 2.0 removes
+/// this type; generic shell scanning remains available independently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // These independent syntax facts may coexist; they are not mutually exclusive states.
 #[allow(clippy::struct_excessive_bools)]
 pub struct CommandAnalysis {
     /// Parsed live segments in their original order.
     pub segments: Vec<CommandSegment>,
-    /// Hidden command-execution syntax.
+    /// Legacy hidden-execution policy signal; not an authorization decision.
     pub hidden_execution: bool,
-    /// Unquoted output redirection in the policy scanner's input.
+    /// Legacy scanner syntax fact; not a host policy decision.
     pub redirection: bool,
-    /// Expansion or substitution markers in the policy scanner's input.
+    /// Legacy scanner syntax fact; not a host policy decision.
     pub expansion: bool,
-    /// A tee command in the policy scanner's input.
+    /// Legacy scanner syntax fact; not a host policy decision.
     pub tee: bool,
-    /// A single unquoted ampersand, excluding conditional chaining.
+    /// Legacy scanner syntax fact; not a host policy decision.
     pub background: bool,
-    /// Literal tokens outside quoted heredoc data; hosts resolve and authorize paths.
+    /// Legacy literal tokens outside quoted heredoc data; do not authorize paths from these.
     pub literal_words: Vec<String>,
 }

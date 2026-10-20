@@ -33,3 +33,7 @@ through its own path.
 The environment is a safe snapshot of the module's own (`PATH`, `HOME`, `TERM`,
 `LANG`, `LC_ALL`, `LC_CTYPE`, `USER`, `SHELL`, `TMPDIR`) plus the request's
 `env`; nothing else of the module's environment reaches the child.
+
+Contract 1.22 adds optional native jail resource limits. A host must bind to a
+module that advertises contract 1.22 before sending that field; see
+[`contract-1-22.md`](contract-1-22.md).

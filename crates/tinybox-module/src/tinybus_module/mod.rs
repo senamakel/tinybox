@@ -132,6 +132,11 @@ impl BoxService {
         })
     }
     /// Report native jail enforcement facts without starting a workload.
+    ///
+    /// The answer is the backend's guaranteed minimum for *any* configuration:
+    /// a backend whose isolation depends on the jail (bubblewrap with a shared
+    /// network namespace) reports its weaker level here. Admission decisions
+    /// use the per-jail form in `native_jail::prepare`.
     async fn jail_status(&self) -> TinyBusResult<tinybox_bus::JailStatus> {
         let backend = tinybox_jail::default_backend();
         let support = backend.constraint_support();

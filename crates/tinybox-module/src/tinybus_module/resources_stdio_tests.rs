@@ -38,6 +38,9 @@ impl JailBackend for Recording {
     fn is_suitable_for_untrusted_code(&self) -> bool {
         self.suitable
     }
+    fn is_suitable_for_untrusted_jail(&self, _: &Jail) -> bool {
+        self.suitable
+    }
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
         use tinybox_core::{Constraint, ConstraintSupport, Enforcement};
         ConstraintSupport::NONE
@@ -67,6 +70,7 @@ fn jail_config() -> tinybox_bus::NativeJailConfig {
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: true,
         deny_read: Vec::new(),
+        resources: None,
     }
 }
 

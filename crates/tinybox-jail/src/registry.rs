@@ -42,6 +42,7 @@ use super::jail::{Jail, JailBackend};
 
 #[path = "registry_path.rs"]
 mod path;
+pub(crate) use path::canonicalize_missing;
 
 #[path = "registry_index_store.rs"]
 mod index_store;

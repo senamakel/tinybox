@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use serde_json::Value;
 use tinystoragedrivers_core::{
     Capabilities, CollectionSpec, DocumentStore, Filter, Page, Precondition, Query, Sort,
-    StorageError, Version, Versioned, async_trait,
+    StorageError, Version, Versioned, WriteOptions, async_trait,
 };
 
 type Result<T> = std::result::Result<T, StorageError>;
@@ -84,6 +84,18 @@ impl DocumentStore for Faulty {
         doc: Value,
         precondition: Precondition,
     ) -> Result<Version> {
+        self.put_with(collection, id, doc, precondition, WriteOptions::default())
+            .await
+    }
+
+    async fn put_with(
+        &self,
+        collection: &str,
+        id: &str,
+        doc: Value,
+        precondition: Precondition,
+        options: WriteOptions,
+    ) -> Result<Version> {
         if self.faults.put {
             return Err(boom("put"));
         }
@@ -96,7 +108,9 @@ impl DocumentStore for Faulty {
                 return Err(StorageError::conflict("injected conflict"));
             }
         }
-        self.inner.put(collection, id, doc, precondition).await
+        self.inner
+            .put_with(collection, id, doc, precondition, options)
+            .await
     }
 
     async fn delete(&self, collection: &str, id: &str, precondition: Precondition) -> Result<bool> {
