@@ -1032,7 +1032,12 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
             .contains("migration authority unavailable")
     );
 
-    let registration = attach_box_storage(&fixture, Arc::clone(&backend)).await?;
+    let registration = attach_box_storage(
+        &fixture.modules,
+        &fixture.controller,
+        Arc::clone(&backend),
+    )
+    .await?;
     let (lease_a, descriptor_a) =
         register_box_lease(&registration, &fixture.module_peer, "local").await?;
     reinitialize_box(&fixture.modules, descriptor_a.clone()).await?;
@@ -1052,7 +1057,7 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     )
     .await?;
     migrate_empty_box_profile(&backend, profile_b, migration_b).await?;
-    let (lease_b, descriptor_b) =
+    let (_lease_b, descriptor_b) =
         register_box_lease(&registration, &fixture.module_peer, profile_b).await?;
     reinitialize_box(&fixture.modules, descriptor_b.clone()).await?;
     assert_eq!(
@@ -1261,12 +1266,13 @@ type BoxStorageRegistration = tinystoragedrivers_tinybus::StorageRegistration<
 >;
 
 async fn attach_box_storage(
-    fixture: &CompiledMigrationFixture,
+    host: &ModuleHost,
+    observer: &Connection,
     backend: Arc<tinystoragedrivers_core::MemoryStorage>,
 ) -> Result<BoxStorageRegistration, Box<dyn std::error::Error>> {
     tinystoragedrivers_tinybus::attach_storage(
-        &fixture.modules,
-        &fixture.controller,
+        host,
+        observer,
         GovernedStorage::new(
             Arc::new(BoxStorageEnvironment { backend }),
             Arc::new(BoxTestAudit),
