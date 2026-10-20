@@ -1132,9 +1132,7 @@ async fn exercise_profile_switches(
     assert_eq!(box_record_count(&backend, "local").await?, 3);
     assert_eq!(box_record_count(&backend, profile_b).await?, 1);
 
-    proxy
-        .call::<()>("Close", (resource_a.to_owned(),))
-        .await?;
+    proxy.call::<()>("Close", (resource_a.to_owned(),)).await?;
     proxy
         .call::<()>("Close", (resource_a2.resource.clone(),))
         .await?;
@@ -1144,15 +1142,8 @@ async fn exercise_profile_switches(
     assert_eq!(box_record_count(&backend, "local").await?, 1);
     assert_eq!(box_record_count(&backend, profile_b).await?, 0);
 
-    exercise_revocation_and_shutdown(
-        fixture,
-        backend,
-        registration,
-        proxy,
-        descriptor_b,
-        lease_a,
-    )
-    .await
+    exercise_revocation_and_shutdown(fixture, backend, registration, proxy, descriptor_b, lease_a)
+        .await
 }
 
 async fn exercise_revocation_and_shutdown(
