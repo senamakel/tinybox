@@ -5,6 +5,9 @@
 //! integration. It is private so that the ABI symbols `module_export!`
 //! generates stay out of the crate's public documentation.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use tinybox_core::{IsolationLevel, SandboxCapabilities};
 use tinybus::{Connection, Result as TinyBusResult};
 use tinybus_module::ModuleSetupContext;
@@ -51,14 +54,18 @@ impl Platform {
 #[derive(Default)]
 struct BoxService {
     resources: std::sync::Arc<resources::Resources>,
+    storage: std::sync::Arc<storage::ModuleStorage>,
 }
 
 impl BoxService {
-    /// A service whose box records live on the host storage behind
-    /// `connection`.
-    fn connected(connection: Connection) -> Self {
+    /// One immutable configured storage route over the module-wide resources.
+    fn configured(
+        resources: std::sync::Arc<resources::Resources>,
+        storage: storage::ModuleStorage,
+    ) -> Self {
         Self {
-            resources: std::sync::Arc::new(resources::Resources::with_connection(connection)),
+            resources,
+            storage: std::sync::Arc::new(storage),
         }
     }
 }
@@ -237,7 +244,9 @@ impl BoxService {
     /// Allocate the explicitly requested sandbox, without fallback.
     async fn create(&self, request: CreateRequest) -> TinyBusResult<ResourceInfo> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move { resources.create(request).await })).await
+        let storage = self.storage.clone();
+        finish_operation(tokio::spawn(async move { resources.create(&storage, request).await }))
+            .await
     }
 
     /// Run one unshelled command and collect output.
@@ -574,18 +583,37 @@ async fn finish_operation<T: Send + 'static>(
         .map_err(|error| tinybus::Error::failed(error.to_string()))?
 }
 
-async fn setup(connection: Connection) -> TinyBusResult<()> {
-    connection
-        .serve_at(
-            OBJECT_PATH.try_into()?,
-            BoxService::connected(connection.clone()),
-        )
-        .await?;
-    connection.request_name(INTERFACE).await?;
-    Ok(())
+#[derive(Default, serde::Deserialize)]
+struct BoxModuleConfig {
+    #[serde(default)]
+    storage_descriptor: Option<tinystoragedrivers_busproxy::StorageDescriptor>,
 }
 
-async fn setup_with_context(context: ModuleSetupContext) -> TinyBusResult<()> {
+type BoxSetupFuture = Pin<Box<dyn Future<Output = TinyBusResult<()>> + Send + 'static>>;
+
+fn setup_factory_with_context(
+) -> impl Fn(ModuleSetupContext, BoxModuleConfig) -> BoxSetupFuture + Send + Sync + 'static {
+    let resources = std::sync::Arc::new(resources::Resources::default());
+    move |context, config| {
+        let resources = std::sync::Arc::clone(&resources);
+        Box::pin(async move { setup_with_context(context, config, resources).await })
+    }
+}
+
+async fn setup_with_context(
+    context: ModuleSetupContext,
+    config: BoxModuleConfig,
+    resources: std::sync::Arc<resources::Resources>,
+) -> TinyBusResult<()> {
+    let connection = context.connection().clone();
+    let storage = storage::ModuleStorage::with_descriptor(
+        connection.clone(),
+        config.storage_descriptor,
+    );
+    storage
+        .validate_configured()
+        .await
+        .map_err(|_| tinybus::Error::failed("TinyBox storage descriptor unavailable"))?;
     let declaration = tinybox_drivers::storage_schema_declaration()
         .map_err(|_| tinybus::Error::failed("TinyBox migration schema unavailable"))?;
     tinystoragedrivers_tinybus::migration::serve_module_migration(
@@ -594,11 +622,19 @@ async fn setup_with_context(context: ModuleSetupContext) -> TinyBusResult<()> {
         std::sync::Arc::new(tinybox_drivers::TinyBoxMigrationHandler),
     )
     .await?;
-    setup(context.connection().clone()).await
+    connection
+        .serve_at(
+            OBJECT_PATH.try_into()?,
+            BoxService::configured(resources, storage),
+        )
+        .await?;
+    connection.request_name(INTERFACE).await?;
+    Ok(())
 }
 
 tinybus_module::module_export_optional_static! {
-    setup_with_context = setup_with_context,
+    setup_factory_with_context = setup_factory_with_context,
+    config = BoxModuleConfig,
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box", "org.tinystoragedrivers.Migration"],
     methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "AnalyzeCommand", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus"],

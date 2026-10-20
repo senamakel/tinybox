@@ -135,7 +135,6 @@ pub(super) struct Resources {
     stdio_changed: tokio::sync::Notify,
     rejected_shells: Mutex<Vec<(ResourceId, Arc<super::native_shell::ShellContext>)>>,
     preparations: tokio::sync::Semaphore,
-    storage: super::storage::ModuleStorage,
 }
 
 #[derive(Default)]
@@ -166,21 +165,11 @@ impl Default for Resources {
             stdio_changed: tokio::sync::Notify::new(),
             rejected_shells: Mutex::default(),
             preparations: tokio::sync::Semaphore::new(stream::MAX_STREAM_EXECUTIONS),
-            storage: super::storage::ModuleStorage::default(),
         }
     }
 }
 
 impl Resources {
-    /// Resources whose box records live on the host storage reached through
-    /// `connection`.
-    pub(super) fn with_connection(connection: tinybus::Connection) -> Self {
-        Self {
-            storage: super::storage::ModuleStorage::connected(connection),
-            ..Self::default()
-        }
-    }
-
     pub(super) async fn reserve(&self, request: ReserveRequest) -> Result<ResourceId> {
         let mut state = self.state.lock().await;
         if state.shutdown {
@@ -271,7 +260,11 @@ impl Resources {
         Ok(())
     }
 
-    pub(super) async fn create(&self, request: CreateRequest) -> Result<ResourceInfo> {
+    pub(super) async fn create(
+        &self,
+        storage: &super::storage::ModuleStorage,
+        request: CreateRequest,
+    ) -> Result<ResourceInfo> {
         let collector = Arc::new(tinybox_host::LimitedLocalHost::new(
             tinybox_bus::MAX_OUTPUT_BYTES,
         ));
@@ -336,8 +329,7 @@ impl Resources {
                 return Err(failure(tinybox_bus::EXEC_CANCELLED, "resource is closing"));
             }
             let resource_host = host.clone();
-            let shared = self
-                .storage
+            let shared = storage
                 .box_store()
                 .await
                 .map_err(|error| backend_error(&error))?;

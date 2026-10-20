@@ -10,12 +10,16 @@ use std::sync::Arc;
 
 use tinybox_core::{MemoryStore, Store};
 use tinybus::Connection;
+use tinystoragedrivers_busproxy::StorageDescriptor;
+use tinystoragedrivers_client::BusStorage;
 use tinystoragedrivers_core::{DocumentStore, ScopedStorage, StorageBackend};
 
 /// Lazily connected storage for one module instance.
 #[derive(Default)]
 pub(super) struct ModuleStorage {
     connection: Option<Connection>,
+    /// A host-issued route, immutable for this service configuration.
+    storage_descriptor: Option<StorageDescriptor>,
     scoped: tokio::sync::Mutex<Option<ScopedStorage>>,
     /// The opened host-backed box store, shared by every resource: it owns a
     /// blocking bridge with its own runtime thread, so one per module.
@@ -25,48 +29,88 @@ pub(super) struct ModuleStorage {
 impl ModuleStorage {
     /// Storage reached through `connection`.
     pub(super) fn connected(connection: Connection) -> Self {
+        Self::with_descriptor(connection, None)
+    }
+
+    /// Storage reached through the one optional host-issued lease descriptor.
+    pub(super) fn with_descriptor(
+        connection: Connection,
+        storage_descriptor: Option<StorageDescriptor>,
+    ) -> Self {
         Self {
             connection: Some(connection),
+            storage_descriptor,
             scoped: tokio::sync::Mutex::default(),
             boxes: tokio::sync::Mutex::default(),
         }
+    }
+
+    /// Eagerly establish a configured route and its box-record store before
+    /// replacing the service object. Legacy no-descriptor configurations stay
+    /// lazy and retain their previous no-storage behavior.
+    pub(super) async fn validate_configured(&self) -> tinybox_core::Result<()> {
+        if self.storage_descriptor.is_some() {
+            self.box_store().await?;
+        }
+        Ok(())
     }
 
     /// The scoped handle, connected on first use and shared afterwards.
     ///
     /// A failed connect is not cached, so a host that starts serving storage
     /// later is picked up by the next call.
-    async fn scoped(&self) -> Option<ScopedStorage> {
-        let connection = self.connection.clone()?;
+    async fn scoped(&self) -> tinybox_core::Result<Option<ScopedStorage>> {
+        let Some(connection) = self.connection.clone() else {
+            return Ok(None);
+        };
         let mut slot = self.scoped.lock().await;
         if let Some(scoped) = slot.as_ref() {
-            return Some(scoped.clone());
+            return Ok(Some(scoped.clone()));
         }
-        let bus = match tinystoragedrivers_busproxy::connect_storage(connection).await {
-            Ok(bus) => bus,
+        let scope = tinystoragedrivers_busproxy::module_scope_label();
+        let bus = match &self.storage_descriptor {
+            Some(descriptor) => {
+                let transport = tinystoragedrivers_busproxy::BusTransport::connect_bound(
+                    connection,
+                    descriptor.clone(),
+                )
+                .await
+                .map_err(|_| storage_route_unavailable())?;
+                BusStorage::connect(Arc::new(transport), scope.clone())
+                    .await
+                    .map_err(|_| storage_route_unavailable())?
+            }
+            None => match tinystoragedrivers_busproxy::connect_storage(connection).await {
+                Ok(bus) => bus,
+                Err(error) => {
+                    log::debug!("[tinybox_module] legacy storage bus unavailable: {error}");
+                    return Ok(None);
+                }
+            },
+        };
+        let scoped = match bus.for_scope(&scope) {
+            Ok(scoped) => scoped,
+            Err(_) if self.storage_descriptor.is_some() => {
+                return Err(storage_route_unavailable());
+            }
             Err(error) => {
-                log::debug!("[tinybox_module] storage bus unavailable: {error}");
-                return None;
+                log::warn!("[tinybox_module] legacy storage bus scope refused: {error}");
+                return Ok(None);
             }
         };
-        match bus.for_scope(&tinystoragedrivers_busproxy::module_scope_label()) {
-            Ok(scoped) => {
-                log::debug!("[tinybox_module] storage bus connected");
-                *slot = Some(scoped.clone());
-                Some(scoped)
-            }
-            Err(error) => {
-                log::warn!("[tinybox_module] storage bus scope refused: {error}");
-                None
-            }
-        }
+        log::debug!("[tinybox_module] storage bus connected");
+        *slot = Some(scoped.clone());
+        Ok(Some(scoped))
     }
 
     /// The host's document port, when it serves one.
-    pub(super) async fn documents(&self) -> Option<Arc<dyn DocumentStore>> {
-        self.scoped()
-            .await
-            .map(|scoped| Arc::clone(scoped.documents()))
+    pub(super) async fn documents(
+        &self,
+    ) -> tinybox_core::Result<Option<Arc<dyn DocumentStore>>> {
+        Ok(self
+            .scoped()
+            .await?
+            .map(|scoped| Arc::clone(scoped.documents())))
     }
 
     /// Where resources keep their box records: the host's document port when
@@ -77,7 +121,10 @@ impl ModuleStorage {
     /// Once the host serves storage, a failure to open its box collection is
     /// returned rather than hidden behind memory records the host cannot see.
     pub(super) async fn box_store(&self) -> tinybox_core::Result<Arc<dyn Store>> {
-        let Some(documents) = self.documents().await else {
+        let Some(documents) = self.documents().await? else {
+            if self.storage_descriptor.is_some() {
+                return Err(storage_route_unavailable());
+            }
             return Ok(Arc::new(MemoryStore::new()));
         };
         let mut slot = self.boxes.lock().await;
@@ -110,7 +157,7 @@ impl ModuleStorage {
         base: std::path::PathBuf,
         name: String,
     ) -> Option<std::io::Result<tinybox_jail::JailRegistry>> {
-        let documents = self.documents().await?;
+        let documents = self.documents().await.ok()??;
         let opened = tokio::task::spawn_blocking(move || {
             let index = tinybox_drivers::DocumentIndexStore::new(documents, name)?;
             tinybox_jail::JailRegistry::open_with_store(
@@ -249,7 +296,15 @@ impl std::fmt::Debug for ModuleStorage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModuleStorage")
             .field("connected", &self.connection.is_some())
+            .field("descriptor_bound", &self.storage_descriptor.is_some())
             .finish_non_exhaustive()
+    }
+}
+
+fn storage_route_unavailable() -> tinybox_core::Error {
+    tinybox_core::Error::Store {
+        operation: "connect",
+        message: "governed storage route unavailable".to_owned(),
     }
 }
 
