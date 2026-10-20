@@ -56,6 +56,8 @@ tempfile = "3"
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
 
 [dev-dependencies]
+# Broker-backed descriptor tests need the exact typed grant vocabulary.
+tinystoragedrivers-bus.workspace = true
 # Tests serve the storage objects on the in-memory broker the module connects to.
 tinystoragedrivers-client.workspace = true
 # Deterministic delayed-host fixtures implement the existing object-safe host trait.

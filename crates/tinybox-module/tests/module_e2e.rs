@@ -11,6 +11,7 @@ use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::{ModuleHost, ModuleState};
 use tinybus::transport::memory::MemoryBus;
+use tinystoragedrivers_core::StorageBackend;
 use tinystoragedrivers_busproxy::{
     AuditEvent, AuditSink, Environment, GovernedEndpointLimits, GovernedStorage, GrantPolicy,
     HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
@@ -1005,7 +1006,7 @@ fn legacy_v1_jail_index() -> serde_json::Value {
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
 -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
-    use tinystoragedrivers_core::{DocumentStoreExt, Query, Scope, StorageBackend};
+    use tinystoragedrivers_core::{DocumentStoreExt, Query};
     use tinystoragedrivers_tinybus::attach_storage;
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
@@ -1045,13 +1046,15 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         ),
         tokio::runtime::Handle::current(),
     )
-    .await?;
+    .await
+    .map_err(|_| std::io::Error::other("governed storage registration failed"))?;
     let (_lease, descriptor) = registration
         .register_lease(
             HostStorageContext::new(BoxStorageContext("local".to_owned())),
             fixture.module_peer.clone(),
         )
-        .await?;
+        .await
+        .map_err(|_| std::io::Error::other("governed storage lease registration failed"))?;
     fixture
         .modules
         .reinitialize(
