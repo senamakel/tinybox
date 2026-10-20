@@ -295,6 +295,18 @@ Use `libtinybox.dylib` for the artifact on macOS. Each artifact fixture loads an
 independent library path so concurrent module initialization stays isolated.
 
 
+## Configured storage
+
+The host may configure `storage_descriptor` during module setup or
+reinitialization. A configured descriptor is bound to that service instance
+and validated before it replaces the active service; storage failures do not
+fall back to an in-memory store. Existing resources keep the store they were
+created with when a later configuration selects another scope. Omitting the
+descriptor preserves the legacy storage route. The module shares resource
+lifecycle state across configurations, so callers must invoke terminal
+`Shutdown` before unloading the module; it drains resources created under each
+configured scope.
+
 ## Observed Docker execution
 
 `StartExec` on Docker resources uses the existing box/store identity and a
