@@ -587,10 +587,27 @@ async fn finish_operation<T: Send + 'static>(
         .map_err(|error| tinybus::Error::failed(error.to_string()))?
 }
 
-#[derive(Default, serde::Deserialize)]
+#[derive(Default)]
 struct BoxModuleConfig {
-    #[serde(default)]
     storage_descriptor: Option<tinystoragedrivers_busproxy::StorageDescriptor>,
+}
+
+impl<'de> serde::Deserialize<'de> for BoxModuleConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Default, serde::Deserialize)]
+        #[serde(default)]
+        struct Fields {
+            storage_descriptor: Option<tinystoragedrivers_busproxy::StorageDescriptor>,
+        }
+
+        let fields = <Option<Fields> as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self {
+            storage_descriptor: fields.and_then(|fields| fields.storage_descriptor),
+        })
+    }
 }
 
 type BoxSetupFuture = Pin<Box<dyn Future<Output = TinyBusResult<()>> + Send + 'static>>;
