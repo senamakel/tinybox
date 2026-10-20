@@ -89,7 +89,7 @@ pub fn storage_schema_declaration() -> Result<SchemaDeclaration> {
     })
 }
 
-/// Stateless TinyBox owner transforms for the TSD migration exchange.
+/// Stateless `TinyBox` owner transforms for the TSD migration exchange.
 #[derive(Debug, Default)]
 pub struct TinyBoxMigrationHandler;
 
