@@ -978,6 +978,23 @@ fn legacy_v1_box() -> serde_json::Value {
     })
 }
 
+fn legacy_v1_jail_index() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "records": {
+            "j1": {
+                "id": "j1",
+                "label": "build",
+                "dir": "/srv/j1",
+                "backend_at_create": "landlock",
+                "created_at_unix": 1_700_000_000_u64,
+                "updated_at_unix": 1_700_000_060_u64,
+                "notes": "keep",
+            },
+        },
+    })
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires TINYBOX_TEST_MODULE to point at the built cdylib"]
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
