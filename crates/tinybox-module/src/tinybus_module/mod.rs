@@ -7,6 +7,7 @@
 
 use tinybox_core::{IsolationLevel, SandboxCapabilities};
 use tinybus::{Connection, Result as TinyBusResult};
+use tinybus_module::ModuleSetupContext;
 
 use tinybox_bus::{
     AbortFileWriteRequest, BeginFileReadRequest, BeginFileWriteRequest, CloseForwardRequest,
@@ -584,11 +585,23 @@ async fn setup(connection: Connection) -> TinyBusResult<()> {
     Ok(())
 }
 
+async fn setup_with_context(context: ModuleSetupContext) -> TinyBusResult<()> {
+    let declaration = tinybox_drivers::storage_schema_declaration()
+        .map_err(|_| tinybus::Error::failed("TinyBox migration schema unavailable"))?;
+    tinystoragedrivers_tinybus::migration::serve_module_migration(
+        &context,
+        declaration,
+        std::sync::Arc::new(tinybox_drivers::TinyBoxMigrationHandler),
+    )
+    .await?;
+    setup(context.connection().clone()).await
+}
+
 tinybus_module::module_export_optional_static! {
-    setup = setup,
+    setup_with_context = setup_with_context,
     worker_threads = 1,
-    provides = ["ai.tinyhumans.tinybox.Box"],
-    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "AnalyzeCommand", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus"],
+    provides = ["ai.tinyhumans.tinybox.Box", "org.tinystoragedrivers.Migration"],
+    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "AnalyzeCommand", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "GetSchema", "Exchange"],
     signals = [],
     requires = [],
     optional = [],
