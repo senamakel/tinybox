@@ -215,3 +215,23 @@ fn args_directory_candidates_resolving_inside_a_grant_are_rejected() -> io::Resu
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     Ok(())
 }
+
+#[test]
+fn args_file_candidates_under_baseline_readable_roots_are_rejected() -> io::Result<()> {
+    let safe_temp = tempfile::tempdir()?;
+    let baseline_candidate = PathBuf::from("/usr");
+    assert!(baseline_candidate.is_dir());
+
+    let chosen = base_dir(
+        &[],
+        Some(baseline_candidate.clone()),
+        safe_temp.path().to_path_buf(),
+    )?;
+    assert_eq!(chosen, safe_temp.path());
+
+    let error = base_dir(&[], None, baseline_candidate)
+        .err()
+        .ok_or_else(|| io::Error::other("TMPDIR under a baseline-readable mount was accepted"))?;
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    Ok(())
+}

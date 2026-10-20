@@ -202,14 +202,15 @@ fn deny_read_directory_is_read_only_or_refused() -> io::Result<()> {
 }
 
 #[test]
-fn deny_read_over_a_grant_drops_the_grant() -> io::Result<()> {
+fn deny_read_equal_to_a_grant_under_private_tmp_is_refused() -> io::Result<()> {
     let root = tempfile::tempdir()?;
     let ro = tempfile::tempdir()?;
     let mut j = jail(root.path()).add_read_only(ro.path());
     j.deny_read = vec![ro.path().to_path_buf()];
-    let argv = build(&j)?;
-    let ro = ro.path().display().to_string();
-    assert!(!argv.contains(&ro));
+    let error = jail_args(&j, None, OPTS).err().ok_or_else(|| {
+        io::Error::other("denial equal to a grant under private /tmp was accepted")
+    })?;
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     Ok(())
 }
 
