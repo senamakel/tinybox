@@ -188,7 +188,7 @@ fn deny_read_directory_is_read_only_or_refused() -> io::Result<()> {
     let mut j = jail(root.path());
     j.deny_read = vec![secret_dir.clone()];
 
-    match jail_args(&j, None, OPTS) {
+    match build(&j) {
         Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
         Ok(argv) => {
             let bind = triple(&argv, "--bind", root.path());
@@ -227,7 +227,7 @@ fn deny_read_under_a_baseline_mount_is_enforced() -> io::Result<()> {
     let mut j = jail(root.path());
     j.deny_read = vec![PathBuf::from("/usr/bin")];
     if Path::new("/usr/bin").is_dir() {
-        match jail_args(&j, None, OPTS) {
+        match build(&j) {
             Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
             Ok(argv) => {
                 let empty_mount = pair(&argv, "--tmpfs", Path::new("/usr/bin"));
@@ -269,7 +269,7 @@ fn deny_read_deeper_than_a_child_of_a_writable_grant_is_refused() -> io::Result<
     std::fs::create_dir_all(&nested)?;
     let mut j = jail(root.path()).add_read_only(ro.path());
     j.deny_read = vec![nested.clone()];
-    match jail_args(&j, None, OPTS) {
+    match build(&j) {
         Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
         Ok(argv) => {
             let empty_mount = pair(&argv, "--tmpfs", &nested);
