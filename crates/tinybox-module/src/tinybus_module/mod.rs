@@ -635,6 +635,22 @@ async fn setup_with_context(
 }
 
 #[cfg(test)]
+async fn setup_service(
+    connection: Connection,
+    resources: std::sync::Arc<resources::Resources>,
+    storage: storage::ModuleStorage,
+) -> TinyBusResult<()> {
+    connection
+        .serve_at(
+            OBJECT_PATH.try_into()?,
+            BoxService::configured(resources, storage),
+        )
+        .await?;
+    connection.request_name(INTERFACE).await?;
+    Ok(())
+}
+
+#[cfg(test)]
 async fn setup(connection: Connection) -> TinyBusResult<()> {
     setup_service(
         connection.clone(),
