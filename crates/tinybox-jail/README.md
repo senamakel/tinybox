@@ -127,12 +127,14 @@ not import that module.
   returns `io::ErrorKind::Unsupported`. See the TODO in `windows.rs`. The
   Windows path is compile-checked but flagged as needing real-hardware
   testing.
-- macOS and Linux forward only variables explicitly supplied with
-  `Command::env` or `Command::envs`; neither backend forwards the inherited
-  process environment. macOS clears it because Rust exposes no getter for
-  `Command::env_clear`, while Linux uses bubblewrap's `--clearenv`. This avoids
-  restoring parent credentials a caller deliberately removed. Supply required
-  variables such as `PATH` explicitly.
+- macOS Seatbelt and Linux bubblewrap forward only variables explicitly
+  supplied with `Command::env` or `Command::envs`; neither forwards the
+  inherited process environment. macOS clears it because Rust exposes no
+  getter for `Command::env_clear`, while bubblewrap uses `--clearenv`. Supply
+  required variables such as `PATH` explicitly.
+- Linux Landlock preserves the original `Command` environment. It applies its
+  filesystem rules on the spawn thread and does not clear or rebuild that
+  environment.
 - macOS stdio is inherited: the Seatbelt wrapper cannot re-apply the
   original command's `Stdio` config, so it uses `sandbox-exec` defaults
   (inherit). The profile re-allows writes under the canonicalized `root` and
