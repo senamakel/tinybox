@@ -1006,8 +1006,6 @@ fn legacy_v1_jail_index() -> serde_json::Value {
 async fn compiled_module_migrates_owner_data_before_storage_is_served()
 -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{CreateRequest, ReserveRequest, ResourceInfo};
-    use tinystoragedrivers_core::{DocumentStoreExt, Query};
-    use tinystoragedrivers_tinybus::attach_storage;
     use tinystoragedrivers_tinybus::migration::{
         EXCHANGE_MEMBER, GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
     };
@@ -1016,7 +1014,7 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         .map(std::path::PathBuf::from)
         .ok_or("TINYBOX_TEST_MODULE must point at libtinybox")?;
     let fixture = load_compiled_migration_fixture(&source).await?;
-    let (backend, storage) = migrate_legacy_box(fixture.module).await?;
+    let (backend, _storage) = migrate_legacy_box(fixture.module).await?;
 
     let outsider_migration = fixture.outsider.proxy(
         fixture.module_peer.as_str(),
@@ -1261,6 +1259,24 @@ type BoxStorageRegistration = tinystoragedrivers_tinybus::StorageRegistration<
     BoxTestAudit,
     BoxStorageContext,
 >;
+
+async fn attach_box_storage(
+    fixture: &CompiledMigrationFixture,
+    backend: Arc<tinystoragedrivers_core::MemoryStorage>,
+) -> Result<BoxStorageRegistration, Box<dyn std::error::Error>> {
+    tinystoragedrivers_tinybus::attach_storage(
+        &fixture.modules,
+        &fixture.controller,
+        GovernedStorage::new(
+            Arc::new(BoxStorageEnvironment { backend }),
+            Arc::new(BoxTestAudit),
+            GovernedEndpointLimits::default(),
+        ),
+        tokio::runtime::Handle::current(),
+    )
+    .await
+    .map_err(|_| std::io::Error::other("governed Box storage registration failed").into())
+}
 
 async fn register_box_lease(
     registration: &BoxStorageRegistration,
