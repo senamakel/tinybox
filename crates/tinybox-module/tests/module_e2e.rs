@@ -1045,13 +1045,16 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
         "TinyBox opens its ordinary storage path only after host migration completes"
     );
 
-    exercise_profile_switches(
+    let exercise = (
         &fixture.modules,
         &fixture.controller,
         &fixture.module_peer,
         &backend,
         &registration,
         &proxy,
+    );
+    exercise_profile_switches(
+        exercise,
         descriptor_a,
         lease_a,
         &resource_a.resource,
@@ -1062,18 +1065,24 @@ async fn compiled_module_migrates_owner_data_before_storage_is_served()
     Ok(())
 }
 
+type DescriptorExercise<'a> = (
+    &'a ModuleHost,
+    &'a Connection,
+    &'a tinybus::BusName,
+    &'a Arc<tinystoragedrivers_core::MemoryStorage>,
+    &'a BoxStorageRegistration,
+    &'a tinybus::Proxy,
+);
+
 async fn exercise_profile_switches(
-    modules: &ModuleHost,
-    controller: &Connection,
-    module_peer: &tinybus::BusName,
-    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
-    registration: &BoxStorageRegistration,
-    proxy: &tinybus::Proxy,
+    exercise: DescriptorExercise<'_>,
     descriptor_a: tinystoragedrivers_busproxy::StorageDescriptor,
     lease_a: tinystoragedrivers_busproxy::StorageLease,
     resource_a: &tinybox_bus::ResourceId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::ResourceInfo;
+
+    let (modules, controller, module_peer, backend, registration, proxy) = exercise;
 
     let profile_b = "box-other-profile";
     let migration_b = tinystoragedrivers_tinybus::migration::MigrationModuleClient::discover(
@@ -1158,12 +1167,7 @@ async fn exercise_profile_switches(
 }
 
 async fn exercise_revocation_and_shutdown(
-    modules: &ModuleHost,
-    controller: &Connection,
-    module_peer: &tinybus::BusName,
-    backend: &Arc<tinystoragedrivers_core::MemoryStorage>,
-    registration: &BoxStorageRegistration,
-    proxy: &tinybus::Proxy,
+    exercise: DescriptorExercise<'_>,
     descriptor_b: tinystoragedrivers_busproxy::StorageDescriptor,
     lease_a: tinystoragedrivers_busproxy::StorageLease,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1171,6 +1175,8 @@ async fn exercise_revocation_and_shutdown(
     use tinystoragedrivers_tinybus::migration::{
         GET_SCHEMA_MEMBER, MIGRATION_INTERFACE, MIGRATION_OBJECT_PATH,
     };
+
+    let (modules, controller, module_peer, backend, registration, proxy) = exercise;
 
     let profile_b = "box-other-profile";
     assert!(registration.revoke(&lease_a).await);
