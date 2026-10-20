@@ -147,7 +147,7 @@ fn baseline_mounts() -> Vec<Mount> {
 pub(super) fn baseline_readable_roots() -> Vec<PathBuf> {
     baseline_mounts()
         .into_iter()
-        .filter(|mount| mount.is_bind())
+        .filter(Mount::is_bind)
         .map(|mount| mount.path)
         .collect()
 }
