@@ -148,10 +148,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_sdk_source_identity_release_floor_and_gitlink_are_pinned(self):
         workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
         client = tomllib.loads((ROOT / "crates/tinybox-client/Cargo.toml").read_text())
-        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.43")
+        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.44")
         self.assertEqual(
             workspace["workspace"]["dependencies"]["tinybox-client"],
-            {"path": "crates/tinybox-client", "version": "0.1.43"},
+            {"path": "crates/tinybox-client", "version": "0.1.44"},
         )
         for name in ("tinybus", "tinybus-module"):
             dependency = workspace["workspace"]["dependencies"][name]
