@@ -39,10 +39,10 @@ categories = ["development-tools", "virtualization"]
 # Use TinyBus's canonical Git source so a host workspace can unify these Rust
 # types with its own SDK patch. This workspace's patch below pins standalone
 # builds to the published SDK checkout in vendor/tinybus.
-tinybus = { version = "=0.3.11", git = "https://github.com/tinyhumansai/tinybus", rev = "9e14f65666b11782ec1054aba576114026d180f8", default-features = false }
+tinybus = { version = "=0.3.12", git = "https://github.com/tinyhumansai/tinybus", rev = "5eb13730c9c60032342ae14454b3c8430302a24b", default-features = false }
 # The module-side SDK owns the isolated runtime and exports the ABI entrypoints
 # required by TinyBus's dynamic loader.
-tinybus-module = { version = "=0.3.11", git = "https://github.com/tinyhumansai/tinybus", rev = "9e14f65666b11782ec1054aba576114026d180f8" }
+tinybus-module = { version = "=0.3.12", git = "https://github.com/tinyhumansai/tinybus", rev = "5eb13730c9c60032342ae14454b3c8430302a24b" }
 
 # Derive macros for the crate-wide error type in `tinybox-core`.
 thiserror = "2"
