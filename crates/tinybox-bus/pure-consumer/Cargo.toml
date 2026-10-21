@@ -8,4 +8,4 @@ publish = false
 
 [dependencies]
 tinybox-bus = { path = ".." }
-tinystoragedrivers-bus = { version = "1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b", default-features = false }
+tinystoragedrivers-bus = { version = "1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59", default-features = false }
