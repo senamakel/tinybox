@@ -197,23 +197,49 @@ async fn a_chained_host_refuses_rather_than_tunnelling_from_the_wrong_machine() 
 }
 
 #[tokio::test]
-async fn an_unreachable_destination_settles_quickly_instead_of_hanging() -> Result<()> {
-    // `BatchMode=yes` is what makes this settle at all: without it `ssh` would
-    // prompt for a password nobody is there to answer, and the call would hang
-    // rather than fail.
-    //
-    // Which way it settles is deliberately not asserted. `ssh` binds the local
-    // port before it authenticates, so an unreachable destination can produce a
-    // listener for a moment before dying — see `open`'s documentation. Pinning
-    // one outcome here would be pinning a race, and the property that matters
-    // is that neither outcome takes the full `LISTEN_TIMEOUT`.
-    let host = SshHost::new(Arc::new(tinybox_host::LocalHost::new()), target()?);
+async fn an_ssh_peer_that_closes_early_settles_quickly() -> Result<()> {
+    // Use a controlled loopback peer instead of a reserved DNS name. Name
+    // resolution timing varies by platform and can consume the listener
+    // deadline before ssh reports that the peer is unavailable.
+    let peer = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(|error| Error::io("bind the SSH peer fixture", &error))?;
+    let peer_port = peer
+        .local_addr()
+        .map_err(|error| Error::io("read the SSH peer fixture address", &error))?
+        .port();
+    let peer_task = tokio::spawn(async move {
+        let (stream, _) = peer.accept().await?;
+        drop(stream);
+        Ok::<(), std::io::Error>(())
+    });
+    let target = SshTarget::new("builder@127.0.0.1")?.with_port(peer_port);
+    let host = SshHost::new(Arc::new(tinybox_host::LocalHost::new()), target);
 
     let started = std::time::Instant::now();
     let outcome = host.forward(([127, 0, 0, 1], 7788).into()).await;
     let elapsed = started.elapsed();
 
     assert!(elapsed < LISTEN_TIMEOUT, "took {elapsed:?}");
+    if matches!(outcome.as_ref(), Err(Error::Io { .. })) {
+        // A machine without ssh cannot contact the fixture; do not leave its
+        // accept task detached in that environment.
+        peer_task.abort();
+        let _ = peer_task.await;
+    } else {
+        // The SSH control connection is opened before the local listener is
+        // reported ready. Yield once so the accept task can observe that
+        // connection, and abort it if the child exited before reaching us.
+        tokio::task::yield_now().await;
+        let peer_was_reached = if peer_task.is_finished() {
+            peer_task.await.is_ok_and(|result| result.is_ok())
+        } else {
+            peer_task.abort();
+            let _ = peer_task.await;
+            false
+        };
+        assert!(peer_was_reached, "ssh did not reach the loopback peer");
+    }
     if let Err(error) = outcome {
         assert!(
             matches!(
