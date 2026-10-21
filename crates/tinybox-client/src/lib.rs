@@ -77,6 +77,7 @@ impl TinyBoxClient {
             .call(MODULE_ID, contract::names::CAPABILITIES, ())
             .await?;
         if !contract::is_compatible(capabilities.contract_version) {
+            client.report_incompatible_contract(MODULE_ID);
             return Err(ModuleCallError::IncompatibleContract);
         }
         Ok(Self {
