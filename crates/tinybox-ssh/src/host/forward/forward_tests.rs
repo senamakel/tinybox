@@ -236,7 +236,7 @@ async fn an_ssh_peer_that_closes_early_settles_quickly() -> Result<()> {
         let remaining = LISTEN_TIMEOUT.saturating_sub(forward_elapsed);
         let peer_was_reached = match tokio::time::timeout(remaining, &mut peer_task).await {
             Ok(Ok(Ok(()))) => true,
-            Ok(Ok(Err(_))) | Ok(Err(_)) => false,
+            Ok(Ok(Err(_)) | Err(_)) => false,
             Err(_) => {
                 peer_task.abort();
                 let _ = peer_task.await;
