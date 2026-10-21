@@ -69,7 +69,9 @@ impl TinyBoxClient {
     /// # Errors
     ///
     /// Returns a sanitized `TinyBus` call error when the module is unavailable,
-    /// its capabilities cannot be read, or its contract is incompatible.
+    /// its capabilities cannot be read, or its contract is incompatible. An
+    /// incompatible contract is reported through the host client's
+    /// registry-keyed failure reporter before the error is returned.
     pub async fn new(client: ModuleClient) -> Result<Self> {
         let capabilities: contract::ModuleCapabilities = client
             .call(MODULE_ID, contract::names::CAPABILITIES, ())
@@ -81,6 +83,16 @@ impl TinyBoxClient {
             client,
             capabilities,
         })
+    }
+
+    /// Override the TinyBus deadline used by later calls through this client.
+    ///
+    /// The already-validated capabilities are retained, so changing a host's
+    /// per-operation deadline does not repeat the compatibility probe.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.client = self.client.with_timeout(timeout);
+        self
     }
 
     /// Return the capabilities captured during construction.
