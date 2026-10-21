@@ -692,3 +692,7 @@ tinybus_module::module_export_optional_static! {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod test;
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod startup_tests;
