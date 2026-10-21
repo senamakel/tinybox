@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/release.yml"
 TINYBUS_URL = "https://github.com/tinyhumansai/tinybus"
 TINYBUS_REV = "34d3bd6dda099e54cee11a2f96f28a21da9e0759"
-TINYBUS_VERSION = "=0.3.11"
+TINYBUS_VERSION = "=0.3.12"
 
 
 def resolve_script(workflow):
