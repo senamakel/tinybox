@@ -1369,7 +1369,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -1432,8 +1432,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tinybox-bus",
- "tinybus",
- "tinybus-module",
+ "tinybus 0.3.11",
+ "tinybus-module 0.3.11",
  "tokio",
 ]
 
@@ -1550,8 +1550,8 @@ dependencies = [
  "tinybox-linux",
  "tinybox-microvm",
  "tinybox-ssh",
- "tinybus",
- "tinybus-module",
+ "tinybus 0.3.11",
+ "tinybus-module 0.3.11",
  "tinystoragedrivers-bus",
  "tinystoragedrivers-busproxy",
  "tinystoragedrivers-client",
@@ -1592,6 +1592,7 @@ dependencies = [
 [[package]]
 name = "tinybus"
 version = "0.3.11"
+source = "git+https://github.com/tinyhumansai/tinybus?rev=9e14f65666b11782ec1054aba576114026d180f8#9e14f65666b11782ec1054aba576114026d180f8"
 dependencies = [
  "async-trait",
  "flate2",
@@ -1613,8 +1614,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinybus"
+version = "0.3.12"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "icu_casemap",
+ "libc",
+ "rawzip",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "unicode-normalization",
+ "ureq",
+]
+
+[[package]]
 name = "tinybus-macros"
 version = "0.3.11"
+source = "git+https://github.com/tinyhumansai/tinybus?rev=9e14f65666b11782ec1054aba576114026d180f8#9e14f65666b11782ec1054aba576114026d180f8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1624,11 +1648,24 @@ dependencies = [
 [[package]]
 name = "tinybus-module"
 version = "0.3.11"
+source = "git+https://github.com/tinyhumansai/tinybus?rev=9e14f65666b11782ec1054aba576114026d180f8#9e14f65666b11782ec1054aba576114026d180f8"
 dependencies = [
  "async-trait",
  "serde",
  "serde_json",
- "tinybus",
+ "tinybus 0.3.11",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tinybus-module"
+version = "0.3.12"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tinybus 0.3.12",
  "tokio",
  "tracing",
 ]
@@ -1640,7 +1677,7 @@ source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=a04e3a174fa
 dependencies = [
  "serde",
  "serde_json",
- "tinybus",
+ "tinybus 0.3.12",
 ]
 
 [[package]]
@@ -1651,7 +1688,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
- "tinybus",
+ "tinybus 0.3.12",
  "tinystoragedrivers-bus",
  "tinystoragedrivers-client",
  "tinystoragedrivers-core",
@@ -1729,8 +1766,8 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
- "tinybus",
- "tinybus-module",
+ "tinybus 0.3.12",
+ "tinybus-module 0.3.12",
  "tinystoragedrivers-bus",
  "tinystoragedrivers-busproxy",
  "tinystoragedrivers-core",
