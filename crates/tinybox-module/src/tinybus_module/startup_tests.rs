@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tinybox_bus::{CreateRequest, ReserveRequest, ResourceId, ResourceInfo, Workspace};
 use tinybus::broker::Broker;
 use tinybus::module::{ModuleHost, PreReadyConfidentialRoute};
 use tinybus::transport::memory::{MemoryBus, MemoryTransport};
@@ -15,7 +16,7 @@ use tinystoragedrivers_busproxy::{
     HostContext, HostFailure, HostStorageContext, ResolvedStorage, StorageGrant,
 };
 use tinystoragedrivers_client::StorageServer;
-use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend};
+use tinystoragedrivers_core::{DocumentStoreExt, MemoryStorage, Query, Scope, StorageBackend};
 use tinystoragedrivers_tinybus::migration::MigrationModuleClient;
 
 struct SetupStorageContext {
@@ -224,7 +225,9 @@ async fn initial_bound_storage_validation_discovers_tinybox_migrations()
             &host,
             &controller,
             GovernedStorage::new(
-                std::sync::Arc::new(SetupStorageEnvironment { backend }),
+                std::sync::Arc::new(SetupStorageEnvironment {
+                    backend: std::sync::Arc::clone(&backend),
+                }),
                 std::sync::Arc::new(SetupStorageAudit),
                 GovernedEndpointLimits::default(),
             ),
@@ -272,6 +275,29 @@ async fn initial_bound_storage_validation_discovers_tinybox_migrations()
         .ok_or_else(|| std::io::Error::other("TinyBox module did not request its bus name"))?;
     let migration = MigrationModuleClient::discover(&controller, &module_peer).await?;
     assert_eq!(migration.declaration().owner.as_str(), "box");
+
+    let proxy = controller.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    let workspace = tempfile::tempdir()?;
+    let created: ResourceInfo = proxy
+        .call(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    assert_eq!(created.resource, resource);
+    let scoped = backend.for_scope(&Scope::local())?;
+    let records = scoped
+        .documents()
+        .query_all(tinybox_drivers::BOX_COLLECTION, &Query::all())
+        .await?;
+    assert_eq!(records.len(), 1, "configured storage is usable after setup");
+    proxy.call::<()>("Close", (resource,)).await?;
 
     let lease = INITIAL_SETUP_LEASE
         .get_or_init(|| std::sync::Mutex::new(None))
