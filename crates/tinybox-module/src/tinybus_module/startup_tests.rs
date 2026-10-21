@@ -224,7 +224,7 @@ async fn initial_bound_storage_validation_discovers_tinybox_migrations()
             &host,
             &controller,
             GovernedStorage::new(
-                SetupStorageEnvironment { backend },
+                std::sync::Arc::new(SetupStorageEnvironment { backend }),
                 std::sync::Arc::new(SetupStorageAudit),
                 GovernedEndpointLimits::default(),
             ),
