@@ -234,14 +234,15 @@ async fn an_ssh_peer_that_closes_early_settles_quickly() -> Result<()> {
         // Keep the peer observation inside the original listener deadline;
         // waiting for the task to be scheduled is not evidence of a connection.
         let remaining = LISTEN_TIMEOUT.saturating_sub(forward_elapsed);
-        let peer_was_reached = matches!(
-            tokio::time::timeout(remaining, &mut peer_task).await,
-            Ok(Ok(Ok(())))
-        );
-        if !peer_was_reached {
-            peer_task.abort();
-            let _ = peer_task.await;
-        }
+        let peer_was_reached = match tokio::time::timeout(remaining, &mut peer_task).await {
+            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Err(_))) | Ok(Err(_)) => false,
+            Err(_) => {
+                peer_task.abort();
+                let _ = peer_task.await;
+                false
+            }
+        };
         assert!(peer_was_reached, "ssh did not reach the loopback peer");
     }
     let elapsed = started.elapsed();
