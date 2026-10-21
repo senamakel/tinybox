@@ -17,9 +17,9 @@ from check_pure_bus_consumer import (  # noqa: E402
 
 
 STORAGE_URL = "https://github.com/tinyhumansai/tinystoragedrivers"
-STORAGE_VERSION = "1.9.0"
-STORAGE_REV = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b"
-PREVIOUS_STORAGE_REV = "c9ea6ff1615b77b55d7269403af5fd11bedc9ce8"
+STORAGE_VERSION = "1.10.0"
+STORAGE_REV = "078d2dee0f299d97dbc22fa7210bd64098a4bf59"
+PREVIOUS_STORAGE_REV = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b"
 STORAGE_SOURCE = f"git+{STORAGE_URL}?rev={STORAGE_REV}#{STORAGE_REV}"
 
 
@@ -64,11 +64,11 @@ source = "{source}"
 
 
 VALID_TREE = """tinybox-bus-pure-consumer v0.1.0
-tinybox-bus v0.1.39 [default]
-tinystoragedrivers-bus v1.9.0 []
+tinybox-bus v0.1.44 [default]
+tinystoragedrivers-bus v1.10.0 []
 serde v1.0.0 [default, derive, std]
-tinybox-bus v0.1.39 [default, storage]
-tinystoragedrivers-bus v1.9.0 []
+tinybox-bus v0.1.44 [default, storage]
+tinystoragedrivers-bus v1.10.0 []
 serde v1.0.0 [default, derive, std]
 """
 
@@ -95,12 +95,12 @@ class PureBusConsumerProofTests(unittest.TestCase):
     def test_accepts_exact_published_dependency_and_normal_build_feature_graph(self):
         validate_manifest(manifest())
         validate_lockfile(lockfile())
-        validate_dependency_graph(VALID_TREE, "0.1.39")
+        validate_dependency_graph(VALID_TREE, "0.1.44")
 
     def test_rejects_previous_published_release_even_when_its_revision_was_once_pinned(self):
         with self.assertRaisesRegex(ProofError, "version and source"):
             previous_source = f"git+{STORAGE_URL}?rev={PREVIOUS_STORAGE_REV}#{PREVIOUS_STORAGE_REV}"
-            validate_lockfile(lockfile("1.5.0", previous_source))
+            validate_lockfile(lockfile("1.9.0", previous_source))
 
     def test_rejects_wrong_revision_with_the_correct_version_and_url(self):
         wrong_rev = "a" * 40
@@ -127,24 +127,24 @@ class PureBusConsumerProofTests(unittest.TestCase):
 
     def test_rejects_client_feature_and_implementation_runtime_or_database_nodes(self):
         bad_trees = (
-            VALID_TREE.replace("tinystoragedrivers-bus v1.9.0 []", "tinystoragedrivers-bus v1.9.0 [client]"),
-            VALID_TREE + "tinystoragedrivers-client v1.9.0\n",
-            VALID_TREE + "tinybox-module v0.1.39\n",
+            VALID_TREE.replace("tinystoragedrivers-bus v1.10.0 []", "tinystoragedrivers-bus v1.10.0 [client]"),
+            VALID_TREE + "tinystoragedrivers-client v1.10.0\n",
+            VALID_TREE + "tinybox-module v0.1.44\n",
             VALID_TREE + "tokio v1.0.0 [rt]\n",
             VALID_TREE + "sqlx v0.8.0\n",
         )
         for tree in bad_trees:
             with self.subTest(tree=tree), self.assertRaises(ProofError):
-                validate_dependency_graph(tree, "0.1.39")
+                validate_dependency_graph(tree, "0.1.44")
 
     def test_rejects_missing_duplicate_or_wrong_versions_in_the_resolved_graph(self):
         for tree in (
-            "tinybox-bus-pure-consumer v0.1.0\ntinybox-bus v0.1.39\n",
+            "tinybox-bus-pure-consumer v0.1.0\ntinybox-bus v0.1.44\n",
             VALID_TREE + "tinystoragedrivers-bus v1.8.0\n",
             VALID_TREE + "tinybox-bus v0.1.36\n",
         ):
             with self.subTest(tree=tree), self.assertRaises(ProofError):
-                validate_dependency_graph(tree, "0.1.39")
+                validate_dependency_graph(tree, "0.1.44")
 
     def test_proof_command_covers_normal_build_edges_and_enabled_features(self):
         script = (ROOT / "scripts/test-pure-bus-consumer.sh").read_text()
@@ -152,9 +152,9 @@ class PureBusConsumerProofTests(unittest.TestCase):
         self.assertIn("-p tinybox-bus --all-features", script)
 
     def test_rejects_an_all_features_graph_that_does_not_enable_storage(self):
-        default_only = VALID_TREE.replace("tinybox-bus v0.1.39 [default, storage]", "tinybox-bus v0.1.39 [default]")
+        default_only = VALID_TREE.replace("tinybox-bus v0.1.44 [default, storage]", "tinybox-bus v0.1.44 [default]")
         with self.assertRaisesRegex(ProofError, "storage feature is missing"):
-            validate_dependency_graph(default_only, "0.1.39")
+            validate_dependency_graph(default_only, "0.1.44")
 
 
 if __name__ == "__main__":
