@@ -86,7 +86,7 @@ impl TinyBoxClient {
         })
     }
 
-    /// Override the TinyBus deadline used by later calls through this client.
+    /// Override the `TinyBus` deadline used by later calls through this client.
     ///
     /// The already-validated capabilities are retained, so changing a host's
     /// per-operation deadline does not repeat the compatibility probe.
