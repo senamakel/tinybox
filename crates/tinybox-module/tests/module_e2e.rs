@@ -954,6 +954,8 @@ fn stage_allowlisted_module(
         .file_name()
         .ok_or_else(|| std::io::Error::other("module artifact has no filename"))?;
     let staging = tempfile::tempdir_in(parent)?;
+    #[cfg(windows)]
+    secure_module_fixture_directory(staging.path())?;
     let staged = staging.path().join(name);
     std::fs::copy(source, &staged)?;
     let digest = tinybus::module::sha256_file(&staged)?;
@@ -962,6 +964,56 @@ fn stage_allowlisted_module(
         format!("{:?} = {:?}\n", name.to_string_lossy(), digest),
     )?;
     Ok((staging, staged))
+}
+
+#[cfg(windows)]
+fn secure_module_fixture_directory(
+    directory: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let identity = std::process::Command::new("whoami")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()?;
+    if !identity.status.success() {
+        return Err(std::io::Error::other("whoami could not identify the test user").into());
+    }
+    let identity = String::from_utf8(identity.stdout)?;
+    let user_sid = identity
+        .lines()
+        .next()
+        .and_then(|line| line.split(',').nth(1))
+        .map(|value| value.trim().trim_matches('"'))
+        .filter(|sid| {
+            sid.starts_with("S-1-")
+                && sid[2..]
+                    .split('-')
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .ok_or_else(|| std::io::Error::other("whoami returned an invalid user SID"))?;
+
+    let inheritance = std::process::Command::new("icacls")
+        .arg(directory)
+        .arg("/inheritance:r")
+        .output()?;
+    if !inheritance.status.success() {
+        return Err(std::io::Error::other("icacls could not protect the fixture directory").into());
+    }
+
+    for sid in [user_sid, "S-1-5-18", "S-1-5-32-544"] {
+        let grant = format!("*{sid}:(OI)(CI)(F)");
+        let output = std::process::Command::new("icacls")
+            .arg(directory)
+            .arg("/grant:r")
+            .arg(grant)
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "icacls could not grant fixture access to trusted SID {sid}"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
 }
 
 async fn connect_migration_peer(broker: &Broker, controller: bool) -> tinybus::Result<Connection> {
