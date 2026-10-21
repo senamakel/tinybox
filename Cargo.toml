@@ -67,8 +67,8 @@ tinybox-microvm = { path = "crates/tinybox-microvm", version = "0.1.25" }
 tinybox-docker = { path = "crates/tinybox-docker", version = "0.1.25" }
 tinybox-ssh = { path = "crates/tinybox-ssh", version = "0.1.25" }
 tinybox-sync = { path = "crates/tinybox-sync", version = "0.1.25" }
-# The storage ports only (no database client), at the same exact source revision as a host that vendors
-# tinystoragedrivers. Used by `tinybox-drivers`. Used by `tinybox-drivers`.
+# The storage ports only (no database client), at the same exact source
+# revision as a host that vendors tinystoragedrivers. Used by `tinybox-drivers`.
 tinystoragedrivers-core = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
 # The module reaches the host's storage over the storage bus: the proxy yields
 # the same port traits a linked library gets. The client crate serves them in
