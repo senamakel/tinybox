@@ -218,28 +218,34 @@ async fn an_ssh_peer_that_closes_early_settles_quickly() -> Result<()> {
 
     let started = std::time::Instant::now();
     let outcome = host.forward(([127, 0, 0, 1], 7788).into()).await;
-    let elapsed = started.elapsed();
-
-    assert!(elapsed < LISTEN_TIMEOUT, "took {elapsed:?}");
-    if matches!(outcome.as_ref(), Err(Error::Io { .. })) {
+    let forward_elapsed = started.elapsed();
+    if matches!(
+        outcome.as_ref(),
+        Err(Error::Io {
+            operation: "spawn ssh for a port forward",
+            ..
+        })
+    ) {
         // A machine without ssh cannot contact the fixture; do not leave its
         // accept task detached in that environment.
         peer_task.abort();
         let _ = peer_task.await;
     } else {
-        // The SSH control connection is opened before the local listener is
-        // reported ready. Yield once so the accept task can observe that
-        // connection, and abort it if the child exited before reaching us.
-        tokio::task::yield_now().await;
-        let peer_was_reached = if peer_task.is_finished() {
-            peer_task.await.is_ok_and(|result| result.is_ok())
-        } else {
+        // Keep the peer observation inside the original listener deadline;
+        // waiting for the task to be scheduled is not evidence of a connection.
+        let remaining = LISTEN_TIMEOUT.saturating_sub(forward_elapsed);
+        let peer_was_reached = matches!(
+            tokio::time::timeout(remaining, &mut peer_task).await,
+            Ok(Ok(Ok(())))
+        );
+        if !peer_was_reached {
             peer_task.abort();
             let _ = peer_task.await;
-            false
-        };
+        }
         assert!(peer_was_reached, "ssh did not reach the loopback peer");
     }
+    let elapsed = started.elapsed();
+    assert!(elapsed < LISTEN_TIMEOUT, "took {elapsed:?}");
     if let Err(error) = outcome {
         assert!(
             matches!(
