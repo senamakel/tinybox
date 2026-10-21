@@ -735,7 +735,11 @@ async fn incompatible_capabilities_report_the_registered_module_once()
     assert!(TinyBoxClient::new(module).await.is_err());
 
     assert_eq!(
-        reports.0.lock().unwrap().as_slice(),
+        reports
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_slice(),
         &[(
             MODULE_ID.to_owned(),
             RELEASE.version.to_owned(),
@@ -782,23 +786,24 @@ async fn timeout_overrides_are_independent_and_keep_the_cached_capabilities()
     })
     .await?;
 
-    let recorded = calls
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert_eq!(
-        recorded.len(),
-        3,
-        "one probe and two typed calls are expected"
-    );
-    assert_eq!(
-        recorded
-            .iter()
-            .filter(|(member, _)| member == tinybox_bus::names::CAPABILITIES)
-            .count(),
-        1,
-        "changing a timeout must reuse the validated capability snapshot"
-    );
-    drop(recorded);
+    {
+        let recorded = calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            recorded.len(),
+            3,
+            "one probe and two typed calls are expected"
+        );
+        assert_eq!(
+            recorded
+                .iter()
+                .filter(|(member, _)| member == tinybox_bus::names::CAPABILITIES)
+                .count(),
+            1,
+            "changing a timeout must reuse the validated capability snapshot"
+        );
+    }
 
     tokio::time::advance(Duration::from_secs(2)).await;
     tokio::task::yield_now().await;
@@ -812,7 +817,7 @@ async fn timeout_overrides_are_independent_and_keep_the_cached_capabilities()
     );
     assert!(short.await?.is_err());
 
-    tokio::time::advance(initial_timeout - Duration::from_secs(2)).await;
+    tokio::time::advance(Duration::from_secs(3)).await;
     tokio::task::yield_now().await;
     assert!(
         !long.is_finished(),
