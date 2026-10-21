@@ -26,7 +26,7 @@ members = [
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.1.43"
+version = "0.1.44"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-only"
@@ -39,10 +39,10 @@ categories = ["development-tools", "virtualization"]
 # Use TinyBus's canonical Git source so a host workspace can unify these Rust
 # types with its own SDK patch. This workspace's patch below pins standalone
 # builds to the published SDK checkout in vendor/tinybus.
-tinybus = { version = "=0.3.11", git = "https://github.com/tinyhumansai/tinybus", rev = "9e14f65666b11782ec1054aba576114026d180f8", default-features = false }
+tinybus = { version = "=0.3.12", git = "https://github.com/tinyhumansai/tinybus", rev = "34d3bd6dda099e54cee11a2f96f28a21da9e0759", default-features = false }
 # The module-side SDK owns the isolated runtime and exports the ABI entrypoints
 # required by TinyBus's dynamic loader.
-tinybus-module = { version = "=0.3.11", git = "https://github.com/tinyhumansai/tinybus", rev = "9e14f65666b11782ec1054aba576114026d180f8" }
+tinybus-module = { version = "=0.3.12", git = "https://github.com/tinyhumansai/tinybus", rev = "34d3bd6dda099e54cee11a2f96f28a21da9e0759" }
 
 # Derive macros for the crate-wide error type in `tinybox-core`.
 thiserror = "2"
@@ -58,7 +58,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 # Internal path dependencies between workspace members.
 tinybox-bus = { path = "crates/tinybox-bus", version = "0.1.25" }
-tinybox-client = { path = "crates/tinybox-client", version = "0.1.43" }
+tinybox-client = { path = "crates/tinybox-client", version = "0.1.44" }
 tinybox-core = { path = "crates/tinybox-core", version = "0.1.25" }
 tinybox-host = { path = "crates/tinybox-host", version = "0.1.25" }
 tinybox-jail = { path = "crates/tinybox-jail", version = "0.1.25" }
@@ -67,20 +67,20 @@ tinybox-microvm = { path = "crates/tinybox-microvm", version = "0.1.25" }
 tinybox-docker = { path = "crates/tinybox-docker", version = "0.1.25" }
 tinybox-ssh = { path = "crates/tinybox-ssh", version = "0.1.25" }
 tinybox-sync = { path = "crates/tinybox-sync", version = "0.1.25" }
-# The storage ports only (no database client), by git tag so a host that vendors
-# tinystoragedrivers once can `[patch]` it. Used by `tinybox-drivers`.
-tinystoragedrivers-core = { version = "=1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b" }
+# The storage ports only (no database client), at the same exact source
+# revision as a host that vendors tinystoragedrivers. Used by `tinybox-drivers`.
+tinystoragedrivers-core = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
 # The module reaches the host's storage over the storage bus: the proxy yields
 # the same port traits a linked library gets. The client crate serves them in
 # tests.
-tinystoragedrivers-busproxy = { version = "=1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b" }
-tinystoragedrivers-client = { version = "=1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b" }
+tinystoragedrivers-busproxy = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
+tinystoragedrivers-client = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
 # Module-owned schema and transform delivery over the authenticated TinyBus setup context.
-tinystoragedrivers-tinybus = { version = "=1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b" }
+tinystoragedrivers-tinybus = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
 tinybox-drivers = { path = "crates/tinybox-drivers", version = "0.1.32" }
 # Shared schema types for TinyBox's storage declaration. Disable the default
 # client feature so the data-only contract does not link TinyBus.
-tinystoragedrivers-bus = { version = "=1.9.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b", default-features = false }
+tinystoragedrivers-bus = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59", default-features = false }
 
 # Lints apply to every crate in the workspace via `[lints] workspace = true`.
 # CI runs clippy with `-D warnings`, so anything set to "warn" here fails CI.

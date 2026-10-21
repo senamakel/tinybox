@@ -629,10 +629,6 @@ async fn setup_with_context(
     let connection = context.connection().clone();
     let storage =
         storage::ModuleStorage::with_descriptor(connection.clone(), config.storage_descriptor);
-    storage
-        .validate_configured()
-        .await
-        .map_err(|_| tinybus::Error::failed("TinyBox storage descriptor unavailable"))?;
     let declaration = tinybox_drivers::storage_schema_declaration()
         .map_err(|_| tinybus::Error::failed("TinyBox migration schema unavailable"))?;
     tinystoragedrivers_tinybus::migration::serve_module_migration(
@@ -641,6 +637,10 @@ async fn setup_with_context(
         std::sync::Arc::new(tinybox_drivers::TinyBoxMigrationHandler),
     )
     .await?;
+    storage
+        .validate_configured()
+        .await
+        .map_err(|_| tinybus::Error::failed("TinyBox storage descriptor unavailable"))?;
     connection
         .serve_at(
             OBJECT_PATH.try_into()?,
@@ -692,3 +692,7 @@ tinybus_module::module_export_optional_static! {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod test;
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod startup_tests;

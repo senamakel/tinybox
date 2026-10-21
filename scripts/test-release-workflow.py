@@ -12,8 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/release.yml"
 TINYBUS_URL = "https://github.com/tinyhumansai/tinybus"
-TINYBUS_REV = "9e14f65666b11782ec1054aba576114026d180f8"
-TINYBUS_VERSION = "=0.3.11"
+TINYBUS_REV = "34d3bd6dda099e54cee11a2f96f28a21da9e0759"
+TINYBUS_VERSION = "=0.3.12"
 
 
 def resolve_script(workflow):
@@ -148,10 +148,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_sdk_source_identity_release_floor_and_gitlink_are_pinned(self):
         workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
         client = tomllib.loads((ROOT / "crates/tinybox-client/Cargo.toml").read_text())
-        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.43")
+        self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.44")
         self.assertEqual(
             workspace["workspace"]["dependencies"]["tinybox-client"],
-            {"path": "crates/tinybox-client", "version": "0.1.43"},
+            {"path": "crates/tinybox-client", "version": "0.1.44"},
         )
         for name in ("tinybus", "tinybus-module"):
             dependency = workspace["workspace"]["dependencies"][name]
@@ -189,7 +189,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             check=True,
         ).stdout.split()
         self.assertGreaterEqual(len(gitlink), 3)
-        self.assertEqual(gitlink[1], "9e14f65666b11782ec1054aba576114026d180f8")
+        self.assertEqual(gitlink[1], "34d3bd6dda099e54cee11a2f96f28a21da9e0759")
 
     def test_release_caller_keeps_ordinary_route_and_pins_current_reviewed_route(self):
         ordinary = "4adc1080fb495098e7af1aade82ed7e6e3c69bb7"
