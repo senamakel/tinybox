@@ -208,7 +208,7 @@ async fn an_ssh_peer_that_closes_early_settles_quickly() -> Result<()> {
         .local_addr()
         .map_err(|error| Error::io("read the SSH peer fixture address", &error))?
         .port();
-    let peer_task = tokio::spawn(async move {
+    let mut peer_task = tokio::spawn(async move {
         let (stream, _) = peer.accept().await?;
         drop(stream);
         Ok::<(), std::io::Error>(())
