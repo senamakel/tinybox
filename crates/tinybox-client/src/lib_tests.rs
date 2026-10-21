@@ -283,6 +283,23 @@ async fn fixture_with_reporter_and_blocked(
     reporter: FailureReporter,
     timeout: Option<Duration>,
 ) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
+    let (service, module, calls) = module_fixture_with_reporter_and_blocked(
+        contract_version,
+        blocked_members,
+        reporter,
+        timeout,
+    )
+    .await?;
+    let client = TinyBoxClient::new(module).await?;
+    Ok((service, client, calls))
+}
+
+async fn module_fixture_with_reporter_and_blocked(
+    contract_version: (u32, u32),
+    blocked_members: &'static [&'static str],
+    reporter: FailureReporter,
+    timeout: Option<Duration>,
+) -> std::result::Result<(Connection, ModuleClient, Calls), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
     let service = Connection::connect(bus.connect().await?).await?;
@@ -310,8 +327,7 @@ async fn fixture_with_reporter_and_blocked(
     if let Some(timeout) = timeout {
         module = module.with_timeout(timeout);
     }
-    let client = TinyBoxClient::new(module).await?;
-    Ok((service, client, calls))
+    Ok((service, module, calls))
 }
 
 async fn attested_fixture() -> std::result::Result<
@@ -714,8 +730,9 @@ async fn incompatible_capabilities_report_the_registered_module_once()
     let sink: Arc<dyn FailureSink> = reports.clone();
     let reporter = FailureReporter::new(sink);
     let incompatible = (tinybox_bus::CONTRACT_VERSION.0 + 1, 0);
-    let (_service, _client, calls) =
-        fixture_with_reporter_and_blocked(incompatible, &[], reporter, None).await?;
+    let (_service, module, calls) =
+        module_fixture_with_reporter_and_blocked(incompatible, &[], reporter, None).await?;
+    assert!(TinyBoxClient::new(module).await.is_err());
 
     assert_eq!(
         reports.0.lock().unwrap().as_slice(),
