@@ -186,6 +186,42 @@ mod initial_setup_export {
     }
 }
 
+async fn verify_ready_storage(
+    controller: &Connection,
+    backend: &std::sync::Arc<MemoryStorage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let module_peer = controller
+        .name_owner(INTERFACE)
+        .await?
+        .ok_or_else(|| std::io::Error::other("TinyBox module did not request its bus name"))?;
+    let migration = MigrationModuleClient::discover(controller, &module_peer).await?;
+    assert_eq!(migration.declaration().owner.as_str(), "box");
+
+    let proxy = controller.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    let workspace = tempfile::tempdir()?;
+    let created: ResourceInfo = proxy
+        .call(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    assert_eq!(created.resource, resource);
+    let scoped = backend.for_scope(&Scope::local())?;
+    let records = scoped
+        .documents()
+        .query_all(tinybox_drivers::BOX_COLLECTION, &Query::all())
+        .await?;
+    assert_eq!(records.len(), 1, "configured storage is usable after setup");
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn initial_bound_storage_validation_discovers_tinybox_migrations()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -268,36 +304,7 @@ async fn initial_bound_storage_validation_discovers_tinybox_migrations()
         migration_discovered.load(Ordering::Acquire),
         "initial bound storage validation must discover TinyBox's migration schema before storage is usable"
     );
-
-    let module_peer = controller
-        .name_owner(INTERFACE)
-        .await?
-        .ok_or_else(|| std::io::Error::other("TinyBox module did not request its bus name"))?;
-    let migration = MigrationModuleClient::discover(&controller, &module_peer).await?;
-    assert_eq!(migration.declaration().owner.as_str(), "box");
-
-    let proxy = controller.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
-    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
-    let workspace = tempfile::tempdir()?;
-    let created: ResourceInfo = proxy
-        .call(
-            "Create",
-            (CreateRequest {
-                resource: resource.clone(),
-                backend: "passthrough".into(),
-                workspace: Workspace::Directory(workspace.path().to_string_lossy().into_owned()),
-                ..Default::default()
-            },),
-        )
-        .await?;
-    assert_eq!(created.resource, resource);
-    let scoped = backend.for_scope(&Scope::local())?;
-    let records = scoped
-        .documents()
-        .query_all(tinybox_drivers::BOX_COLLECTION, &Query::all())
-        .await?;
-    assert_eq!(records.len(), 1, "configured storage is usable after setup");
-    proxy.call::<()>("Close", (resource,)).await?;
+    verify_ready_storage(&controller, &backend).await?;
 
     let lease = INITIAL_SETUP_LEASE
         .get_or_init(|| std::sync::Mutex::new(None))
