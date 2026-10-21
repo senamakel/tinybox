@@ -5,9 +5,9 @@ import re
 import sys
 
 STORAGE_BUS_NAME = "tinystoragedrivers-bus"
-STORAGE_BUS_VERSION = "1.5.0"
+STORAGE_BUS_VERSION = "1.9.0"
 STORAGE_BUS_URL = "https://github.com/tinyhumansai/tinystoragedrivers"
-STORAGE_BUS_REV = "c9ea6ff1615b77b55d7269403af5fd11bedc9ce8"
+STORAGE_BUS_REV = "a04e3a174fa8f28d5229a816ca6b39c72a9efd7b"
 STORAGE_BUS_SOURCE = f"git+{STORAGE_BUS_URL}?rev={STORAGE_BUS_REV}#{STORAGE_BUS_REV}"
 PURE_CONSUMER_NAME = "tinybox-bus-pure-consumer"
 

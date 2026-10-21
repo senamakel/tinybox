@@ -24,7 +24,11 @@ const OBJECT_PATH: &str = "/ai/tinyhumans/tinybox/Box";
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (release_url, archive, sha256) = arguments()?;
     let bus = MemoryBus::new();
-    let broker = Broker::new();
+    let broker = Broker::new_restricted_module_control();
+    let (broker_transport, controller_transport) =
+        tinybus::transport::memory::MemoryTransport::pair();
+    broker.attach_module_controller(std::sync::Arc::new(broker_transport))?;
+    let controller = Connection::connect(Box::new(controller_transport)).await?;
     let broker_task = broker.spawn(bus.clone());
     let module_host = ModuleHost::new(broker);
     let info = module_host.load_github_release(
@@ -33,6 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(&sha256),
         serde_json::Value::default(),
     )?;
+    module_host
+        .ensure_ready(info.manifest.bus_name.as_str())
+        .await?;
 
     if info.name != env!("CARGO_PKG_NAME") {
         return Err(io::Error::other(format!(
@@ -43,10 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    let client = Connection::connect(bus.connect().await?).await?;
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let names = client.list_names().await?;
+            let names = controller.list_names().await?;
             if names.iter().any(|name| name.as_str() == INTERFACE) {
                 return tinybus::Result::Ok(());
             }
@@ -55,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await??;
 
-    let proxy = client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let proxy = controller.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
     // `Describe` is the module's only method, and it must at least name the
     // crate. Asserting the whole string would couple this verifier to the
     // registered-sandbox list, which changes as backends land.

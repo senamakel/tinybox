@@ -15,8 +15,11 @@
 //! decoders as well as the migrations that invoke them.
 
 use super::{BOX_COLLECTION, JAIL_INDEX_COLLECTION};
+use tinystoragedrivers_core::schema::declaration_from_schema;
+use tinystoragedrivers_core::schema::delivery::MigrationPayloadHandler;
 use tinystoragedrivers_core::schema::{
-    Owner, Schema, ScopeClass, SourceRecord, Step, TargetRecord,
+    MigrationPayload, MigrationPayloadReply, Owner, Schema, SchemaDeclaration, ScopeClass,
+    SourceRecord, Step, TargetRecord, TransformError, TransformErrorKind,
 };
 use tinystoragedrivers_core::{Key, Result, StorageError};
 
@@ -33,6 +36,10 @@ pub(crate) const V1_JAIL_INDEX_COLLECTION: &str = "tinybox_jail_index";
 
 /// The body version both collections are declared at.
 pub(crate) const BODY_VERSION: u32 = 2;
+
+const MIGRATION_TRANSFORM_VERSION: u32 = 1;
+const BOX_MIGRATION_OPERATION: &str = "box.rename_boxes";
+const JAIL_INDEX_MIGRATION_OPERATION: &str = "box.rename_jail_index";
 
 /// Everything tinybox stores, with the v1 to v2 migration steps.
 ///
@@ -63,6 +70,79 @@ pub fn storage_schema() -> Schema {
             )
             .source(V1_JAIL_INDEX_COLLECTION),
         )
+}
+
+/// Export this owner's existing schema and explicit operation selectors for
+/// confidential module migration delivery.
+///
+/// # Errors
+/// Returns an error if a schema step has no operation mapping.
+pub fn storage_schema_declaration() -> Result<SchemaDeclaration> {
+    let schema = storage_schema();
+    declaration_from_schema(&schema, |step| {
+        let operation = match step.id {
+            "rename_boxes" => BOX_MIGRATION_OPERATION,
+            "rename_jail_index" => JAIL_INDEX_MIGRATION_OPERATION,
+            _ => return None,
+        };
+        Some((operation.to_owned(), MIGRATION_TRANSFORM_VERSION))
+    })
+}
+
+/// Stateless `TinyBox` owner transforms for the TSD migration exchange.
+#[derive(Debug, Default)]
+pub struct TinyBoxMigrationHandler;
+
+impl MigrationPayloadHandler for TinyBoxMigrationHandler {
+    fn transform(&self, payload: MigrationPayload) -> MigrationPayloadReply {
+        match payload {
+            MigrationPayload::Documents(request) => {
+                MigrationPayloadReply::Documents(transform_documents(request))
+            }
+            MigrationPayload::BlobTarget(_) => {
+                MigrationPayloadReply::BlobTarget(Err(unsupported_transform()))
+            }
+            MigrationPayload::StreamPlan(_) => {
+                MigrationPayloadReply::StreamPlan(Err(unsupported_transform()))
+            }
+            MigrationPayload::StreamEntries(_) => {
+                MigrationPayloadReply::StreamEntries(Err(unsupported_transform()))
+            }
+        }
+    }
+}
+
+fn transform_documents(
+    request: tinystoragedrivers_core::schema::DocumentsTransformRequest,
+) -> std::result::Result<Vec<TargetRecord>, TransformError> {
+    if request.version != MIGRATION_TRANSFORM_VERSION {
+        return Err(TransformError {
+            kind: TransformErrorKind::UnsupportedVersion,
+            message: "unsupported TinyBox migration operation version".to_owned(),
+        });
+    }
+    let transform: fn(SourceRecord) -> Result<TargetRecord> = match request.operation.as_str() {
+        BOX_MIGRATION_OPERATION => box_to_v2,
+        JAIL_INDEX_MIGRATION_OPERATION => jail_index_to_v2,
+        _ => return Err(unsupported_transform()),
+    };
+    request
+        .records
+        .into_iter()
+        .map(|record| {
+            transform(record).map_err(|_| TransformError {
+                kind: TransformErrorKind::InvalidInput,
+                message: "TinyBox rejected an invalid migration record".to_owned(),
+            })
+        })
+        .collect()
+}
+
+fn unsupported_transform() -> TransformError {
+    TransformError {
+        kind: TransformErrorKind::UnsupportedOperation,
+        message: "unsupported TinyBox migration operation".to_owned(),
+    }
 }
 
 /// A v1 box row (a serialized `BoxInfo`) as a v2 record under the same id.

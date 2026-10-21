@@ -1,8 +1,8 @@
 //! Tests for the `TinyBus` module adapter and its declared surface.
 
 use super::{
-    BoxService, INTERFACE, OBJECT_PATH, Platform, capabilities_for, describe, registered_sandboxes,
-    setup,
+    BoxModuleConfig, BoxService, INTERFACE, OBJECT_PATH, Platform, capabilities_for, describe,
+    registered_sandboxes, setup,
 };
 use tinybox_core::{IsolationLevel, SandboxCapabilities, SnapshotSupport};
 use tinybus::broker::Broker;
@@ -18,6 +18,31 @@ const CONTAINER: SandboxCapabilities =
 
 /// A backend too weak to be trusted with untrusted code.
 const BARE: SandboxCapabilities = SandboxCapabilities::PASSTHROUGH;
+
+#[test]
+fn module_configuration_accepts_null_empty_and_descriptor_values() -> Result<(), serde_json::Error>
+{
+    let null_config = serde_json::from_value::<BoxModuleConfig>(serde_json::Value::Null)?;
+    let empty_config = serde_json::from_value::<BoxModuleConfig>(serde_json::json!({}))?;
+    let descriptor_config = serde_json::from_value::<BoxModuleConfig>(serde_json::json!({
+        "storage_descriptor": {
+            "service_peer": ":1.2",
+            "registration_id": 17,
+            "object_root": "/org/tinystoragedrivers/leases/17",
+        },
+    }))?;
+
+    assert!(null_config.storage_descriptor.is_none());
+    assert!(empty_config.storage_descriptor.is_none());
+    assert_eq!(
+        descriptor_config
+            .storage_descriptor
+            .as_ref()
+            .map(tinystoragedrivers_busproxy::StorageDescriptor::service_peer),
+        Some(":1.2"),
+    );
+    Ok(())
+}
 
 #[tokio::test]
 async fn command_facts_keep_quoted_heredoc_data_out_of_host_policy_inputs() -> tinybus::Result<()> {

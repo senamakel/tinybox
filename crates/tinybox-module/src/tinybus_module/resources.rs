@@ -135,7 +135,6 @@ pub(super) struct Resources {
     stdio_changed: tokio::sync::Notify,
     rejected_shells: Mutex<Vec<(ResourceId, Arc<super::native_shell::ShellContext>)>>,
     preparations: tokio::sync::Semaphore,
-    storage: super::storage::ModuleStorage,
 }
 
 #[derive(Default)]
@@ -166,21 +165,11 @@ impl Default for Resources {
             stdio_changed: tokio::sync::Notify::new(),
             rejected_shells: Mutex::default(),
             preparations: tokio::sync::Semaphore::new(stream::MAX_STREAM_EXECUTIONS),
-            storage: super::storage::ModuleStorage::default(),
         }
     }
 }
 
 impl Resources {
-    /// Resources whose box records live on the host storage reached through
-    /// `connection`.
-    pub(super) fn with_connection(connection: tinybus::Connection) -> Self {
-        Self {
-            storage: super::storage::ModuleStorage::connected(connection),
-            ..Self::default()
-        }
-    }
-
     pub(super) async fn reserve(&self, request: ReserveRequest) -> Result<ResourceId> {
         let mut state = self.state.lock().await;
         if state.shutdown {
@@ -271,13 +260,29 @@ impl Resources {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) async fn create(&self, request: CreateRequest) -> Result<ResourceInfo> {
+        self.create_with_storage(&super::storage::ModuleStorage::default(), request)
+            .await
+    }
+
+    pub(super) async fn create_with_storage(
+        &self,
+        storage: &super::storage::ModuleStorage,
+        request: CreateRequest,
+    ) -> Result<ResourceInfo> {
         let collector = Arc::new(tinybox_host::LimitedLocalHost::new(
             tinybox_bus::MAX_OUTPUT_BYTES,
         ));
         let host = configured_host(&request.host, collector.clone())?;
-        self.create_with_platform(request, host, Some(collector), super::Platform::current())
-            .await
+        self.create_with_platform(
+            storage,
+            request,
+            host,
+            Some(collector),
+            super::Platform::current(),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -286,7 +291,8 @@ impl Resources {
         request: CreateRequest,
         host: Arc<dyn tinybox_core::Host>,
     ) -> Result<ResourceInfo> {
-        self.create_with_platform(request, host, None, super::Platform::current())
+        let storage = super::storage::ModuleStorage::default();
+        self.create_with_platform(&storage, request, host, None, super::Platform::current())
             .await
     }
 
@@ -297,12 +303,14 @@ impl Resources {
         host: Arc<dyn tinybox_core::Host>,
         platform: super::Platform,
     ) -> Result<ResourceInfo> {
-        self.create_with_platform(request, host, None, platform)
+        let storage = super::storage::ModuleStorage::default();
+        self.create_with_platform(&storage, request, host, None, platform)
             .await
     }
 
     async fn create_with_platform(
         &self,
+        storage: &super::storage::ModuleStorage,
         request: CreateRequest,
         host: Arc<dyn tinybox_core::Host>,
         collector: Option<Arc<tinybox_host::LimitedLocalHost>>,
@@ -336,8 +344,7 @@ impl Resources {
                 return Err(failure(tinybox_bus::EXEC_CANCELLED, "resource is closing"));
             }
             let resource_host = host.clone();
-            let shared = self
-                .storage
+            let shared = storage
                 .box_store()
                 .await
                 .map_err(|error| backend_error(&error))?;

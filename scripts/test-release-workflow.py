@@ -12,8 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/release.yml"
 TINYBUS_URL = "https://github.com/tinyhumansai/tinybus"
-TINYBUS_REV = "207a9a7df15e44fdba00a807d0f7eaf21904ba0e"
-TINYBUS_VERSION = ">=0.3.3, <0.4.0"
+TINYBUS_REV = "9e14f65666b11782ec1054aba576114026d180f8"
+TINYBUS_VERSION = "=0.3.11"
 
 
 def resolve_script(workflow):
@@ -189,7 +189,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             check=True,
         ).stdout.split()
         self.assertGreaterEqual(len(gitlink), 3)
-        self.assertEqual(gitlink[1], "207a9a7df15e44fdba00a807d0f7eaf21904ba0e")
+        self.assertEqual(gitlink[1], "9e14f65666b11782ec1054aba576114026d180f8")
 
     def test_release_caller_keeps_ordinary_route_and_pins_current_reviewed_route(self):
         ordinary = "4adc1080fb495098e7af1aade82ed7e6e3c69bb7"
