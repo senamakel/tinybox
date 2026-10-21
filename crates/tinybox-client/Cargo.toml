@@ -15,7 +15,7 @@ tinybus = { workspace = true }
 [dev-dependencies]
 async-trait.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tinybus = { workspace = true, features = ["macros", "modules"] }
 tinybus-module = { workspace = true, features = ["static-link"] }
 

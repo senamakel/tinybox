@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tinybus::broker::Broker;
 use tinybus::module::{
     AccessFuture, FailureReport, FailureReporter, FailureSink, ModuleAccess, ModuleClient,
-    ProxyFailure, ReleaseRecord,
+    ProxyFailure, Reason, ReleaseRecord,
 };
 use tinybus::service::Interface;
 use tinybus::transport::memory::MemoryBus;
@@ -52,6 +52,22 @@ impl FailureSink for IgnoreFailures {
     fn capture(&self, _report: &FailureReport<'_>) {}
 }
 
+#[derive(Default)]
+struct RecordedReports(Mutex<Vec<(String, String, Reason)>>);
+
+impl FailureSink for RecordedReports {
+    fn capture(&self, report: &FailureReport<'_>) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((
+                report.module.to_owned(),
+                report.version.to_owned(),
+                report.reason,
+            ));
+    }
+}
+
 struct FixtureAccess {
     reporter: FailureReporter,
 }
@@ -89,6 +105,7 @@ struct MockTinyBox {
     contract_version: (u32, u32),
     calls: Calls,
     members: &'static [&'static str],
+    blocked_members: &'static [&'static str],
 }
 
 #[derive(Deserialize)]
@@ -113,6 +130,7 @@ async fn linked_fixture_setup(
                 contract_version: config.contract_version,
                 calls,
                 members: ATTESTED_METHODS,
+                blocked_members: &[],
             },
         )
         .await?;
@@ -154,6 +172,9 @@ impl Interface for MockTinyBox {
             .lock()
             .map_err(|_| tinybus::Error::failed("fixture call log is poisoned"))?
             .push((name.to_owned(), args));
+        if self.blocked_members.contains(&name) {
+            return std::future::pending().await;
+        }
         let value = match name {
             tinybox_bus::names::DESCRIBE => json!("tinybox fixture"),
             tinybox_bus::names::CAPABILITIES => json!({
@@ -232,6 +253,53 @@ impl Interface for MockTinyBox {
 async fn fixture(
     contract_version: (u32, u32),
 ) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
+    fixture_with_blocked(contract_version, &[]).await
+}
+
+async fn fixture_with_blocked(
+    contract_version: (u32, u32),
+    blocked_members: &'static [&'static str],
+) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
+    fixture_with_blocked_timeout(contract_version, blocked_members, None).await
+}
+
+async fn fixture_with_blocked_timeout(
+    contract_version: (u32, u32),
+    blocked_members: &'static [&'static str],
+    timeout: Option<Duration>,
+) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
+    fixture_with_reporter_and_blocked(
+        contract_version,
+        blocked_members,
+        FailureReporter::new(Arc::new(IgnoreFailures)),
+        timeout,
+    )
+    .await
+}
+
+async fn fixture_with_reporter_and_blocked(
+    contract_version: (u32, u32),
+    blocked_members: &'static [&'static str],
+    reporter: FailureReporter,
+    timeout: Option<Duration>,
+) -> std::result::Result<(Connection, TinyBoxClient, Calls), Box<dyn std::error::Error>> {
+    let (service, module, calls) = module_fixture_with_reporter_and_blocked(
+        contract_version,
+        blocked_members,
+        reporter,
+        timeout,
+    )
+    .await?;
+    let client = TinyBoxClient::new(module).await?;
+    Ok((service, client, calls))
+}
+
+async fn module_fixture_with_reporter_and_blocked(
+    contract_version: (u32, u32),
+    blocked_members: &'static [&'static str],
+    reporter: FailureReporter,
+    timeout: Option<Duration>,
+) -> std::result::Result<(Connection, ModuleClient, Calls), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
     let service = Connection::connect(bus.connect().await?).await?;
@@ -243,6 +311,7 @@ async fn fixture(
                 contract_version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
+                blocked_members,
             },
         )
         .await?;
@@ -253,12 +322,12 @@ async fn fixture(
         tinybox_bus::OBJECT_PATH,
         tinybox_bus::INTERFACE,
     )?;
-    let access = FixtureAccess {
-        reporter: FailureReporter::new(Arc::new(IgnoreFailures)),
-    };
-    let module = ModuleClient::new(access).with_fixture(proxy);
-    let client = TinyBoxClient::new(module).await?;
-    Ok((service, client, calls))
+    let access = FixtureAccess { reporter };
+    let mut module = ModuleClient::new(access).with_fixture(proxy);
+    if let Some(timeout) = timeout {
+        module = module.with_timeout(timeout);
+    }
+    Ok((service, module, calls))
 }
 
 async fn attested_fixture() -> std::result::Result<
@@ -424,6 +493,7 @@ async fn incompatible_fixture(
                 contract_version: version,
                 calls: Arc::clone(&calls),
                 members: tinybox_bus::METHODS,
+                blocked_members: &[],
             },
         )
         .await?;
@@ -654,9 +724,121 @@ async fn workspace_file_wrappers_preserve_typed_wire_calls()
 }
 
 #[tokio::test]
+async fn incompatible_capabilities_report_the_registered_module_once()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let reports = Arc::new(RecordedReports::default());
+    let sink: Arc<dyn FailureSink> = reports.clone();
+    let reporter = FailureReporter::new(sink);
+    let incompatible = (tinybox_bus::CONTRACT_VERSION.0 + 1, 0);
+    let (_service, module, calls) =
+        module_fixture_with_reporter_and_blocked(incompatible, &[], reporter, None).await?;
+    assert!(TinyBoxClient::new(module).await.is_err());
+
+    assert_eq!(
+        reports
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_slice(),
+        &[(
+            MODULE_ID.to_owned(),
+            RELEASE.version.to_owned(),
+            Reason::IncompatibleContract,
+        )]
+    );
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len(),
+        1,
+        "only the capabilities probe is needed to report incompatibility"
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn timeout_overrides_are_independent_and_keep_the_cached_capabilities()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let initial_timeout = Duration::from_secs(5);
+    let (_service, client, calls) = fixture_with_blocked_timeout(
+        tinybox_bus::CONTRACT_VERSION,
+        &[tinybox_bus::names::DESCRIBE],
+        Some(initial_timeout),
+    )
+    .await?;
+    let short_client = client.clone().with_timeout(Duration::from_secs(2));
+    let long_client = client.with_timeout(Duration::from_secs(15));
+    let short = tokio::spawn(async move { short_client.describe().await });
+    let long = tokio::spawn(async move { long_client.describe().await });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if calls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len()
+                == 3
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+
+    {
+        let recorded = calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            recorded.len(),
+            3,
+            "one probe and two typed calls are expected"
+        );
+        assert_eq!(
+            recorded
+                .iter()
+                .filter(|(member, _)| member == tinybox_bus::names::CAPABILITIES)
+                .count(),
+            1,
+            "changing a timeout must reuse the validated capability snapshot"
+        );
+    }
+
+    tokio::time::advance(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        short.is_finished(),
+        "the shorter client deadline must expire"
+    );
+    assert!(
+        !long.is_finished(),
+        "changing one clone must not alter the other clone's deadline"
+    );
+    assert!(short.await?.is_err());
+
+    tokio::time::advance(Duration::from_secs(3)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !long.is_finished(),
+        "the initial construction deadline must not leak into an overridden call"
+    );
+
+    tokio::time::advance(Duration::from_secs(10)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        long.is_finished(),
+        "the longer client deadline must expire later"
+    );
+    assert!(long.await?.is_err());
+    Ok(())
+}
+
+#[tokio::test]
 async fn confidential_operations_fail_closed_without_ordinary_retry()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_service, client, calls) = fixture(tinybox_bus::CONTRACT_VERSION).await?;
+    let client = client.with_timeout(Duration::from_secs(1));
     let secret = "/private/marker";
     assert!(
         client
