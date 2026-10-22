@@ -192,8 +192,10 @@ impl ProbeScript {
 
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("bwrap-probe");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}"))?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+        let staged_path = directory.path().join("bwrap-probe.staged");
+        std::fs::write(&staged_path, format!("#!/bin/sh\n{body}"))?;
+        std::fs::set_permissions(&staged_path, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::rename(staged_path, &path)?;
         Ok(Self {
             _directory: directory,
             path,
