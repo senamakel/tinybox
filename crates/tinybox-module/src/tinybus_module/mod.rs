@@ -76,13 +76,6 @@ fn grant_paths_to_wire(paths: Vec<std::path::PathBuf>) -> TinyBusResult<Vec<Stri
 
 #[tinybus::interface(name = "ai.tinyhumans.tinybox.Box")]
 impl BoxService {
-    /// Return detailed generic shell facts for caller-owned execution policy.
-    async fn analyze_command(
-        &self,
-        command: String,
-    ) -> TinyBusResult<tinybox_bus::CommandAnalysis> {
-        std::future::ready(Ok(tinybox_core::shell::analysis::analyze_command(&command))).await
-    }
     /// Discover the module machine's shell syntax and invocation plan.
     async fn select_shell(
         &self,
@@ -432,12 +425,11 @@ impl BoxService {
     /// Return shell structure facts without applying host security policy.
     #[allow(deprecated)]
     async fn analyze_shell(&self, command: String) -> TinyBusResult<ShellAnalysis> {
-        use tinybox_core::shell::{classify, scan};
+        use tinybox_core::shell::scan;
         let stripped = scan::strip_quoted_heredoc_bodies(&command);
         let structural = scan::strip_heredoc_bodies(&command);
         std::future::ready(Ok(ShellAnalysis {
             segments: scan::split_unquoted_segments(&stripped),
-            hidden_execution: classify::has_hidden_execution(&command),
             redirection: scan::contains_unquoted_char(&structural, '>'),
         }))
         .await
@@ -588,7 +580,7 @@ tinybus_module::module_export_optional_static! {
     setup = setup,
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box"],
-    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "AnalyzeCommand", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus"],
+    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus"],
     signals = [],
     requires = [],
     optional = [],

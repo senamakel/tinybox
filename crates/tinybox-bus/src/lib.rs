@@ -41,8 +41,6 @@ pub use policy::{DockerPolicyReport, DockerPolicyRequest};
 mod event;
 pub use event::{DenialKind, EgressAllowlist, LimitKind, SandboxEvent};
 
-mod shell;
-pub use shell::{CommandAnalysis, CommandClass, CommandSegment};
 mod files;
 pub use files::{
     AbortFileWriteRequest, BeginFileReadRequest, BeginFileWriteRequest, FileChunk, FileReadInfo,
@@ -56,7 +54,7 @@ pub use files::{
 /// reservations, owned lifecycle/operations, capabilities and terminal shutdown.
 /// 1.2 adds host selection, container networking/ports, and owned forwards.
 /// 1.3 adds native jail discovery.
-/// 1.4 adds detailed shell facts for host execution policy. 1.5 adds bounded
+/// 1.4 added legacy shell facts for host execution policy, removed in 2.0. 1.5 adds bounded
 /// file transfer for mounted workspaces. 1.6 adds bounded live native output.
 /// 1.7 adds explicitly approved native directory-jail execution. 1.8 adds a
 /// bounded, module-owned one-shot Docker operation. 1.9 adds bounded Docker
@@ -81,7 +79,10 @@ pub use files::{
 /// program inside a mandatory native jail and stream its stdin, stdout and
 /// stderr over the bus. 1.22 adds optional hard resource limits to
 /// [`NativeJailConfig`].
-pub const CONTRACT_VERSION: (u32, u32) = (1, 22);
+/// 2.0 removes TinyBox-owned command policy classification and the
+/// `AnalyzeShell.hidden_execution` policy signal. Generic shell structure facts
+/// and transport helpers remain.
+pub const CONTRACT_VERSION: (u32, u32) = (2, 0);
 
 /// Whether this host vocabulary can bind to a module's advertised version.
 /// The major must match and the module's minor must include every host member.
@@ -154,8 +155,6 @@ pub mod names {
     pub const CLOSE_FORWARD: &str = "CloseForward";
     /// Wire name of the `JailStatus` member.
     pub const JAIL_STATUS: &str = "JailStatus";
-    /// Wire name of the `AnalyzeCommand` member.
-    pub const ANALYZE_COMMAND: &str = "AnalyzeCommand";
     /// Wire name of the `BeginFileRead` member.
     pub const BEGIN_FILE_READ: &str = "BeginFileRead";
     /// Wire name of the `ReadFileChunk` member.
@@ -210,8 +209,8 @@ pub mod names {
     pub const STDIO_STATUS: &str = "StdioStatus";
 }
 
-/// Supported additive methods, including the original discovery operation.
-/// Derived from [`names`]; the order is append-only.
+/// Supported methods in this contract, including the original discovery
+/// operation. Derived from [`names`]; the order is stable within this major.
 pub const METHODS: &[&str] = &[
     names::DESCRIBE,
     names::CREATE,
@@ -228,7 +227,6 @@ pub const METHODS: &[&str] = &[
     names::FORWARD,
     names::CLOSE_FORWARD,
     names::JAIL_STATUS,
-    names::ANALYZE_COMMAND,
     names::BEGIN_FILE_READ,
     names::READ_FILE_CHUNK,
     names::FINISH_FILE_READ,
@@ -678,17 +676,12 @@ pub struct ProcessRef {
     pub process: ResourceId,
 }
 
-/// Structural shell facts. These do not grant permission or choose an access tier.
+/// Generic structural shell facts. These do not classify a command, grant
+/// permission, or choose an access tier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellAnalysis {
     /// Live shell segments after quoted heredoc bodies are removed.
     pub segments: Vec<String>,
-    /// Whether the scan found syntax that can execute hidden commands.
-    ///
-    /// Deprecated for policy decisions as of contract 1.22. Hosts must use
-    /// `TinySecurity` for authorization and command policy; this structural fact
-    /// remains during the 1.x transition and is removed in contract 2.0.
-    pub hidden_execution: bool,
     /// Whether an unquoted redirect occurs outside heredoc data.
     pub redirection: bool,
 }
