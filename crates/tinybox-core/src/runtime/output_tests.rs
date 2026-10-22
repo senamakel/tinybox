@@ -61,7 +61,3 @@ fn a_default_observer_does_not_spuriously_request_cancellation() {
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());
 }
 
-#[test]
-fn memory_limit_termination_has_a_typed_identity() {
-    assert_eq!(TerminationCause::MemoryLimit, TerminationCause::MemoryLimit);
-}
