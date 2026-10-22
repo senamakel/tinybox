@@ -207,7 +207,7 @@ impl ProbeScript {
 fn the_probe_uses_only_the_fixed_read_only_bwrap_command() -> Result<(), Box<dyn std::error::Error>>
 {
     let script = ProbeScript::new(
-        "[ \"$#\" -eq 6 ] && \\\n+         [ \"$1\" = --unshare-user ] && [ \"$2\" = --ro-bind ] && \\\n+         [ \"$3\" = / ] && [ \"$4\" = / ] && [ \"$5\" = -- ] && \\\n+         [ \"$6\" = /bin/true ]\n",
+        r#"[ "$#" -eq 6 ] && [ "$1" = --unshare-user ] && [ "$2" = --ro-bind ] && [ "$3" = / ] && [ "$4" = / ] && [ "$5" = -- ] && [ "$6" = /bin/true ]"#,
     )?;
 
     assert_eq!(
