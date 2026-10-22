@@ -38,11 +38,64 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
     }
 
     let root = tempfile::tempdir()?;
-    let mut allowed_command = Command::new("/bin/sh");
-    allowed_command.args([
-        "-c",
-        "echo before; /usr/bin/printf child-executed; echo after",
-    ]);
+    const FORK_PROBE: &str = r#"
+#include <errno.h>
+#include <stddef.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(void) {
+    emit("before\n", 7);
+    pid_t child = fork();
+    if (child == 0) {
+        emit("child-executed\n", 15);
+        _exit(0);
+    }
+    if (child < 0) {
+        if (errno == EPERM) {
+            emit("fork-denied\n", 12);
+            emit("after\n", 6);
+            return 0;
+        }
+        return 2;
+    }
+    int status = 0;
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return 3;
+    }
+    emit("after\n", 6);
+    return 0;
+}
+"#;
+    let source = root.path().join("fork_probe.c");
+    std::fs::write(&source, FORK_PROBE)?;
+    let helper = root.path().join("fork_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile fork probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let allowed_command = Command::new(&helper);
     let allowed = SeatbeltBackend::new()
         .spawn_captured(
             &Jail::new(root.path(), "seatbelt-subprocess-control"),
@@ -57,11 +110,7 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
     );
 
     let jail = Jail::new(root.path(), "seatbelt-no-subprocess").deny_subprocess();
-    let mut command = Command::new("/bin/sh");
-    command.args([
-        "-c",
-        "echo before; /usr/bin/printf child-executed; echo after",
-    ]);
+    let command = Command::new(&helper);
     let output = SeatbeltBackend::new()
         .spawn_captured(&jail, command)?
         .wait_with_output()?;
@@ -69,14 +118,15 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
 
     assert!(
         output.status.success(),
-        "the jailed shell should run while child creation is denied; status: {}, stdout: {stdout:?}, stderr: {:?}",
+        "the jailed process should continue after fork is denied; status: {}, stdout: {stdout:?}, stderr: {:?}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(stdout.contains("before"), "unexpected stdout: {stdout:?}");
+    assert!(stdout.contains("fork-denied"), "fork was not denied: {stdout:?}");
     assert!(
         !stdout.contains("child-executed"),
-        "Seatbelt allowed the child executable; stdout: {stdout:?}, stderr: {:?}",
+        "Seatbelt allowed the child process; stdout: {stdout:?}, stderr: {:?}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(stdout.contains("after"), "unexpected stdout: {stdout:?}");
