@@ -506,6 +506,11 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
         .iter()
         .position(|part| part == "--")
         .ok_or("missing systemd delimiter")?;
+    assert_eq!(
+        &argv[systemd_end + 1..systemd_end + 5],
+        ["/bin/bash", "--noprofile", "--norc", "-c"],
+        "a trusted supervisor must sample cgroup events from inside the scope"
+    );
     assert!(
         !argv[..systemd_end]
             .iter()
