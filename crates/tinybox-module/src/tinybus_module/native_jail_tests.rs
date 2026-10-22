@@ -851,6 +851,116 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
 }
 
 #[cfg(target_os = "linux")]
+#[test]
+fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use tinybus::Connection;
+    use tinybus::broker::Broker;
+    use tinybus::transport::memory::MemoryBus;
+    use tinybox_bus::{
+        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
+        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+    };
+
+    if !native_resource_runtime_available() {
+        eprintln!("skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable");
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .status()?
+        .success()
+    {
+        eprintln!("skipped: python3 is unavailable for the pids pressure fixture");
+        return Ok(());
+    }
+
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    super::super::setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(
+        super::super::INTERFACE,
+        super::super::OBJECT_PATH,
+        super::super::INTERFACE,
+    )?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(state.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    let request = ShellExecRequest {
+        process: process_id,
+        resource: resource.clone(),
+        shell: SelectShellRequest {
+            command: "python3 -c 'import errno,os; children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os._exit(0)\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir: state.path().to_string_lossy().into_owned(),
+        timeout_ms: 30_000,
+        stdin: None,
+        jail: Some(NativeJailConfig {
+            read_only: Vec::new(),
+            read_write: Vec::new(),
+            allow_net: false,
+            allow_subprocess: true,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: Vec::new(),
+            resources: None,
+        }),
+        hide_window: false,
+    };
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>(
+                "StartNativeShellExecWithResources",
+                (
+                    request,
+                    NativeJailResourceRequest {
+                        cpu_millis: Some(1000),
+                        memory_bytes: None,
+                        pids_max: Some(16),
+                        disk_bytes: None,
+                    }
+                ),
+            )
+            .await?,
+        process
+    );
+
+    let output = wait_for_memory_process_output(&proxy, &process).await?;
+    assert!(matches!(
+        output.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 0 }
+    ));
+    assert_pids_event_sequence(&mut events, &process).await?;
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn active_scope_cgroup(
     argv: &[String],
     child: &mut std::process::Child,
