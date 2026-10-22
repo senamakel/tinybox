@@ -499,7 +499,11 @@ impl OwnedChild {
         }
     }
 
-    fn from_std(child: Child) -> std::io::Result<Self> {
+    /// Adapt a standard child and its configured pipes to the owned interface.
+    /// # Errors
+    /// Returns an error on platforms where standard child pipes cannot be
+    /// converted into owned files.
+    pub fn from_std(child: Child) -> std::io::Result<Self> {
         let mut child = StdOwnedProcess(child);
         let stdin = child.0.stdin.take().map(child_stdin_file).transpose()?;
         let stdout = child.0.stdout.take().map(child_stdout_file).transpose()?;

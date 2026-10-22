@@ -434,7 +434,7 @@ async fn retained_jail_cleanup_retries_and_releases_native_child()
     let group = i32::try_from(pid)?;
     let retained = retain_cleanup(
         &host.state,
-        child,
+        tinybox_jail::OwnedChild::from_std(child)?,
         group,
         Err(failure(
             "kill jail group",
