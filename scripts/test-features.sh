@@ -7,6 +7,11 @@ case "${RUNNER_OS:-$(uname -s)}" in
   macOS|Darwin)
     brew install util-linux
     export PATH="$(brew --prefix util-linux)/bin:$PATH"
+    if [ ! -x /usr/bin/sandbox-exec ]; then
+      echo "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent" >&2
+      exit 1
+    fi
+    TINYBOX_REQUIRE_SEATBELT_TESTS=1 cargo test --locked -p tinybox-jail live_seatbelt_deny_subprocess_blocks_child_execution -- --nocapture
     ;;
   Windows|MINGW*|MSYS*|CYGWIN*)
     # Native Rust commands resolve /bin/sh at the current drive root, while
