@@ -600,7 +600,10 @@ fn runtime_capabilities_explain_each_kvm_readiness_state() {
             },
         ),
     ] {
-        assert_eq!(MicroVmSandbox::availability_for_kvm_status(status), expected);
+        assert_eq!(
+            MicroVmSandbox::availability_for_kvm_status(status),
+            expected
+        );
     }
 }
 
