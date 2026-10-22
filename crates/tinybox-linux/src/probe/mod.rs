@@ -144,7 +144,18 @@ impl NamespaceProbe {
     /// Convert the probe result into the runtime readiness reported by a sandbox.
     #[must_use]
     pub fn availability(&self) -> tinybox_core::SandboxAvailability {
-        match self.problem() {
+        let detected = detected_namespace();
+        let probe_error = (detected.probe == *self)
+            .then_some(detected.probe_error.as_deref())
+            .flatten();
+        self.availability_with_probe_error(probe_error)
+    }
+
+    fn availability_with_probe_error(
+        &self,
+        probe_error: Option<&str>,
+    ) -> tinybox_core::SandboxAvailability {
+        match self.problem_with_probe_error(probe_error) {
             Some(reason) => tinybox_core::SandboxAvailability::Unavailable { reason },
             None => tinybox_core::SandboxAvailability::Available,
         }
