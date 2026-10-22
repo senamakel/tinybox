@@ -45,6 +45,7 @@ impl ShellContext {
     ) -> Result<Arc<Self>> {
         Self::prepare_with_resource_limits(request, root, resolved, None)
     }
+    #[cfg(test)]
     fn prepare_with_backend(
         request: ShellExecRequest,
         root: &Path,
