@@ -33,6 +33,22 @@ jobs:
         env:
           TINYBOX_REQUIRE_BWRAP: "1"
         run: scripts/test-features.sh
+  macos-15:
+    name: macOS E2E and feature tests (macOS 15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+      - name: Require Seatbelt runtime
+        run: test -x /usr/bin/sandbox-exec
+      - name: Run module E2E verification
+        run: scripts/test-e2e.sh
+      - name: Run required macOS sandbox and feature tests
+        env:
+          TINYBOX_REQUIRE_SEATBELT_TESTS: "1"
+        run: scripts/test-features.sh
   native-resource-live:
     runs-on: ubuntu-latest
     steps:
