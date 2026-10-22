@@ -122,6 +122,20 @@ fn pids_event_report_hands_off_the_scope_counter_and_removes_its_file()
     let mut no_pids_limit = std::process::Command::new("/bin/bash");
     no_pids_limit.arg("--unit=tinybox-native-123-2.scope");
     assert!(super::PidsEventReport::prepare_in(&mut no_pids_limit, &jail, &runtime).is_none());
+    let exposed_jail = jail.clone().add_read_write(&runtime);
+    let mut exposed_report = std::process::Command::new("/bin/bash");
+    exposed_report.args([
+        "--unit=tinybox-native-123-3.scope",
+        "--property=TasksMax=16",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    assert!(
+        super::PidsEventReport::prepare_in(&mut exposed_report, &exposed_jail, &runtime).is_none()
+    );
     let path = report.0.clone();
     drop(report);
     assert!(!path.exists());

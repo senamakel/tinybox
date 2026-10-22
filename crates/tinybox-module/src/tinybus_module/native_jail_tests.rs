@@ -912,7 +912,7 @@ async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
         process: process_id,
         resource: resource.clone(),
         shell: SelectShellRequest {
-            command: "python3 -c 'import errno,os,signal; children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os.pause()\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.kill(pid,signal.SIGKILL)\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
+            command: "python3 -c 'import errno,os,signal; assert \"TINYBOX_INTERNAL_PIDS_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os.pause()\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.kill(pid,signal.SIGKILL)\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
             preserve_pipeline_status: false,
             runtime_path: None,
             python_utf8: false,
