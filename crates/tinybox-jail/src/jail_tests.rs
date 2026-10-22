@@ -63,6 +63,7 @@ fn typed_invocation_reaches_backend_without_losing_exec_fields_or_resource_plan(
 -> std::io::Result<()> {
     use std::io::{Read, Write};
     let root = tempfile::tempdir()?;
+    let canonical_root = root.path().canonicalize()?;
     let backend = InvocationBackend::default();
     let resources = crate::ResourceLimitPlan {
         cpu_millis: Some(750),
@@ -119,7 +120,7 @@ fn typed_invocation_reaches_backend_without_losing_exec_fields_or_resource_plan(
         stdout,
         format!(
             "yes|unset|{}|argument-kept|stdin-kept",
-            root.path().display()
+            canonical_root.display()
         )
     );
     assert_eq!(stderr, "stderr-kept");
