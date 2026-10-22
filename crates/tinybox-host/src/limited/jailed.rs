@@ -64,7 +64,6 @@ impl MemoryEventReport {
         }
         let metadata = std::fs::metadata(&runtime_dir).ok()?;
         let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
-        eprintln!("runtime dir {:?} {:?} {process_uid}", runtime_dir, metadata);
         if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
             return None;
         }

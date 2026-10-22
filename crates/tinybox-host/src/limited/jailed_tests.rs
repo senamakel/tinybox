@@ -33,7 +33,12 @@ fn memory_event_report_is_disabled_when_a_jail_mount_can_expose_it() {
 #[test]
 fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
 -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = tempfile::tempdir()?;
+    use std::os::unix::fs::PermissionsExt;
+
+    let runtime_parent = tempfile::tempdir()?;
+    let runtime = runtime_parent.path().join("runtime");
+    std::fs::create_dir(&runtime)?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700))?;
     let workspace = tempfile::tempdir()?;
     let jail = tinybox_jail::Jail::new(workspace.path(), "memory-report-test");
     let mut command = std::process::Command::new("/bin/bash");
@@ -41,9 +46,9 @@ fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
         "--unit=tinybox-native-123-1.scope",
         "--property=MemoryMax=67108864",
     ]);
-    let report = super::MemoryEventReport::prepare_in(&mut command, &jail, runtime.path())
+    let report = super::MemoryEventReport::prepare_in(&mut command, &jail, &runtime)
         .ok_or("private runtime directory should support memory event reporting")?;
-    assert!(report.0.starts_with(runtime.path()));
+    assert!(report.0.starts_with(&runtime));
     assert_eq!(std::fs::read_to_string(&report.0)?, "0\n");
     std::fs::write(&report.0, "1\n")?;
     assert!(report.oom_kill_observed());
@@ -53,9 +58,7 @@ fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
     }));
     let mut no_memory_limit = std::process::Command::new("/bin/bash");
     no_memory_limit.arg("--unit=tinybox-native-123-2.scope");
-    assert!(
-        super::MemoryEventReport::prepare_in(&mut no_memory_limit, &jail, runtime.path()).is_none()
-    );
+    assert!(super::MemoryEventReport::prepare_in(&mut no_memory_limit, &jail, &runtime).is_none());
     let path = report.0.clone();
     drop(report);
     assert!(!path.exists());
