@@ -1084,6 +1084,27 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
         process
     );
 
+    let output = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let output: tinybox_bus::OutputBatch = proxy
+                .call("ReadOutput", (process.clone(), 0_u64))
+                .await?;
+            if !matches!(output.state, tinybox_bus::ExecutionState::Running) {
+                return Ok::<_, tinybus::Error>(output);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .map_err(|_| tinybus::Error::failed("native shell did not reach its configured deadline"))??;
+    assert_eq!(
+        output.state,
+        tinybox_bus::ExecutionState::Failed {
+            code: tinybox_bus::ExecutionFailure::TimedOut
+        }
+    );
+    assert!(output.chunks.iter().any(|chunk| chunk.bytes == b"partial\n"));
+
     let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
         tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
             .await
