@@ -7,11 +7,11 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tinybox_core::{Error, ExecOutput, ExecRequest, ExecutionObserver, Host, OutputStream, Result};
-use tinybox_jail::{Jail, JailBackend};
+use tinybox_jail::{Jail, JailBackend, OwnedChild};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{oneshot, watch};
 
-type Retained = Arc<tokio::sync::Mutex<Option<std::process::Child>>>;
+type Retained = Arc<tokio::sync::Mutex<Option<OwnedChild>>>;
 struct State {
     active: AtomicUsize,
     failed: Mutex<BTreeMap<i32, Retained>>,
@@ -435,7 +435,7 @@ fn report_event_terminations(
 // Standard children do not kill on drop. Keep ownership across supervisor panics
 // and aborts so the module can acknowledge cleanup through its normal drain path.
 struct RetainedOnDrop {
-    child: Option<std::process::Child>,
+    child: Option<OwnedChild>,
     group: i32,
     state: Arc<State>,
 }
@@ -450,7 +450,7 @@ impl Drop for RetainedOnDrop {
                 };
                 let _ = killpg(Pid::from_raw(self.group), Signal::SIGKILL);
             }
-            let _ = child.kill();
+            let _ = child.terminate();
             self.state
                 .failed
                 .lock()
@@ -623,12 +623,14 @@ impl JailLocalHost {
                 return Err(failure("start native jail", "execution cancelled".into()));
             }
             let child = tokio::task::spawn_blocking(move || {
-                tinybox_jail::spawn_captured_with(backend.as_ref(), &jail, command)
+                tinybox_jail::spawn_owned_captured_with(backend.as_ref(), &jail, command)
             })
             .await
             .map_err(|error| failure("start native jail", error.to_string()))?
             .map_err(|error| Error::io("spawn native jail", &error))?;
-            let group = i32::try_from(child.id())
+            let group = i32::try_from(child.id().ok_or_else(|| {
+                failure("identify jail child", "missing native process identifier".into())
+            })?)
                 .map_err(|error| failure("identify jail child", error.to_string()))?;
             let mut owned = RetainedOnDrop {
                 child: Some(child),
@@ -640,16 +642,11 @@ impl JailLocalHost {
             })?;
             let pipes = (|| {
                 Ok::<_, Error>((
-                    tokio::process::ChildStdout::from_std(pipe(child.stdout.take(), "stdout")?)
-                        .map_err(|error| Error::io("attach stdout", &error))?,
-                    tokio::process::ChildStderr::from_std(pipe(child.stderr.take(), "stderr")?)
-                        .map_err(|error| Error::io("attach stderr", &error))?,
+                    tokio::fs::File::from_std(pipe(child.take_stdout(), "stdout")?),
+                    tokio::fs::File::from_std(pipe(child.take_stderr(), "stderr")?),
                     child
-                        .stdin
-                        .take()
-                        .map(tokio::process::ChildStdin::from_std)
-                        .transpose()
-                        .map_err(|error| Error::io("attach stdin", &error))?,
+                        .take_stdin()
+                        .map(tokio::fs::File::from_std),
                 ))
             })();
             let result = match pipes {
@@ -738,7 +735,7 @@ impl Host for JailLocalHost {
 }
 fn retain_cleanup(
     state: &State,
-    child: std::process::Child,
+    child: OwnedChild,
     group: i32,
     outcome: Result<()>,
 ) -> Result<()> {
@@ -752,18 +749,15 @@ fn retain_cleanup(
     outcome
 }
 
-async fn wait_child(child: &mut std::process::Child) -> Result<std::process::ExitStatus> {
+async fn wait_child(child: &mut OwnedChild) -> Result<tinybox_jail::ChildStatus> {
     loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| Error::io("wait native jail", &error))?
-        {
+        if let Some(status) = child.try_wait().map_err(|error| Error::io("wait native jail", &error))? {
             return Ok(status);
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
-async fn terminate(child: &mut std::process::Child, group: i32) -> Result<()> {
+async fn terminate(child: &mut OwnedChild, group: i32) -> Result<()> {
     #[cfg(not(unix))]
     let _ = group;
     #[cfg(unix)]
@@ -788,7 +782,7 @@ async fn terminate(child: &mut std::process::Child, group: i32) -> Result<()> {
     }
     let completion = async {
         child
-            .kill()
+            .terminate()
             .map_err(|error| Error::io("kill jail child", &error))?;
         wait_child(child).await?;
         #[cfg(unix)]
