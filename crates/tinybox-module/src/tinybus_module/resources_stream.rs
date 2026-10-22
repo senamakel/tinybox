@@ -456,6 +456,37 @@ impl Resources {
         )
         .await
     }
+    pub(in crate::tinybus_module) async fn start_native_shell_exec_with_resources(
+        &self,
+        shell: tinybox_bus::ShellExecRequest,
+        resources: tinybox_bus::NativeJailResourceRequest,
+    ) -> Result<ProcessRef> {
+        let jail = shell
+            .jail
+            .clone()
+            .ok_or_else(|| failure(tinybox_bus::INVALID_ID, "native shell requires jail config"))?;
+        let request = SpawnRequest {
+            process: shell.process.clone(),
+            command: tinybox_bus::ExecRequest {
+                resource: shell.resource.clone(),
+                argv: vec![tinybox_host::select_shell(&shell.shell).program],
+                cwd: shell.cwd.clone(),
+                env: shell.extra_env.clone(),
+                stdin: shell.stdin.clone(),
+            },
+        };
+        let jail = tinybox_bus::NativeJailRequest {
+            jail,
+            resources: Some(resources),
+        };
+        self.start_with_jail(
+            request,
+            Some(NativeJailRequest::Resources(jail)),
+            Some(shell),
+            None,
+        )
+        .await
+    }
     pub(in crate::tinybus_module) async fn start_platform_shell_exec(
         &self,
         request: SpawnRequest,

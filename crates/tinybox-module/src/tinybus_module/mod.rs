@@ -321,6 +321,21 @@ impl BoxService {
         .await
     }
 
+    /// Start a module-owned shell in a native jail with explicit contract 2.1 limits.
+    async fn start_native_shell_exec_with_resources(
+        &self,
+        request: tinybox_bus::ShellExecRequest,
+        limits: tinybox_bus::NativeJailResourceRequest,
+    ) -> TinyBusResult<ProcessRef> {
+        let manager = self.resources.clone();
+        finish_operation(tokio::spawn(async move {
+            manager
+                .start_native_shell_exec_with_resources(request, limits)
+                .await
+        }))
+        .await
+    }
+
     /// Start one program with piped stdio inside the resource's native jail.
     async fn start_stdio(
         &self,
@@ -597,7 +612,7 @@ tinybus_module::module_export_optional_static! {
     setup = setup,
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box"],
-    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources"],
+    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources", "StartNativeShellExecWithResources"],
     signals = [],
     requires = [],
     optional = [],
