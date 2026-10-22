@@ -745,8 +745,7 @@ fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
-        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+        CreateRequest, NativeJailResourceRequest, ProcessRef, ReserveRequest, ResourceId, Workspace,
     };
     use tinybus::Connection;
     use tinybus::broker::Broker;
@@ -908,32 +907,11 @@ async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
         resource: resource.clone(),
         process: process_id.clone(),
     };
-    let request = ShellExecRequest {
-        process: process_id,
-        resource: resource.clone(),
-        shell: SelectShellRequest {
-            command: "python3 -c 'import errno,os,signal; assert \"TINYBOX_INTERNAL_PIDS_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os.pause()\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.kill(pid,signal.SIGKILL)\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
-            preserve_pipeline_status: false,
-            runtime_path: None,
-            python_utf8: false,
-        },
-        cwd: None,
-        extra_env: std::collections::BTreeMap::new(),
-        state_dir: state.path().to_string_lossy().into_owned(),
-        timeout_ms: 30_000,
-        stdin: None,
-        jail: Some(NativeJailConfig {
-            read_only: Vec::new(),
-            read_write: Vec::new(),
-            allow_net: false,
-            allow_subprocess: true,
-            enforcement: JailEnforcement::Enforced,
-            require_process_isolation: true,
-            deny_read: Vec::new(),
-            resources: None,
-        }),
-        hide_window: false,
-    };
+    let request = pids_limit_shell_request(
+        process_id,
+        resource.clone(),
+        state.path().to_string_lossy().into_owned(),
+    );
     assert_eq!(
         proxy
             .call::<ProcessRef>(
@@ -960,6 +938,42 @@ async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
     assert_pids_event_sequence(&mut events, &process).await?;
     proxy.call::<()>("Close", (resource,)).await?;
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn pids_limit_shell_request(
+    process: tinybox_bus::ResourceId,
+    resource: tinybox_bus::ResourceId,
+    state_dir: String,
+) -> tinybox_bus::ShellExecRequest {
+    use tinybox_bus::{JailEnforcement, NativeJailConfig, SelectShellRequest, ShellExecRequest};
+
+    ShellExecRequest {
+        process,
+        resource,
+        shell: SelectShellRequest {
+            command: "python3 -c 'import errno,os,signal; assert \"TINYBOX_INTERNAL_PIDS_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os.pause()\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.kill(pid,signal.SIGKILL)\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir,
+        timeout_ms: 30_000,
+        stdin: None,
+        jail: Some(NativeJailConfig {
+            read_only: Vec::new(),
+            read_write: Vec::new(),
+            allow_net: false,
+            allow_subprocess: true,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: Vec::new(),
+            resources: None,
+        }),
+        hide_window: false,
+    }
 }
 
 #[cfg(target_os = "linux")]
