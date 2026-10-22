@@ -745,7 +745,8 @@ fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, NativeJailResourceRequest, ProcessRef, ReserveRequest, ResourceId, Workspace,
+        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
+        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
     };
     use tinybus::Connection;
     use tinybus::broker::Broker;
@@ -854,8 +855,7 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
 async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
-        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+        CreateRequest, NativeJailResourceRequest, ProcessRef, ReserveRequest, ResourceId, Workspace,
     };
     use tinybus::Connection;
     use tinybus::broker::Broker;
