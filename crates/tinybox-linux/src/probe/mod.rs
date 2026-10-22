@@ -173,7 +173,11 @@ fn probe_bwrap_with_timeout(program: &Path, timeout: Duration) -> Result<(), Str
     probe_program_with_timeout(program, &BWRAP_PROBE_ARGS, timeout)
 }
 
-fn probe_program_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Result<(), String> {
+fn probe_program_with_timeout(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(), String> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
