@@ -65,7 +65,16 @@ impl MemoryEventReport {
             .get_args()
             .filter_map(|arg| arg.to_str())
             .any(|arg| arg.contains("MemoryMax="));
-        if !has_scope || !has_memory_limit {
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
+        let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
+        let clears_target_environment = args.contains(&"--clearenv");
+        if !has_scope
+            || !has_memory_limit
+            || !masks_runtime
+            || !masks_cgroup
+            || !clears_target_environment
+        {
             return None;
         }
         let metadata = std::fs::metadata(runtime_dir).ok()?;

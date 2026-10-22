@@ -45,6 +45,11 @@ fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
     command.args([
         "--unit=tinybox-native-123-1.scope",
         "--property=MemoryMax=67108864",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
     ]);
     let report = super::MemoryEventReport::prepare_in(&mut command, &jail, &runtime)
         .ok_or("private runtime directory should support memory event reporting")?;
@@ -59,6 +64,13 @@ fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
     let mut no_memory_limit = std::process::Command::new("/bin/bash");
     no_memory_limit.arg("--unit=tinybox-native-123-2.scope");
     assert!(super::MemoryEventReport::prepare_in(&mut no_memory_limit, &jail, &runtime).is_none());
+    let mut exposed_runtime = std::process::Command::new("/bin/bash");
+    exposed_runtime.args([
+        "--unit=tinybox-native-123-3.scope",
+        "--property=MemoryMax=67108864",
+        "--clearenv",
+    ]);
+    assert!(super::MemoryEventReport::prepare_in(&mut exposed_runtime, &jail, &runtime).is_none());
     let path = report.0.clone();
     drop(report);
     assert!(!path.exists());
