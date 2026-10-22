@@ -40,7 +40,10 @@ fn process_event_signal_has_correlated_process_and_event_fields() -> Result<(), 
         "event": {"event":"exited", "status":7}
     });
     assert_eq!(serde_json::to_value(&process_event)?, snapshot);
-    assert_eq!(serde_json::from_value::<ProcessEvent>(snapshot)?, process_event);
+    assert_eq!(
+        serde_json::from_value::<ProcessEvent>(snapshot)?,
+        process_event
+    );
     assert_eq!(names::PROCESS_EVENT, "ProcessEvent");
     assert_eq!(SIGNALS, &[names::PROCESS_EVENT]);
     assert_eq!(CONTRACT_VERSION, (2, 4));
