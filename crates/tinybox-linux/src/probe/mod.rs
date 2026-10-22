@@ -64,7 +64,12 @@ pub struct NamespaceProbe {
 }
 
 impl NamespaceProbe {
-    /// Probe this machine: `PATH` for `bwrap`, and the user-namespace sysctls.
+    /// Probe this machine for `bwrap` and user-namespace readiness.
+    ///
+    /// In addition to inspecting the relevant sysctls, this runs a fixed
+    /// `bwrap` user-namespace command with a two-second timeout. The result is
+    /// cached for the process lifetime so availability checks do not spawn a
+    /// child on every call.
     #[must_use]
     pub fn detect() -> Self {
         static DETECTED: OnceLock<NamespaceProbe> = OnceLock::new();

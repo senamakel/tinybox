@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, Host, HostRef,
-    IsolationLevel, MemoryStore, NetworkPolicy, Placement, Resources, Result, Sandbox, SandboxRef,
-    SandboxAvailability, SnapshotId, SnapshotSupport, Store, WorkspaceSource,
+    IsolationLevel, MemoryStore, NetworkPolicy, Placement, Resources, Result, Sandbox,
+    SandboxAvailability, SandboxRef, SnapshotId, SnapshotSupport, Store, WorkspaceSource,
 };
 
 use super::{NAME, NamespaceSandbox, args};

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tinybox_core::{
     BoxId, BoxSpec, Error, ExecRequest, HostRef, MemoryStore, NetworkPolicy, Placement, Resources,
-    Result, Sandbox, SandboxRef, WorkspaceSource,
+    Result, Sandbox, SandboxAvailability, SandboxRef, WorkspaceSource,
 };
 use tinybox_host::LocalHost;
 use tinybox_linux::NamespaceSandbox;
@@ -195,9 +195,13 @@ fn namespace_resource_runtime_problem() -> Option<String> {
     {
         return Some("set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests".into());
     }
-    let probe = tinybox_linux::NamespaceProbe::detect();
-    if let Some(problem) = probe.problem() {
-        return Some(problem);
+    match sandbox().availability() {
+        SandboxAvailability::Available => {}
+        SandboxAvailability::Unavailable { reason } => return Some(reason),
+        SandboxAvailability::Unknown => {
+            return Some("namespace sandbox did not report runtime availability".into());
+        }
+        _ => return Some("namespace sandbox reported an unknown availability state".into()),
     }
     let scope = std::process::Command::new("systemd-run")
         .args([
