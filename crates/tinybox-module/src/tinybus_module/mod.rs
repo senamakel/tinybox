@@ -538,26 +538,43 @@ async fn publish_process_events(
                 },
             )
             .await;
-        } else if stream.memory_limit_hit() {
-            emit_process_event(
-                &connection,
-                ProcessEvent {
-                    process: event_process.clone(),
-                    event: SandboxEvent::LimitHit {
-                        limit: tinybox_bus::LimitKind::Memory,
+        } else {
+            let memory_limit_hit = stream.memory_limit_hit();
+            let pids_limit_hit = stream.pids_limit_hit();
+            if memory_limit_hit {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process.clone(),
+                        event: SandboxEvent::LimitHit {
+                            limit: tinybox_bus::LimitKind::Memory,
+                        },
                     },
-                },
-            )
-            .await;
-            emit_process_event(
-                &connection,
-                ProcessEvent {
-                    process: event_process,
-                    event: SandboxEvent::Exited { status },
-                },
-            )
-            .await;
-        } else if let Some(status) = status {
+                )
+                .await;
+            }
+            if pids_limit_hit {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process.clone(),
+                        event: SandboxEvent::LimitHit {
+                            limit: tinybox_bus::LimitKind::Pids,
+                        },
+                    },
+                )
+                .await;
+            }
+            if memory_limit_hit || pids_limit_hit {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited { status },
+                    },
+                )
+                .await;
+            } else if let Some(status) = status {
             emit_process_event(
                 &connection,
                 ProcessEvent {
@@ -568,6 +585,7 @@ async fn publish_process_events(
                 },
             )
             .await;
+            }
         }
     });
 }

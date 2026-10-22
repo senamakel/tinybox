@@ -139,7 +139,7 @@ fn empty_output_does_not_consume_sequence_or_memory()
 }
 
 #[test]
-fn provider_memory_termination_is_retained_for_the_process_event_publisher() {
+fn provider_limit_termination_is_retained_for_the_process_event_publisher() {
     let journal = OutputJournal::default();
     assert!(!journal.memory_limit_hit());
     assert!(!journal.pids_limit_hit());

@@ -393,6 +393,9 @@ impl StreamExecution {
     pub(in crate::tinybus_module) fn memory_limit_hit(&self) -> bool {
         self.journal.memory_limit_hit()
     }
+    pub(in crate::tinybus_module) fn pids_limit_hit(&self) -> bool {
+        self.journal.pids_limit_hit()
+    }
     pub(super) fn running(&self) -> bool {
         !self.journal.cleanup_acknowledged()
     }
