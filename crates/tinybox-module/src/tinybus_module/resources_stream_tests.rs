@@ -765,6 +765,40 @@ async fn resource_aware_native_shell_runs_through_the_requested_resource_launche
     assert_eq!(output.state, ExecutionState::Exited { exit_code: 0 });
     assert_eq!(output.chunks[0].bytes, b"resource-shell");
     resources.release_output(&process).await?;
+
+    let mut unsupported =
+        shell_request(&resources, &resource, state.path(), "printf legacy-shell").await?;
+    unsupported.jail = Some(tinybox_bus::NativeJailConfig {
+        read_only: Vec::new(),
+        read_write: Vec::new(),
+        allow_net: false,
+        allow_subprocess: true,
+        enforcement: tinybox_bus::JailEnforcement::Enforced,
+        require_process_isolation: true,
+        deny_read: Vec::new(),
+        resources: None,
+    });
+    assert!(
+        resources
+            .start_native_shell_exec_with_resources(
+                unsupported.clone(),
+                tinybox_bus::NativeJailResourceRequest {
+                    cpu_millis: None,
+                    memory_bytes: None,
+                    pids_max: None,
+                    disk_bytes: Some(1),
+                },
+            )
+            .await
+            .is_err()
+    );
+    let legacy = resources.start_shell_exec(unsupported).await?;
+    completed(&resources, &legacy).await?;
+    assert_eq!(
+        resources.read_output(&legacy, 0).await?.state,
+        ExecutionState::Exited { exit_code: 0 }
+    );
+    resources.release_output(&legacy).await?;
     resources.close(&resource).await?;
     Ok(())
 }
