@@ -69,7 +69,7 @@ pub mod macos;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
-pub use jail::{Jail, JailBackend, reject_symlinked_grants};
+pub use jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess, reject_symlinked_grants};
 #[cfg(target_os = "linux")]
 pub use linux::LandlockBackend;
 pub use macos::SeatbeltBackend;
@@ -143,6 +143,25 @@ pub fn spawn_captured_with(
     require_resources(backend, &jail)?;
     jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
     backend.spawn_captured(&jail, cmd)
+}
+
+/// Spawn captured work through a backend-owned process abstraction.
+///
+/// The backend is responsible for retaining the process handle while callers
+/// consume the returned standard pipes. This is the extensible path for
+/// process owners that cannot be represented by `std::process::Child`.
+/// # Errors
+/// Returns canonicalization, confinement, or native startup errors.
+pub fn spawn_owned_captured_with(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    cmd: Command,
+) -> std::io::Result<OwnedChild> {
+    let mut jail = jail.clone();
+    jail.canonicalize()?;
+    require_resources(backend, &jail)?;
+    jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
+    backend.spawn_owned_captured(&jail, cmd)
 }
 
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {
