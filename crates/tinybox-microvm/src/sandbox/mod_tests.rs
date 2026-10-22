@@ -604,6 +604,16 @@ fn runtime_capabilities_explain_each_kvm_readiness_state() {
     }
 }
 
+#[test]
+fn runtime_availability_uses_the_host_kvm_probe() {
+    let sandbox = sandbox(ScriptedHost::booting("", 0));
+
+    assert_eq!(
+        sandbox.availability(),
+        MicroVmSandbox::availability_for_kvm_status(super::super::kvm::probe())
+    );
+}
+
 #[tokio::test]
 async fn the_workspace_root_itself_is_not_written_as_a_file() -> Result<()> {
     /// A host whose `find` names the workspace root as well as a file in it.
