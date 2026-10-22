@@ -44,7 +44,10 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
         "echo before; /usr/bin/printf child-executed; echo after",
     ]);
     let allowed = SeatbeltBackend::new()
-        .spawn_captured(&Jail::new(root.path(), "seatbelt-subprocess-control"), allowed_command)?
+        .spawn_captured(
+            &Jail::new(root.path(), "seatbelt-subprocess-control"),
+            allowed_command,
+        )?
         .wait_with_output()?;
     let allowed_stdout = String::from_utf8_lossy(&allowed.stdout);
     assert!(
