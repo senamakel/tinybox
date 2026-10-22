@@ -17,13 +17,15 @@
 //! checks the declaration before dispatching and surfaces
 //! [`Error::Unsupported`], so a backend should
 //! return an accurate [`SandboxCapabilities`] and let the check fail rather
-//! than emulate something it cannot deliver.
+//! than emulate something it cannot deliver. Host-specific prerequisites that
+//! can change at runtime are reported separately by [`Sandbox::availability`].
 
 use async_trait::async_trait;
 
 use std::net::SocketAddr;
 use std::path::Path;
 
+use crate::capability::SandboxAvailability;
 use crate::capability::{Capability, SandboxCapabilities};
 use crate::error::{Error, Result};
 use crate::identity::{BoxId, ProcessId, SnapshotId};
@@ -214,6 +216,15 @@ pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     /// Callers use this to choose a backend, and core uses it to reject
     /// unsupported requests before they reach the implementation.
     fn capabilities(&self) -> SandboxCapabilities;
+
+    /// Whether this host currently satisfies the sandbox's runtime prerequisites.
+    ///
+    /// Static behavior belongs to [`Self::capabilities`]. Backends that can
+    /// probe host-specific requirements, such as KVM access, override this
+    /// method; the default reports [`SandboxAvailability::Unknown`].
+    fn availability(&self) -> SandboxAvailability {
+        SandboxAvailability::Unknown
+    }
 
     /// Per-constraint enforcement, conservatively unsupported by default.
     fn constraint_support(&self) -> crate::ConstraintSupport {

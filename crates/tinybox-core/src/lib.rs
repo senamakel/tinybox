@@ -77,7 +77,9 @@ pub mod template;
 pub mod constraint;
 pub use constraint::{Constraint, ConstraintSupport, Enforcement, PlanCheck};
 
-pub use capability::{Capability, IsolationLevel, SandboxCapabilities, SnapshotSupport};
+pub use capability::{
+    Capability, IsolationLevel, SandboxAvailability, SandboxCapabilities, SnapshotSupport,
+};
 pub use clock::{Clock, SystemClock};
 pub use error::{Error, Result};
 pub use event::{CollectingSink, DenialKind, EventSink, LimitKind, SandboxEvent};

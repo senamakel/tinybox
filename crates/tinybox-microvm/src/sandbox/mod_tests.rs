@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, Host, HostRef,
-    IsolationLevel, MemoryStore, Placement, Resources, Result, Sandbox, SandboxRef, SnapshotId,
-    SnapshotSupport, Store, WorkspaceSource,
+    IsolationLevel, MemoryStore, Placement, Resources, Result, Sandbox, SandboxAvailability,
+    SandboxRef, SnapshotId, SnapshotSupport, Store, WorkspaceSource,
 };
 
 use tinybox_core::clock::FixedClock;
@@ -573,6 +573,51 @@ async fn a_box_records_when_it_was_created() -> Result<()> {
     // Time comes from the clock so a test never has to wait for one.
     assert_eq!(info.created_at, Some(std::time::UNIX_EPOCH));
     Ok(())
+}
+
+#[test]
+fn runtime_capabilities_explain_each_kvm_readiness_state() {
+    use super::super::kvm::KvmStatus;
+
+    for (status, expected) in [
+        (KvmStatus::Available, SandboxAvailability::Available),
+        (
+            KvmStatus::Missing,
+            SandboxAvailability::Unavailable {
+                reason: KvmStatus::Missing.advice().unwrap_or_default().to_owned(),
+            },
+        ),
+        (
+            KvmStatus::PermissionDenied,
+            SandboxAvailability::Unavailable {
+                reason: KvmStatus::PermissionDenied
+                    .advice()
+                    .unwrap_or_default()
+                    .to_owned(),
+            },
+        ),
+        (
+            KvmStatus::Unusable,
+            SandboxAvailability::Unavailable {
+                reason: KvmStatus::Unusable.advice().unwrap_or_default().to_owned(),
+            },
+        ),
+    ] {
+        assert_eq!(
+            MicroVmSandbox::availability_for_kvm_status(status),
+            expected
+        );
+    }
+}
+
+#[test]
+fn runtime_availability_uses_the_host_kvm_probe() {
+    let sandbox = sandbox(ScriptedHost::booting("", 0));
+
+    assert_eq!(
+        sandbox.availability(),
+        MicroVmSandbox::availability_for_kvm_status(super::super::kvm::probe())
+    );
 }
 
 #[tokio::test]

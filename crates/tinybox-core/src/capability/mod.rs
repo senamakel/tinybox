@@ -24,7 +24,7 @@ use crate::error::{Error, Result};
 
 mod types;
 
-pub use types::{Capability, IsolationLevel, SnapshotSupport};
+pub use types::{Capability, IsolationLevel, SandboxAvailability, SnapshotSupport};
 
 /// The complete set of behaviors a sandbox declares.
 ///

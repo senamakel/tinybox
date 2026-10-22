@@ -12,7 +12,9 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use super::{BoxInfo, BoxState, ExecOutput, ExecRequest, Host, Sandbox};
-use crate::capability::{Capability, IsolationLevel, SandboxCapabilities, SnapshotSupport};
+use crate::capability::{
+    Capability, IsolationLevel, SandboxAvailability, SandboxCapabilities, SnapshotSupport,
+};
 use crate::error::{Error, Result};
 use crate::identity::{BoxId, HostRef, SandboxRef, SnapshotId};
 use crate::spec::{BoxSpec, Lifecycle, Placement, WorkspaceSource};
@@ -23,6 +25,13 @@ async fn backends_without_published_ports_report_an_empty_fact_list() -> Result<
     let ports = sandbox.published_ports(&BoxId::new("box-0")?).await?;
     assert_eq!(ports, Vec::new());
     Ok(())
+}
+
+#[test]
+fn backends_without_a_runtime_probe_report_unknown_availability() {
+    let sandbox = FakeSandbox::new(SandboxCapabilities::PASSTHROUGH);
+
+    assert_eq!(sandbox.availability(), SandboxAvailability::Unknown);
 }
 
 #[tokio::test]
