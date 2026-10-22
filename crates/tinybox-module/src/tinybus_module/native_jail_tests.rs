@@ -851,8 +851,8 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
 }
 
 #[cfg(target_os = "linux")]
-#[test]
-fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
+#[tokio::test]
+async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybus::Connection;
     use tinybus::broker::Broker;
