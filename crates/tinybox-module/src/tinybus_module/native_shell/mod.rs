@@ -139,53 +139,15 @@ impl ShellContext {
         for name in selection.remove_environment {
             environment.remove(&name);
         }
-        let mut native_launcher = None;
-        let host = if let Some(resources) = resources {
-            let config = request.jail.as_ref().ok_or_else(invalid)?;
-            let mut jail = tinybox_bus::NativeJailRequest {
-                jail: config.clone(),
-                resources: Some(resources),
-            };
-            jail.jail
-                .read_write
-                .push(scratch.path().to_string_lossy().into_owned());
-            let selection = tinybox_host::select_shell(&request.shell);
-            let mut argv = vec![selection.program];
-            argv.extend(selection.arguments);
-            let mut native_request = tinybox_core::ExecRequest::new(argv)
-                .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
-            native_request.env = environment.clone();
-            native_request.stdin = request.stdin.clone();
-            let host =
-                super::native_jail::collector_with_resources(root, &jail, &mut native_request)?;
-            native_launcher = Some(native_request);
-            ShellHost::Jailed(host)
-        } else if let Some(config) = &request.jail {
-            let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
-            jail.read_write.push(scratch.path().to_path_buf());
-            if config.enforcement == tinybox_bus::JailEnforcement::Enforced {
-                backend.require(&jail).map_err(|_| invalid())?;
-            } else if backend
-                .plan_check(&jail)
-                .constraints
-                .iter()
-                .any(|(_, support)| *support == tinybox_core::Enforcement::Unsupported)
-            {
-                return Err(invalid());
-            }
-            ShellHost::Jailed(Arc::new(
-                tinybox_host::JailLocalHost::with_backend(
-                    jail,
-                    backend,
-                    tinybox_bus::MAX_OUTPUT_BYTES,
-                )
-                .map_err(|_| invalid())?,
-            ))
-        } else {
-            ShellHost::Local(tinybox_host::LimitedLocalHost::new(
-                tinybox_bus::MAX_OUTPUT_BYTES,
-            ))
-        };
+        let (host, native_launcher) = prepare_host(
+            &request,
+            root,
+            resolved,
+            &environment,
+            scratch.path(),
+            resources,
+            backend,
+        )?;
         Ok(Arc::new(Self {
             request,
             environment,
@@ -289,6 +251,60 @@ impl ShellContext {
         })?
     }
 }
+fn prepare_host(
+    request: &ShellExecRequest,
+    root: &Path,
+    resolved: &tinybox_core::ExecRequest,
+    environment: &std::collections::BTreeMap<String, String>,
+    scratch: &Path,
+    resources: Option<tinybox_bus::NativeJailResourceRequest>,
+    backend: Arc<dyn tinybox_jail::JailBackend>,
+) -> Result<(ShellHost, Option<tinybox_core::ExecRequest>)> {
+    if let Some(resources) = resources {
+        let config = request.jail.as_ref().ok_or_else(invalid)?;
+        let mut jail = tinybox_bus::NativeJailRequest {
+            jail: config.clone(),
+            resources: Some(resources),
+        };
+        jail.jail
+            .read_write
+            .push(scratch.to_string_lossy().into_owned());
+        let selection = tinybox_host::select_shell(&request.shell);
+        let mut argv = vec![selection.program];
+        argv.extend(selection.arguments);
+        let mut native_request = tinybox_core::ExecRequest::new(argv)
+            .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
+        native_request.env.clone_from(environment);
+        native_request.stdin.clone_from(&request.stdin);
+        let host = super::native_jail::collector_with_resources(root, &jail, &mut native_request)?;
+        Ok((ShellHost::Jailed(host), Some(native_request)))
+    } else if let Some(config) = &request.jail {
+        let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
+        jail.read_write.push(scratch.to_path_buf());
+        if config.enforcement == tinybox_bus::JailEnforcement::Enforced {
+            backend.require(&jail).map_err(|_| invalid())?;
+        } else if backend
+            .plan_check(&jail)
+            .constraints
+            .iter()
+            .any(|(_, support)| *support == tinybox_core::Enforcement::Unsupported)
+        {
+            return Err(invalid());
+        }
+        let host =
+            tinybox_host::JailLocalHost::with_backend(jail, backend, tinybox_bus::MAX_OUTPUT_BYTES)
+                .map_err(|_| invalid())?;
+        Ok((ShellHost::Jailed(Arc::new(host)), None))
+    } else {
+        Ok((
+            ShellHost::Local(tinybox_host::LimitedLocalHost::new(
+                tinybox_bus::MAX_OUTPUT_BYTES,
+            )),
+            None,
+        ))
+    }
+}
+
 /// Windows: `CREATE_NO_WINDOW`, so a GUI host's shell child flashes no console.
 /// Other platforms have no console window to hide.
 fn apply_window_flags(command: &mut std::process::Command, hide_window: bool) {
