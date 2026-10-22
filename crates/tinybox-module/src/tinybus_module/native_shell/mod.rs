@@ -156,11 +156,8 @@ impl ShellContext {
                 .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
             native_request.env = environment.clone();
             native_request.stdin = request.stdin.clone();
-            let host = super::native_jail::collector_with_resources(
-                root,
-                &jail,
-                &mut native_request,
-            )?;
+            let host =
+                super::native_jail::collector_with_resources(root, &jail, &mut native_request)?;
             native_launcher = Some(native_request);
             ShellHost::Jailed(host)
         } else if let Some(config) = &request.jail {
@@ -188,6 +185,7 @@ impl ShellContext {
             ShellHost::Local(tinybox_host::LimitedLocalHost::new(
                 tinybox_bus::MAX_OUTPUT_BYTES,
             ))
+        };
         Ok(Arc::new(Self {
             request,
             environment,
@@ -205,7 +203,7 @@ impl ShellContext {
         observer: Arc<super::output::OutputJournal>,
     ) -> tinybox_core::Result<tinybox_core::ExecOutput> {
         if let (ShellHost::Jailed(host), Some(launcher)) = (&self.host, &self.native_launcher) {
-            return host.run_observed(launcher, observer).await;
+            return tinybox_core::Host::run_observed(host.as_ref(), launcher, observer).await;
         }
         let mut command = tinybox_host::build_shell_command(&self.request.shell);
         apply_window_flags(&mut command, self.request.hide_window);
