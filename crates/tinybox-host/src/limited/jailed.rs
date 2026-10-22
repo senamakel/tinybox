@@ -733,12 +733,7 @@ impl Host for JailLocalHost {
         self.retry_retained_cleanup().await
     }
 }
-fn retain_cleanup(
-    state: &State,
-    child: OwnedChild,
-    group: i32,
-    outcome: Result<()>,
-) -> Result<()> {
+fn retain_cleanup(state: &State, child: OwnedChild, group: i32, outcome: Result<()>) -> Result<()> {
     if outcome.is_err() {
         state
             .failed
@@ -751,7 +746,10 @@ fn retain_cleanup(
 
 async fn wait_child(child: &mut OwnedChild) -> Result<tinybox_jail::ChildStatus> {
     loop {
-        if let Some(status) = child.try_wait().map_err(|error| Error::io("wait native jail", &error))? {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| Error::io("wait native jail", &error))?
+        {
             return Ok(status);
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

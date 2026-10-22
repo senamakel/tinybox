@@ -69,9 +69,7 @@ pub mod macos;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
-pub use jail::{
-    ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess, reject_symlinked_grants,
-};
+pub use jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess, reject_symlinked_grants};
 #[cfg(target_os = "linux")]
 pub use linux::LandlockBackend;
 pub use macos::SeatbeltBackend;

@@ -5,8 +5,8 @@
 //! top-level [`crate::spawn`] function — they
 //! never pick a backend by name.
 
-use std::path::{Path, PathBuf};
 use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 const RESOURCE_CONSTRAINTS: [tinybox_core::Constraint; 4] = [
@@ -546,9 +546,11 @@ impl OwnedProcess for StdOwnedProcess {
     }
 
     fn try_wait(&mut self) -> std::io::Result<Option<ChildStatus>> {
-        self.0
-            .try_wait()
-            .map(|status| status.map(|status| ChildStatus { code: status.code() }))
+        self.0.try_wait().map(|status| {
+            status.map(|status| ChildStatus {
+                code: status.code(),
+            })
+        })
     }
 
     fn terminate(&mut self) -> std::io::Result<()> {
