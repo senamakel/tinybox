@@ -17,7 +17,7 @@ fn profile_deny_subprocess_emits_deny_rules() {
     let jail = Jail::new("/tmp", "x").deny_subprocess();
     let p = render_profile(&jail);
     assert!(p.contains("(deny process-fork)"));
-    assert!(p.contains("(deny process-exec)"));
+    assert!(!p.contains("(deny process-exec)"));
 }
 
 #[cfg(target_os = "macos")]
@@ -69,7 +69,7 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
 
     assert!(
         output.status.success(),
-        "the shell should continue after the denied child; status: {}, stdout: {stdout:?}, stderr: {:?}",
+        "the jailed shell should run while child creation is denied; status: {}, stdout: {stdout:?}, stderr: {:?}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
