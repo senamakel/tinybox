@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 #[test]
 fn an_unrestricted_kernel_is_available() {
@@ -104,4 +105,63 @@ fn path_search_finds_only_executable_files() -> Result<(), Box<dyn std::error::E
 fn detect_runs_on_this_machine_without_panicking() {
     let probe = NamespaceProbe::detect();
     assert_eq!(probe.is_usable(), probe.problem().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_successful_bwrap_userns_probe_is_available() -> Result<(), Box<dyn std::error::Error>> {
+    let script = ProbeScript::new("exit 0\n")?;
+
+    assert_eq!(probe_bwrap_with_timeout(&script.path, Duration::from_secs(1)), Ok(()));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_bwrap_userns_probe_preserves_its_diagnostic(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let script = ProbeScript::new("echo 'user namespace denied' >&2\nexit 17\n")?;
+
+    let error = probe_bwrap_with_timeout(&script.path, Duration::from_secs(1))
+        .expect_err("a failing probe must not report readiness");
+    assert!(error.contains("user namespace denied"), "{error}");
+    assert!(error.contains("17"), "{error}");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_timed_out_bwrap_userns_probe_is_killed_and_reaped(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let script = ProbeScript::new("exec sleep 30\n")?;
+    let started = std::time::Instant::now();
+
+    let error = probe_bwrap_with_timeout(&script.path, Duration::from_millis(50))
+        .expect_err("a stuck probe must not report readiness");
+
+    assert!(error.contains("timed out"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    Ok(())
+}
+
+#[cfg(unix)]
+struct ProbeScript {
+    _directory: tempfile::TempDir,
+    path: PathBuf,
+}
+
+#[cfg(unix)]
+impl ProbeScript {
+    fn new(body: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("bwrap-probe");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}"))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+        Ok(Self {
+            _directory: directory,
+            path,
+        })
+    }
 }
