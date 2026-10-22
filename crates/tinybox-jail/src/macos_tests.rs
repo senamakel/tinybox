@@ -430,6 +430,156 @@ int main(int argc, char **argv) {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn live_seatbelt_denies_case_variant_paths_on_case_insensitive_volumes() -> std::io::Result<()> {
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().canonicalize()?;
+    let allowed_file = root.join("allowed.txt");
+    let protected_file = root.join("APFSCaseProbe-7f3c9d.txt");
+    let case_variant = root.join("apfscaseprobe-7F3C9D.TXT");
+    fs::write(&allowed_file, b"allowed")?;
+    fs::write(&protected_file, b"protected")?;
+    if !case_variant.exists() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "required macOS Seatbelt test needs a case-insensitive temporary volume",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: temporary volume is case-sensitive");
+        return Ok(());
+    }
+
+    const READ_PROBE: &str = r#"
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    char byte;
+    int file = open(argv[1], O_RDONLY);
+    if (file < 0 || read(file, &byte, 1) != 1) return 3;
+    (void)close(file);
+    emit("allowed-readable\n", 17);
+
+    file = open(argv[2], O_RDONLY);
+    if (file < 0 && (errno == EACCES || errno == EPERM)) {
+        emit("case-variant-denied\n", 20);
+    } else if (file >= 0) {
+        emit("case-variant-readable\n", 22);
+        (void)close(file);
+    } else {
+        return 4;
+    }
+    emit("continued\n", 10);
+    return 0;
+}
+"#;
+    let source = root.join("case_probe.c");
+    fs::write(&source, READ_PROBE)?;
+    let helper = root.join("case_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile case-variant probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let run_probe = |jail: &Jail| -> std::io::Result<std::process::Output> {
+        let mut command = Command::new(&helper);
+        command.arg(&allowed_file).arg(&protected_file);
+        SeatbeltBackend::new()
+            .spawn_captured(jail, command)?
+            .wait_with_output()
+    };
+
+    let control = run_probe(&Jail::new(&root, "case-insensitive-control"))?;
+    let control_stdout = String::from_utf8_lossy(&control.stdout);
+    assert!(
+        control.status.success(),
+        "unrestricted file-read control failed: status {}, stdout: {control_stdout:?}, stderr: {:?}",
+        control.status,
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("allowed-readable"),
+        "stdout: {control_stdout:?}"
+    );
+    assert!(
+        control_stdout.contains("case-variant-readable"),
+        "stdout: {control_stdout:?}"
+    );
+    assert!(
+        control_stdout.contains("continued"),
+        "stdout: {control_stdout:?}"
+    );
+
+    let mut jail = Jail::new(&root, "case-insensitive-denial");
+    jail.deny_read.push(case_variant);
+    jail.canonicalize()?;
+    let denied = run_probe(&jail)?;
+    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    assert!(
+        denied.status.success(),
+        "case-variant denial did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
+        denied.status,
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("allowed-readable"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        denied_stdout.contains("case-variant-denied"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        !denied_stdout.contains("case-variant-readable"),
+        "Seatbelt allowed the case-variant protected read: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("continued"),
+        "stdout: {denied_stdout:?}"
+    );
+    eprintln!("[seatbelt-live] case-insensitive path denial behavior passed");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn live_seatbelt_denies_configured_file_writes_without_stopping_the_process() -> std::io::Result<()>
 {
     use std::process::Command;
