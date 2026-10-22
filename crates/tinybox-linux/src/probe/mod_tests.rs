@@ -140,7 +140,7 @@ fn detect_runs_on_this_machine_without_panicking() {
 #[test]
 fn a_successful_bwrap_userns_probe_is_available() {
     assert_eq!(
-        probe_program_with_timeout(Path::new("/bin/true"), &[], Duration::from_secs(1)),
+        probe_program_with_timeout(Path::new("/usr/bin/true"), &[], Duration::from_secs(1)),
         Ok(())
     );
 }
