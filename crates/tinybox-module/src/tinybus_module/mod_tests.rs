@@ -1080,6 +1080,12 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
     };
     assert_eq!(
         proxy
+            .call::<ProcessRef>("StartNativeShellExec", (request.clone(),))
+            .await?,
+        process
+    );
+    assert_eq!(
+        proxy
             .call::<ProcessRef>("StartNativeShellExec", (request,))
             .await?,
         process

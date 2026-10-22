@@ -76,10 +76,13 @@ how to act on `BestEffort` or `Unsupported` results.
 
 Contract 2.4 adds the `ProcessEvent` signal. The module emits a correlated
 `ProcessEvent { process: ProcessRef, event: SandboxEvent }` with `Started`
-after the first successful `StartExec` for a process reservation and `Exited`
-after the supervisor observes its terminal exit status. Replayed `StartExec`
-calls do not duplicate lifecycle events. Signal delivery is best-effort, and
-this initial path does not claim denial or resource-limit observations.
+after the first successful `StartExec`, `StartNativeShellExec`, or
+`StartNativeShellExecWithResources` for a process reservation. It emits
+`Exited { status: Some(code) }` after an observed exit status. When native
+shell supervision reaches its configured timeout, it emits `LimitHit::Timeout`
+followed by `Exited { status: None }`. Replayed starts do not duplicate
+process events. Signal delivery is best-effort; the module does not claim
+denial or CPU, memory, process-count, or disk-limit observations.
 
 Contract 1.22 was the one-release deprecation window for `AnalyzeCommand`,
 `CommandClass`, command classification fields, executor/environment-guard
