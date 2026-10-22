@@ -188,7 +188,9 @@ impl PidsEventReport {
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
                 && arg.starts_with("--unit=tinybox-native-")
         });
-        let has_pids_limit = args.iter().any(|arg| arg.starts_with("--property=TasksMax="));
+        let has_pids_limit = args
+            .iter()
+            .any(|arg| arg.starts_with("--property=TasksMax="));
         let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
         let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
         let clears_target_environment = args.contains(&"--clearenv");

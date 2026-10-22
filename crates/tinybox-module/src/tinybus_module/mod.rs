@@ -575,16 +575,16 @@ async fn publish_process_events(
                 )
                 .await;
             } else if let Some(status) = status {
-            emit_process_event(
-                &connection,
-                ProcessEvent {
-                    process: event_process,
-                    event: SandboxEvent::Exited {
-                        status: Some(status),
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited {
+                            status: Some(status),
+                        },
                     },
-                },
-            )
-            .await;
+                )
+                .await;
             }
         }
     });

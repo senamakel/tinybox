@@ -854,16 +854,18 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
 #[tokio::test]
 async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
-    use tinybus::Connection;
-    use tinybus::broker::Broker;
-    use tinybus::transport::memory::MemoryBus;
     use tinybox_bus::{
         CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
         ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
     };
+    use tinybus::Connection;
+    use tinybus::broker::Broker;
+    use tinybus::transport::memory::MemoryBus;
 
     if !native_resource_runtime_available() {
-        eprintln!("skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable");
+        eprintln!(
+            "skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable"
+        );
         return Ok(());
     }
     if !std::process::Command::new("python3")
