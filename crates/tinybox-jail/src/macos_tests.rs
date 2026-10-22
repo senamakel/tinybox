@@ -22,7 +22,7 @@ fn profile_deny_subprocess_emits_deny_rules() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()> {
+fn live_seatbelt_deny_subprocess_blocks_child_creation() -> std::io::Result<()> {
     use std::process::Command;
 
     const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
@@ -104,9 +104,23 @@ int main(void) {
         .wait_with_output()?;
     let allowed_stdout = String::from_utf8_lossy(&allowed.stdout);
     assert!(
+        allowed.status.success(),
+        "unrestricted control failed: status {}, stdout: {allowed_stdout:?}, stderr: {:?}",
+        allowed.status,
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(
+        allowed_stdout.contains("before"),
+        "unexpected stdout: {allowed_stdout:?}"
+    );
+    assert!(
         allowed_stdout.contains("child-executed"),
         "unrestricted control did not run the child; stdout: {allowed_stdout:?}, stderr: {:?}",
         String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(
+        allowed_stdout.contains("after"),
+        "unexpected stdout: {allowed_stdout:?}"
     );
 
     let jail = Jail::new(root.path(), "seatbelt-no-subprocess").deny_subprocess();

@@ -8,7 +8,7 @@ case "${RUNNER_OS:-$(uname -s)}" in
     brew install util-linux
     export PATH="$(brew --prefix util-linux)/bin:$PATH"
     if [ -x /usr/bin/sandbox-exec ]; then
-      TINYBOX_REQUIRE_SEATBELT_TESTS=1 cargo test --locked -p tinybox-jail live_seatbelt_deny_subprocess_blocks_child_execution -- --nocapture
+      TINYBOX_REQUIRE_SEATBELT_TESTS=1 cargo test --locked -p tinybox-jail live_seatbelt_deny_subprocess_blocks_child_creation -- --nocapture
     else
       echo "[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent on this macOS runner"
     fi
