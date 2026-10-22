@@ -159,8 +159,10 @@ fn a_failed_bwrap_userns_probe_preserves_its_diagnostic() -> Result<(), Box<dyn 
 {
     let script = ProbeScript::new("echo 'user namespace denied' >&2\nexit 17\n")?;
 
-    let error = probe_bwrap_with_timeout(&script.path, Duration::from_secs(1))
-        .expect_err("a failing probe must not report readiness");
+    let error = match probe_bwrap_with_timeout(&script.path, Duration::from_secs(1)) {
+        Ok(()) => return Err("a failing probe must not report readiness".into()),
+        Err(error) => error,
+    };
     assert!(error.contains("user namespace denied"), "{error}");
     assert!(error.contains("17"), "{error}");
     Ok(())
@@ -172,8 +174,10 @@ fn a_timed_out_bwrap_userns_probe_is_killed_and_reaped() -> Result<(), Box<dyn s
     let script = ProbeScript::new("exec sleep 30\n")?;
     let started = std::time::Instant::now();
 
-    let error = probe_bwrap_with_timeout(&script.path, Duration::from_millis(50))
-        .expect_err("a stuck probe must not report readiness");
+    let error = match probe_bwrap_with_timeout(&script.path, Duration::from_millis(50)) {
+        Ok(()) => return Err("a stuck probe must not report readiness".into()),
+        Err(error) => error,
+    };
 
     assert!(error.contains("timed out"), "{error}");
     assert!(started.elapsed() < Duration::from_secs(2));
