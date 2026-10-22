@@ -31,7 +31,11 @@ impl Drop for Active {
 #[cfg(target_os = "linux")]
 const MEMORY_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_MEMORY_EVENT_FILE";
 #[cfg(target_os = "linux")]
+const PIDS_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_PIDS_EVENT_FILE";
+#[cfg(target_os = "linux")]
 static MEMORY_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
+#[cfg(target_os = "linux")]
+static PIDS_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
 
 /// Private handoff written by the trusted launcher before it stops the scope.
 #[cfg(target_os = "linux")]
@@ -155,6 +159,116 @@ fn prepare_memory_event_report(
 ) -> Option<MemoryEventReport> {
     observer_attached
         .then(|| MemoryEventReport::prepare(command, jail))
+        .flatten()
+}
+
+/// Private handoff for a proven cgroup-v2 pids limit event.
+#[cfg(target_os = "linux")]
+struct PidsEventReport(std::path::PathBuf);
+
+#[cfg(target_os = "linux")]
+impl PidsEventReport {
+    fn prepare(command: &mut std::process::Command, jail: &Jail) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, jail, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &mut std::process::Command,
+        jail: &Jail,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
+        use std::io::Write;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        let has_scope = args.iter().any(|arg| {
+            arg.strip_prefix("--unit=")
+                .and_then(|unit| std::path::Path::new(unit).extension())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
+                && arg.starts_with("--unit=tinybox-native-")
+        });
+        let has_pids_limit = args.iter().any(|arg| arg.starts_with("--property=TasksMax="));
+        let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
+        let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
+        let clears_target_environment = args.contains(&"--clearenv");
+        if !has_scope
+            || !has_pids_limit
+            || !masks_runtime
+            || !masks_cgroup
+            || !clears_target_environment
+        {
+            return None;
+        }
+        let metadata = std::fs::metadata(runtime_dir).ok()?;
+        let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
+        if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
+            return None;
+        }
+        let sequence = PIDS_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = runtime_dir.join(format!(
+            "tinybox-pids-event-{}-{sequence}",
+            std::process::id()
+        ));
+        if jail_exposes_path(jail, &path) {
+            return None;
+        }
+        let mut report = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        if report.write_all(b"0\n").is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        command.env(PIDS_EVENT_FILE_ENV, &path);
+        Some(Self(path))
+    }
+
+    fn max_event_observed(&self) -> bool {
+        // Each invocation receives a fresh systemd scope. A positive `max`
+        // counter therefore proves this scope hit its own pids limit.
+        std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|contents| parse_pids_max_counter(&contents))
+            .is_some_and(|count| count > 0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for PidsEventReport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_pids_max_counter(events: &str) -> Option<u64> {
+    events.trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn report_pids_termination(
+    report: Option<&PidsEventReport>,
+    target: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report.is_some_and(PidsEventReport::max_event_observed)
+        && let Some(observer) = target
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::PidsLimit);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_pids_event_report(
+    command: &mut std::process::Command,
+    jail: &Jail,
+    observer_attached: bool,
+) -> Option<PidsEventReport> {
+    observer_attached
+        .then(|| PidsEventReport::prepare(command, jail))
         .flatten()
 }
 
