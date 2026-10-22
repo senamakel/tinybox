@@ -85,14 +85,18 @@ pub use files::{
 /// 2.1 adds separate resource-aware native jail request members without
 /// changing the 2.0 Rust request shapes. 2.2 adds a resource-aware native
 /// shell member that retains module-owned shell selection, environment and
-/// scratch setup.
-pub const CONTRACT_VERSION: (u32, u32) = (2, 2);
+/// scratch setup. 2.3 adds `PlanCheck`, a typed per-backend constraint
+/// enforcement preflight.
+pub const CONTRACT_VERSION: (u32, u32) = (2, 3);
 
 /// Minimum contract version required for resource-aware native jail members.
 pub const NATIVE_JAIL_RESOURCES_VERSION: (u32, u32) = (2, 1);
 
 /// Minimum contract version required for resource-aware native shell execution.
 pub const NATIVE_SHELL_RESOURCES_VERSION: (u32, u32) = (2, 2);
+
+/// Minimum contract version required for `PlanCheck`.
+pub const PLAN_CHECK_VERSION: (u32, u32) = (2, 3);
 
 /// Whether a module explicitly advertises support for the resource-aware
 /// native jail members. Hosts must check this before sending a 2.1 request.
@@ -105,6 +109,12 @@ pub fn supports_native_jail_resources(module: (u32, u32)) -> bool {
 #[must_use]
 pub fn supports_native_shell_resources(module: (u32, u32)) -> bool {
     module.0 == NATIVE_SHELL_RESOURCES_VERSION.0 && module.1 >= NATIVE_SHELL_RESOURCES_VERSION.1
+}
+
+/// Whether a module advertises the typed constraint preflight member.
+#[must_use]
+pub fn supports_plan_check(module: (u32, u32)) -> bool {
+    module.0 == PLAN_CHECK_VERSION.0 && module.1 >= PLAN_CHECK_VERSION.1
 }
 
 /// Whether this host vocabulary can bind to a module's advertised version.
