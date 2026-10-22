@@ -1025,8 +1025,8 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
 async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tinybus::Result<()> {
     use serde_json::Value;
     use tinybox_bus::{
-        CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest,
-        Workspace,
+        CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest,
+        ShellExecRequest, Workspace,
     };
 
     let state = tempfile::tempdir().map_err(tinybus::Error::failed)?;
@@ -1057,7 +1057,8 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
         process: process_id.clone(),
     };
     #[cfg(windows)]
-    let command = "echo partial & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"";
+    let command =
+        "echo partial & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"";
     #[cfg(not(windows))]
     let command = "echo partial; sleep 60";
     let request = ShellExecRequest {
@@ -1086,9 +1087,8 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
 
     let output = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let output: tinybox_bus::OutputBatch = proxy
-                .call("ReadOutput", (process.clone(), 0_u64))
-                .await?;
+            let output: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
             if !matches!(output.state, tinybox_bus::ExecutionState::Running) {
                 return Ok::<_, tinybus::Error>(output);
             }
@@ -1103,7 +1103,12 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
             code: tinybox_bus::ExecutionFailure::TimedOut
         }
     );
-    assert!(output.chunks.iter().any(|chunk| chunk.bytes == b"partial\n"));
+    assert!(
+        output
+            .chunks
+            .iter()
+            .any(|chunk| chunk.bytes == b"partial\n")
+    );
 
     let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
         tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
