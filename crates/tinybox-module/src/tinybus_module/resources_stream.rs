@@ -387,6 +387,10 @@ impl StreamExecution {
             | tinybox_bus::ExecutionState::Failed { .. } => None,
         }
     }
+    pub(in crate::tinybus_module) fn timed_out(&self) -> bool {
+        self.timed_out
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
     pub(super) fn running(&self) -> bool {
         !self.journal.cleanup_acknowledged()
     }

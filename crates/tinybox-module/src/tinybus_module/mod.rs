@@ -276,34 +276,7 @@ impl BoxService {
             async move { resources.start_exec(request).await },
         ))
         .await?;
-        if let Some(connection) = self.connection.clone()
-            && let Ok(Some(stream)) = self.resources.stream(&process)
-            && stream.claim_event_publisher()
-        {
-            emit_process_event(
-                &connection,
-                ProcessEvent {
-                    process: process.clone(),
-                    event: SandboxEvent::Started,
-                },
-            )
-            .await;
-            let event_process = process.clone();
-            tokio::spawn(async move {
-                if let Some(status) = stream.wait_for_terminal_exit().await {
-                    emit_process_event(
-                        &connection,
-                        ProcessEvent {
-                            process: event_process,
-                            event: SandboxEvent::Exited {
-                                status: Some(status),
-                            },
-                        },
-                    )
-                    .await;
-                }
-            });
-        }
+        self.publish_process_events(&process).await;
         Ok(process)
     }
     /// Start an execution in the resource's native directory jail.
@@ -355,10 +328,12 @@ impl BoxService {
         request: tinybox_bus::ShellExecRequest,
     ) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             resources.start_shell_exec(request).await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Start a module-owned shell in a native jail with explicit contract 2.2 limits.
@@ -368,12 +343,14 @@ impl BoxService {
         limits: tinybox_bus::NativeJailResourceRequest,
     ) -> TinyBusResult<ProcessRef> {
         let manager = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             manager
                 .start_native_shell_exec_with_resources(request, limits)
                 .await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Start one program with piped stdio inside the resource's native jail.
@@ -514,6 +491,58 @@ impl BoxService {
     /// before it tries to create a box.
     async fn describe(&self) -> TinyBusResult<String> {
         std::future::ready(Ok(describe(&registered_sandboxes()))).await
+    }
+
+    async fn publish_process_events(&self, process: &ProcessRef) {
+        let Some(connection) = self.connection.clone()
+            && let Ok(Some(stream)) = self.resources.stream(process)
+            && stream.claim_event_publisher()
+        else {
+            return;
+        };
+        emit_process_event(
+            &connection,
+            ProcessEvent {
+                process: process.clone(),
+                event: SandboxEvent::Started,
+            },
+        )
+        .await;
+        let event_process = process.clone();
+        tokio::spawn(async move {
+            let status = stream.wait_for_terminal_exit().await;
+            if stream.timed_out() {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process.clone(),
+                        event: SandboxEvent::LimitHit {
+                            limit: tinybox_bus::LimitKind::Timeout,
+                        },
+                    },
+                )
+                .await;
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited { status: None },
+                    },
+                )
+                .await;
+            } else if let Some(status) = status {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited {
+                            status: Some(status),
+                        },
+                    },
+                )
+                .await;
+            }
+        });
     }
 }
 
