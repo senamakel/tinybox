@@ -759,7 +759,7 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
             if output.state != tinybox_bus::ExecutionState::Running {
                 return Ok::<_, tinybus::Error>(output);
             }
-            tokio::task::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await??;
@@ -768,8 +768,13 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         tinybox_bus::ExecutionState::Exited { exit_code: 137 },
         "memory-pressure child did not terminate from the limit: {output:?}"
     );
+    let output_bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
     assert!(
-        !output_contains_marker(&output, "allocation survived"),
+        !String::from_utf8_lossy(&output_bytes).contains("allocation survived"),
         "the memory-pressure child completed normally"
     );
 
