@@ -980,7 +980,16 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
             stdin: None,
         },
     };
-    assert_eq!(proxy.call::<ProcessRef>("StartExec", (request,)).await?, process);
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>("StartExec", (request.clone(),))
+            .await?,
+        process
+    );
+    assert_eq!(
+        proxy.call::<ProcessRef>("StartExec", (request,)).await?,
+        process
+    );
 
     let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
         tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
