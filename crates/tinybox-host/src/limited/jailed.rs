@@ -39,7 +39,7 @@ struct MemoryEventReport(std::path::PathBuf);
 
 #[cfg(target_os = "linux")]
 impl MemoryEventReport {
-    fn prepare(command: &mut std::process::Command) -> Option<Self> {
+    fn prepare(command: &mut std::process::Command, jail: &Jail) -> Option<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
         let has_scope = command.get_args().filter_map(|arg| arg.to_str()).any(|arg| {
@@ -67,6 +67,9 @@ impl MemoryEventReport {
             "tinybox-memory-event-{}-{sequence}",
             std::process::id()
         ));
+        if jail_exposes_path(jail, &path) {
+            return None;
+        }
         let mut report = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -74,7 +77,10 @@ impl MemoryEventReport {
             .open(&path)
             .ok()?;
         use std::io::Write;
-        report.write_all(b"0\n").ok()?;
+        if report.write_all(b"0\n").is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
         command.env(MEMORY_EVENT_FILE_ENV, &path);
         Some(Self(path))
     }
@@ -97,6 +103,14 @@ impl Drop for MemoryEventReport {
 #[cfg(target_os = "linux")]
 fn parse_oom_kill_counter(events: &str) -> Option<u64> {
     events.trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn jail_exposes_path(jail: &Jail, path: &std::path::Path) -> bool {
+    std::iter::once(&jail.root)
+        .chain(&jail.read_only)
+        .chain(&jail.read_write)
+        .any(|mount| path.starts_with(mount))
 }
 
 // Standard children do not kill on drop. Keep ownership across supervisor panics
@@ -271,7 +285,7 @@ impl JailLocalHost {
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let memory_event_report = MemoryEventReport::prepare(&mut command);
+        let memory_event_report = MemoryEventReport::prepare(&mut command, &self.jail);
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

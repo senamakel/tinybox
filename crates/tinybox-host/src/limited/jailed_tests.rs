@@ -14,6 +14,21 @@ fn memory_event_report_accepts_only_a_valid_oom_kill_counter() {
     assert_eq!(super::parse_oom_kill_counter("1\n2\n"), None);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_event_report_is_disabled_when_a_jail_mount_can_expose_it() {
+    let jail = tinybox_jail::Jail::new("/workspace", "memory-report-test");
+    assert!(!super::jail_exposes_path(
+        &jail,
+        std::path::Path::new("/run/user/1000/tinybox-memory-event")
+    ));
+    let jail = jail.add_read_write("/run/user/1000");
+    assert!(super::jail_exposes_path(
+        &jail,
+        std::path::Path::new("/run/user/1000/tinybox-memory-event")
+    ));
+}
+
 struct FixtureBackend;
 impl tinybox_jail::JailBackend for FixtureBackend {
     fn name(&self) -> &'static str {
