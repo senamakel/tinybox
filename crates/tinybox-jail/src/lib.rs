@@ -51,6 +51,7 @@
 
 pub mod detect;
 pub mod grants;
+pub mod invocation;
 pub mod jail;
 pub mod noop;
 pub mod registry;
@@ -69,6 +70,7 @@ pub mod macos;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
+pub use invocation::{JailInvocation, ResourceLimitPlan};
 pub use jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess, reject_symlinked_grants};
 #[cfg(target_os = "linux")]
 pub use linux::LandlockBackend;
@@ -162,6 +164,77 @@ pub fn spawn_owned_captured_with(
     require_resources(backend, &jail)?;
     jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
     backend.spawn_owned_captured(&jail, cmd)
+}
+
+/// Spawn a typed invocation through the selected jail backend.
+///
+/// The backend receives the original argv, cwd, approved environment, stdio,
+/// and optional per-dimension resource plan alongside the flattened command.
+/// This lets a platform owner configure a suspended child before it resumes;
+/// the default adapter preserves existing backend behavior.
+/// # Errors
+/// Returns validation, capability, confinement, or native startup errors.
+pub fn spawn_owned_invocation_captured_with(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    invocation: &JailInvocation,
+) -> std::io::Result<OwnedChild> {
+    let command = invocation.command()?;
+    spawn_owned_invocation_with_command(backend, jail, invocation, command)
+}
+
+/// Spawn a typed invocation with a command that has trusted host-side
+/// adjustments applied after flattening.
+///
+/// The command must preserve the invocation's program, argv, cwd, environment,
+/// and stdio. This entry point exists for supervisors that add private
+/// telemetry or wrapper arguments after the typed request is captured.
+/// # Errors
+/// Returns validation, capability, confinement, or native startup errors.
+pub fn spawn_owned_invocation_with_command(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    invocation: &JailInvocation,
+    command: Command,
+) -> std::io::Result<OwnedChild> {
+    let mut jail = jail.clone();
+    jail.canonicalize()?;
+    require_resources(backend, &jail)?;
+    require_resource_plan(backend, invocation.resources)?;
+    jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
+    backend.spawn_owned_invocation_captured(&jail, invocation, command)
+}
+
+fn require_resource_plan(
+    backend: &dyn JailBackend,
+    plan: Option<ResourceLimitPlan>,
+) -> std::io::Result<()> {
+    let Some(plan) = plan else {
+        return Ok(());
+    };
+    if plan.is_empty() || plan.has_zero() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid resource limit plan",
+        ));
+    }
+    let mut requested = Vec::new();
+    if plan.cpu_millis.is_some() {
+        requested.push(tinybox_core::Constraint::Cpu);
+    }
+    if plan.memory_bytes.is_some() {
+        requested.push(tinybox_core::Constraint::Memory);
+    }
+    if plan.pids_max.is_some() {
+        requested.push(tinybox_core::Constraint::Pids);
+    }
+    if plan.disk_bytes.is_some() {
+        requested.push(tinybox_core::Constraint::Disk);
+    }
+    backend
+        .constraint_support()
+        .require(backend.name(), &requested)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Unsupported, error))
 }
 
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {
