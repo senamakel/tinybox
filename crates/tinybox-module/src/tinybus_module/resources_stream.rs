@@ -396,6 +396,46 @@ impl StreamExecution {
     pub(in crate::tinybus_module) fn pids_limit_hit(&self) -> bool {
         self.journal.pids_limit_hit()
     }
+    pub(in crate::tinybus_module) fn pids_subprocess_denied(&self) -> bool {
+        self.journal.pids_subprocess_denied()
+    }
+    pub(in crate::tinybus_module) fn terminal_events(
+        &self,
+        status: Option<i32>,
+    ) -> Vec<tinybox_bus::SandboxEvent> {
+        use tinybox_bus::{DenialKind, LimitKind, SandboxEvent};
+
+        if self.timed_out() {
+            return vec![
+                SandboxEvent::LimitHit {
+                    limit: LimitKind::Timeout,
+                },
+                SandboxEvent::Exited { status: None },
+            ];
+        }
+
+        let mut events = Vec::new();
+        if self.pids_subprocess_denied() {
+            events.push(SandboxEvent::Denied {
+                kind: DenialKind::Subprocess,
+                target: None,
+            });
+        }
+        if self.memory_limit_hit() {
+            events.push(SandboxEvent::LimitHit {
+                limit: LimitKind::Memory,
+            });
+        }
+        if self.pids_limit_hit() {
+            events.push(SandboxEvent::LimitHit {
+                limit: LimitKind::Pids,
+            });
+        }
+        if self.memory_limit_hit() || self.pids_limit_hit() || status.is_some() {
+            events.push(SandboxEvent::Exited { status });
+        }
+        events
+    }
     pub(super) fn running(&self) -> bool {
         !self.journal.cleanup_acknowledged()
     }

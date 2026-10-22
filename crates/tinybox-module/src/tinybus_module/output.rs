@@ -35,6 +35,7 @@ pub(super) struct OutputJournal {
     cancelled: tokio::sync::Notify,
     memory_limit_hit: AtomicBool,
     pids_limit_hit: AtomicBool,
+    pids_subprocess_denied: AtomicBool,
 }
 impl OutputJournal {
     pub(super) fn memory_limit_hit(&self) -> bool {
@@ -42,6 +43,9 @@ impl OutputJournal {
     }
     pub(super) fn pids_limit_hit(&self) -> bool {
         self.pids_limit_hit.load(Ordering::SeqCst)
+    }
+    pub(super) fn pids_subprocess_denied(&self) -> bool {
+        self.pids_subprocess_denied.load(Ordering::SeqCst)
     }
     pub(super) fn read(&self, cursor: u64) -> Result<OutputBatch> {
         let state = self
@@ -161,6 +165,7 @@ impl ExecutionObserver for OutputJournal {
             self.memory_limit_hit.store(true, Ordering::SeqCst);
         } else if cause == TerminationCause::PidsLimit {
             self.pids_limit_hit.store(true, Ordering::SeqCst);
+            self.pids_subprocess_denied.store(true, Ordering::SeqCst);
         }
     }
     async fn cancelled(&self) {
