@@ -5,8 +5,8 @@
 
 use tinybox_core::{
     BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, HostRef, IsolationLevel,
-    Lifecycle, NetworkPolicy, Placement, Resources, Result, SandboxCapabilities, SandboxRef,
-    SnapshotId, SnapshotSupport, WorkspaceSource,
+    Lifecycle, NetworkPolicy, Placement, Resources, Result, SandboxAvailability,
+    SandboxCapabilities, SandboxRef, SnapshotId, SnapshotSupport, WorkspaceSource,
 };
 
 /// Build a placement, propagating identifier validation failures to the test.
@@ -71,6 +71,18 @@ fn a_container_backend_snapshots_disk_but_not_memory() {
     assert!(docker.is_suitable_for_untrusted_code());
     assert!(docker.supports(Capability::FilesystemSnapshot));
     assert!(!docker.supports(Capability::MemorySnapshot));
+}
+
+#[test]
+fn runtime_availability_is_consumer_visible() {
+    let availability = SandboxAvailability::Unavailable {
+        reason: "KVM device is not accessible".to_owned(),
+    };
+
+    assert!(matches!(
+        availability,
+        SandboxAvailability::Unavailable { reason } if reason.contains("KVM")
+    ));
 }
 
 #[test]

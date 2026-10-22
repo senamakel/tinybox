@@ -17,7 +17,8 @@
 //! checks the declaration before dispatching and surfaces
 //! [`Error::Unsupported`], so a backend should
 //! return an accurate [`SandboxCapabilities`] and let the check fail rather
-//! than emulate something it cannot deliver.
+//! than emulate something it cannot deliver. Host-specific prerequisites that
+//! can change at runtime are reported separately by [`Sandbox::availability`].
 
 use async_trait::async_trait;
 
