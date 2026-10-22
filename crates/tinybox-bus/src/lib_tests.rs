@@ -196,6 +196,61 @@ fn contract_two_drops_command_classification_but_keeps_structural_shell_analysis
 }
 
 #[test]
+fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_json::Error> {
+    assert_eq!(CONTRACT_VERSION, (2, 3));
+    assert_eq!(names::PLAN_CHECK, "PlanCheck");
+    assert!(METHODS.contains(&names::PLAN_CHECK));
+    let request = PlanCheckRequest {
+        backend: "namespace".into(),
+        constraints: vec![
+            ConstraintRequest {
+                constraint: ResourceConstraint::Memory,
+                hard: true,
+            },
+            ConstraintRequest {
+                constraint: ResourceConstraint::Cpu,
+                hard: false,
+            },
+        ],
+    };
+    let request_json = serde_json::json!({
+        "backend": "namespace",
+        "constraints": [
+            {"constraint": "Memory", "hard": true},
+            {"constraint": "Cpu", "hard": false}
+        ]
+    });
+    assert_eq!(serde_json::to_value(&request)?, request_json);
+    assert_eq!(serde_json::from_value::<PlanCheckRequest>(request_json)?, request);
+
+    let response = PlanCheckResponse {
+        backend: "namespace".into(),
+        results: vec![
+            ConstraintResult {
+                constraint: ResourceConstraint::Memory,
+                hard: true,
+                enforcement: ConstraintEnforcement::Unsupported,
+            },
+            ConstraintResult {
+                constraint: ResourceConstraint::Cpu,
+                hard: false,
+                enforcement: ConstraintEnforcement::Unsupported,
+            },
+        ],
+    };
+    let response_json = serde_json::json!({
+        "backend": "namespace",
+        "results": [
+            {"constraint": "Memory", "hard": true, "enforcement": "Unsupported"},
+            {"constraint": "Cpu", "hard": false, "enforcement": "Unsupported"}
+        ]
+    });
+    assert_eq!(serde_json::to_value(&response)?, response_json);
+    assert_eq!(serde_json::from_value::<PlanCheckResponse>(response_json)?, response);
+    Ok(())
+}
+
+#[test]
 fn workspace_file_transfers_are_chunked_typed_and_bounded() -> Result<(), serde_json::Error> {
     assert_eq!(MAX_FILE_CHUNK_BYTES, 64 * 1024);
     assert_eq!(MAX_FILE_TRANSFERS_PER_RESOURCE, 8);

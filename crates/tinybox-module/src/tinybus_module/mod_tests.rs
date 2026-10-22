@@ -263,6 +263,17 @@ fn declared_methods_match_the_dispatch_table() {
 }
 
 #[test]
+fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
+    assert!(BoxService::default()
+        .members()
+        .contains(&tinybox_bus::names::PLAN_CHECK));
+    assert!(tinybox_bus::METHODS.contains(&tinybox_bus::names::PLAN_CHECK));
+    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 3));
+    let capabilities = capabilities_for(Platform::Linux);
+    assert_eq!(capabilities.contract_version, (2, 3));
+}
+
+#[test]
 fn an_empty_registry_is_reported_as_none_rather_than_omitted() {
     // A build with no backends must say so plainly rather than leaving the
     // reader to infer it from an absent list.
