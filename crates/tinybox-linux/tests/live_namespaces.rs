@@ -274,10 +274,13 @@ async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Resul
         .await?;
     sandbox.destroy(&info.id).await?;
 
-    assert_eq!(
+    // `tinybox_host::LimitedLocalHost::collect` maps an absent
+    // `ExitStatus::code()` to 128; shell-style wrappers report SIGKILL as 137.
+    assert!(
+        matches!(output.exit_code, 128 | 137)
+            && !output.stdout_lossy().contains("allocation survived"),
+        "memory-capped child should be killed by the cgroup OOM limit; exit: {}, stdout: {}, stderr: {}",
         output.exit_code,
-        137,
-        "memory-capped child should be killed by the cgroup OOM limit; stdout: {}, stderr: {}",
         output.stdout_lossy(),
         output.stderr_lossy()
     );
