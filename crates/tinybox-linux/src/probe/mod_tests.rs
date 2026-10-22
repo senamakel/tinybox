@@ -139,10 +139,8 @@ fn detect_runs_on_this_machine_without_panicking() {
 #[cfg(unix)]
 #[test]
 fn a_successful_bwrap_userns_probe_is_available() -> Result<(), Box<dyn std::error::Error>> {
-    let script = ProbeScript::new("exit 0\n")?;
-
     assert_eq!(
-        probe_bwrap_with_timeout(&script.path, Duration::from_secs(1)),
+        probe_program_with_timeout(Path::new("/bin/true"), &[], Duration::from_secs(1)),
         Ok(())
     );
     Ok(())
@@ -152,9 +150,11 @@ fn a_successful_bwrap_userns_probe_is_available() -> Result<(), Box<dyn std::err
 #[test]
 fn a_failed_bwrap_userns_probe_preserves_its_diagnostic() -> Result<(), Box<dyn std::error::Error>>
 {
-    let script = ProbeScript::new("echo 'user namespace denied' >&2\nexit 17\n")?;
-
-    let error = match probe_bwrap_with_timeout(&script.path, Duration::from_secs(1)) {
+    let error = match probe_program_with_timeout(
+        Path::new("/bin/sh"),
+        &["-c", "echo 'user namespace denied' >&2; exit 17"],
+        Duration::from_secs(1),
+    ) {
         Ok(()) => return Err("a failing probe must not report readiness".into()),
         Err(error) => error,
     };
@@ -166,10 +166,13 @@ fn a_failed_bwrap_userns_probe_preserves_its_diagnostic() -> Result<(), Box<dyn 
 #[cfg(unix)]
 #[test]
 fn a_timed_out_bwrap_userns_probe_is_killed_and_reaped() -> Result<(), Box<dyn std::error::Error>> {
-    let script = ProbeScript::new("exec sleep 30\n")?;
     let started = std::time::Instant::now();
 
-    let error = match probe_bwrap_with_timeout(&script.path, Duration::from_millis(50)) {
+    let error = match probe_program_with_timeout(
+        Path::new("/bin/sh"),
+        &["-c", "exec sleep 30"],
+        Duration::from_millis(50),
+    ) {
         Ok(()) => return Err("a stuck probe must not report readiness".into()),
         Err(error) => error,
     };
@@ -179,41 +182,10 @@ fn a_timed_out_bwrap_userns_probe_is_killed_and_reaped() -> Result<(), Box<dyn s
     Ok(())
 }
 
-#[cfg(unix)]
-struct ProbeScript {
-    _directory: tempfile::TempDir,
-    path: PathBuf,
-}
-
-#[cfg(unix)]
-impl ProbeScript {
-    fn new(body: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("bwrap-probe");
-        let staged_path = directory.path().join("bwrap-probe.staged");
-        std::fs::write(&staged_path, format!("#!/bin/sh\n{body}"))?;
-        std::fs::set_permissions(&staged_path, std::fs::Permissions::from_mode(0o755))?;
-        std::fs::rename(staged_path, &path)?;
-        Ok(Self {
-            _directory: directory,
-            path,
-        })
-    }
-}
-
-#[cfg(unix)]
 #[test]
-fn the_probe_uses_only_the_fixed_read_only_bwrap_command() -> Result<(), Box<dyn std::error::Error>>
-{
-    let script = ProbeScript::new(
-        r#"[ "$#" -eq 6 ] && [ "$1" = --unshare-user ] && [ "$2" = --ro-bind ] && [ "$3" = / ] && [ "$4" = / ] && [ "$5" = -- ] && [ "$6" = /bin/true ]"#,
-    )?;
-
+fn the_probe_uses_only_the_fixed_read_only_bwrap_command() {
     assert_eq!(
-        probe_bwrap_with_timeout(&script.path, Duration::from_secs(1)),
-        Ok(())
+        BWRAP_PROBE_ARGS,
+        ["--unshare-user", "--ro-bind", "/", "/", "--", "/bin/true"]
     );
-    Ok(())
 }
