@@ -150,13 +150,10 @@ impl ShellContext {
             let selection = tinybox_host::select_shell(&request.shell);
             let mut argv = vec![selection.program];
             argv.extend(selection.arguments);
-            let mut native_request = tinybox_core::ExecRequest {
-                resource: request.resource.clone(),
-                argv,
-                cwd: resolved.cwd.clone(),
-                env: environment.clone(),
-                stdin: request.stdin.clone(),
-            };
+            let mut native_request = tinybox_core::ExecRequest::new(argv)
+                .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
+            native_request.env = environment.clone();
+            native_request.stdin = request.stdin.clone();
             ShellHost::Jailed(super::native_jail::collector_with_resources(
                 root,
                 &jail,
@@ -175,14 +172,14 @@ impl ShellContext {
             {
                 return Err(invalid());
             }
-            ShellHost::Jailed(
+            ShellHost::Jailed(Arc::new(
                 tinybox_host::JailLocalHost::with_backend(
                     jail,
                     backend,
                     tinybox_bus::MAX_OUTPUT_BYTES,
                 )
                 .map_err(|_| invalid())?,
-            )
+            ))
         } else {
             ShellHost::Local(tinybox_host::LimitedLocalHost::new(
                 tinybox_bus::MAX_OUTPUT_BYTES,
