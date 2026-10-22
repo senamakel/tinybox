@@ -8,7 +8,7 @@
 //! first command runs and turns that into an actionable message, so a caller
 //! can choose another backend or fail closed instead of guessing.
 
-use std::io::Read as _;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
