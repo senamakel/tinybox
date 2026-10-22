@@ -763,7 +763,13 @@ async fn resource_aware_native_shell_runs_through_the_requested_resource_launche
     completed(&resources, &process).await?;
     let output = resources.read_output(&process, 0).await?;
     assert_eq!(output.state, ExecutionState::Exited { exit_code: 0 });
-    assert_eq!(output.chunks[0].bytes, b"resource-shell");
+    let stdout: Vec<_> = output
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.stream == tinybox_bus::OutputStream::Stdout)
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
+    assert_eq!(stdout, b"resource-shell");
     resources.release_output(&process).await?;
 
     let mut unsupported =
