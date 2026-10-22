@@ -16,6 +16,20 @@ jobs:
       module-e2e-script: scripts/test-e2e.sh
       feature-test-script: scripts/test-features.sh
       apt-packages: bubblewrap
+  linux-2204:
+    name: Linux E2E and feature tests (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+      - name: Run module E2E verification
+        run: scripts/test-e2e.sh
+      - name: Run required Linux sandbox and feature tests
+        env:
+          TINYBOX_REQUIRE_BWRAP: "1"
+        run: scripts/test-features.sh
   native-resource-live:
     runs-on: ubuntu-latest
     steps:
