@@ -3,6 +3,9 @@ use super::*;
 #[cfg(windows)]
 use tinybox_core::Host;
 
+#[cfg(windows)]
+const WINDOWS_DESCENDANT_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[cfg(unix)]
 #[tokio::test]
 async fn cleanup_failures_are_retained_and_never_acknowledged_as_success() -> Result<()> {
@@ -146,7 +149,9 @@ async fn stopping_a_windows_job_terminates_its_spawned_descendant() -> Result<()
         "-Command",
         &script,
     ]))?;
-    let pid = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // Windows 11 ARM runs this x64 legacy PowerShell child under emulation;
+    // allow startup to finish before treating the descendant as missing.
+    let pid = tokio::time::timeout(WINDOWS_DESCENDANT_START_TIMEOUT, async {
         loop {
             if let Ok(contents) = std::fs::read_to_string(&pid_file)
                 && let Ok(pid) = contents.parse::<u32>()
@@ -199,7 +204,9 @@ async fn a_windows_parent_exit_reclaims_its_detached_descendant_without_explicit
         "-Command",
         &script,
     ]))?;
-    let completed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // The x64-emulated PowerShell child needs more startup time on ARM64,
+    // while this still bounds a stuck parent process.
+    let completed = tokio::time::timeout(WINDOWS_DESCENDANT_START_TIMEOUT, async {
         while process.is_running() {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
