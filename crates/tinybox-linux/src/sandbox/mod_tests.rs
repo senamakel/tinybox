@@ -511,6 +511,17 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
         ["/bin/bash", "--noprofile", "--norc", "-c"],
         "a trusted supervisor must sample cgroup events from inside the scope"
     );
+    let scope_unit = argv[..systemd_end]
+        .iter()
+        .find_map(|part| part.strip_prefix("--unit="))
+        .ok_or("missing transient scope name")?;
+    let scope_script = argv
+        .get(systemd_end + 5)
+        .ok_or("missing in-scope telemetry script")?;
+    assert!(scope_script.contains("/sys/fs/cgroup${control_group}/memory.events"));
+    assert_eq!(argv[systemd_end + 6], "tinybox-memory-event-scope");
+    assert_eq!(argv[systemd_end + 7], scope_unit);
+    assert_eq!(argv[systemd_end + 8], bubblewrap);
     assert!(
         !argv[..systemd_end]
             .iter()
