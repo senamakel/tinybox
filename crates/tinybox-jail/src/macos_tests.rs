@@ -123,7 +123,10 @@ int main(void) {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(stdout.contains("before"), "unexpected stdout: {stdout:?}");
-    assert!(stdout.contains("fork-denied"), "fork was not denied: {stdout:?}");
+    assert!(
+        stdout.contains("fork-denied"),
+        "fork was not denied: {stdout:?}"
+    );
     assert!(
         !stdout.contains("child-executed"),
         "Seatbelt allowed the child process; stdout: {stdout:?}, stderr: {:?}",
