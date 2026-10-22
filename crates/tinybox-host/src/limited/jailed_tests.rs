@@ -571,7 +571,8 @@ async fn dropping_jail_call_before_supervisor_start_does_not_spawn()
 }
 
 #[test]
-fn owned_file_pipes_capture_output_with_a_tokio_io_driver() -> Result<(), Box<dyn std::error::Error>> {
+fn owned_file_pipes_capture_output_with_a_tokio_io_driver() -> Result<(), Box<dyn std::error::Error>>
+{
     let root = tempfile::tempdir()?;
     let host = JailLocalHost::with_backend(
         tinybox_jail::Jail::new(root.path(), "runtime-fault-fixture"),
@@ -584,11 +585,8 @@ fn owned_file_pipes_capture_output_with_a_tokio_io_driver() -> Result<(), Box<dy
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let output = runtime.block_on(host.run(&ExecRequest::new([
-        "/bin/sh",
-        "-c",
-        "printf owned-pipes",
-    ])))?;
+    let output =
+        runtime.block_on(host.run(&ExecRequest::new(["/bin/sh", "-c", "printf owned-pipes"])))?;
     assert_eq!(output.stdout, b"owned-pipes");
     runtime.block_on(host.drain_checked())?;
     assert!(!host.has_pending_cleanup());
