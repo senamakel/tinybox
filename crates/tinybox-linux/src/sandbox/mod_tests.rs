@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, Host, HostRef,
     IsolationLevel, MemoryStore, NetworkPolicy, Placement, Resources, Result, Sandbox, SandboxRef,
-    SnapshotId, SnapshotSupport, Store, WorkspaceSource,
+    SandboxAvailability, SnapshotId, SnapshotSupport, Store, WorkspaceSource,
 };
 
 use super::{NAME, NamespaceSandbox, args};
@@ -128,6 +128,15 @@ fn it_declares_kernel_isolation_and_nothing_it_cannot_do() {
     // Limits need a systemd user session, so they are not claimed by default.
     assert!(!caps.supports(Capability::ResourceLimits));
     assert_eq!(caps.declared().len(), 0);
+}
+
+#[test]
+fn runtime_availability_reports_the_namespace_probe_result() {
+    let (sandbox, _) = sandbox();
+    let probe = super::super::super::probe::NamespaceProbe::detect();
+
+    assert_eq!(sandbox.availability(), probe.availability());
+    assert_ne!(sandbox.availability(), SandboxAvailability::Unknown);
 }
 
 #[test]
