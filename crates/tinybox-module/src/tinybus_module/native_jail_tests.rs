@@ -784,7 +784,7 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         process: process_id,
         resource: resource.clone(),
         shell: SelectShellRequest {
-            command: "python3 -c 'data=bytearray(256*1024*1024); [data.__setitem__(i, 1) for i in range(0, len(data), 4096)]; print(\"allocation survived\")'".into(),
+            command: "python3 -c 'import os; assert \"TINYBOX_INTERNAL_MEMORY_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); data=bytearray(256*1024*1024); [data.__setitem__(i, 1) for i in range(0, len(data), 4096)]; print(\"allocation survived\")'".into(),
             preserve_pipeline_status: false,
             runtime_path: None,
             python_utf8: false,
