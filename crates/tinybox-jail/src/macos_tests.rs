@@ -440,6 +440,33 @@ fn executable_presence_cannot_satisfy_hard_seatbelt_denials() {
     }
 }
 
+#[test]
+fn seatbelt_reports_resource_limits_unsupported() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let support = declared_constraint_support(true);
+    for constraint in [
+        Constraint::Cpu,
+        Constraint::Memory,
+        Constraint::Pids,
+        Constraint::Disk,
+    ] {
+        assert_eq!(
+            support.enforcement(constraint),
+            Enforcement::Unsupported,
+            "Seatbelt must not claim {constraint} enforcement without a native limit",
+        );
+        assert!(matches!(
+            support.require("seatbelt", &[constraint]),
+            Err(tinybox_core::Error::ConstraintNotEnforced {
+                sandbox,
+                constraint: rejected,
+                enforcement: Enforcement::Unsupported,
+            }) if sandbox == "seatbelt" && rejected == constraint
+        ));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn captured_launcher_preserves_all_three_owned_pipes() -> std::io::Result<()> {
