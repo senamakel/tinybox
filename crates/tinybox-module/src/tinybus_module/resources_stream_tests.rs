@@ -698,6 +698,34 @@ async fn native_shell_invalid_budget_does_not_consume_its_reservation()
     resources.close(&resource).await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn resource_aware_native_shell_requires_jail_without_consuming_its_reservation()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let resources = Resources::default();
+    let resource = local_resource(&resources).await?;
+    let state = tempfile::tempdir()?;
+    let shell = shell_request(&resources, &resource, state.path(), "echo accepted").await?;
+    let limits = tinybox_bus::NativeJailResourceRequest {
+        cpu_millis: None,
+        memory_bytes: None,
+        pids_max: None,
+        disk_bytes: None,
+    };
+
+    assert!(
+        resources
+            .start_native_shell_exec_with_resources(shell.clone(), limits)
+            .await
+            .is_err()
+    );
+    let process = resources.start_shell_exec(shell).await?;
+    completed(&resources, &process).await?;
+    resources.release_output(&process).await?;
+    resources.close(&resource).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn native_shell_timeout_acknowledges_child_cleanup_before_output_release()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
