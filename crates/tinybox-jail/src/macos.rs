@@ -174,8 +174,11 @@ fn render_profile(jail: &Jail) -> String {
 
     // Subprocess gate. Same idea — only restrict on opt-in.
     if !jail.allow_subprocess {
+        // Seatbelt applies this profile before the configured executable is
+        // launched. Denying process-exec would also block that primary
+        // process, so deny forks to prevent child creation while allowing the
+        // configured command itself to run.
         out.push_str("(deny process-fork)\n");
-        out.push_str("(deny process-exec)\n");
     }
 
     // The actual directory jail: deny writes everywhere, then re-allow
