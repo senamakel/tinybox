@@ -20,6 +20,46 @@ fn profile_deny_subprocess_emits_deny_rules() {
     assert!(p.contains("(deny process-exec)"));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()> {
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let root = tempfile::tempdir()?;
+    let jail = Jail::new(root.path(), "seatbelt-no-subprocess").deny_subprocess();
+    let mut command = Command::new("/bin/sh");
+    command.args([
+        "-c",
+        "echo before; /usr/bin/printf child-executed; echo after",
+    ]);
+    let output = SeatbeltBackend::new()
+        .spawn_captured(&jail, command)?
+        .wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("before"), "unexpected stdout: {stdout:?}");
+    assert!(
+        !stdout.contains("child-executed"),
+        "Seatbelt allowed the child executable; stdout: {stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("after"), "unexpected stdout: {stdout:?}");
+    eprintln!("[seatbelt-live] deny-subprocess behavior passed");
+    Ok(())
+}
+
 #[test]
 fn profile_allow_subprocess_default_has_no_process_deny() {
     let jail = Jail::new("/tmp", "x");
