@@ -752,6 +752,27 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         process
     );
 
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let output: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
+            if output.state != tinybox_bus::ExecutionState::Running {
+                return Ok::<_, tinybus::Error>(output);
+            }
+            tokio::task::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
+    assert_eq!(
+        output.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 137 },
+        "memory-pressure child did not terminate from the limit: {output:?}"
+    );
+    assert!(
+        !output_contains_marker(&output, "allocation survived"),
+        "the memory-pressure child completed normally"
+    );
+
     async fn next_event(
         events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
     ) -> tinybus::Result<serde_json::Value> {
