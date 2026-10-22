@@ -1094,15 +1094,9 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
             code: tinybox_bus::ExecutionFailure::TimedOut
         }
     );
-    let output_bytes: Vec<u8> = output
-        .chunks
-        .iter()
-        .flat_map(|chunk| chunk.bytes.iter().copied())
-        .collect();
     assert!(
-        String::from_utf8_lossy(&output_bytes).contains("partial"),
-        "timeout child output did not contain the partial marker: {:?}",
-        String::from_utf8_lossy(&output_bytes)
+        output_contains_marker(&output, "partial"),
+        "timeout child output did not contain the partial marker"
     );
 
     assert_process_event(&mut events, &process, "started").await?;
@@ -1127,6 +1121,15 @@ async fn receive_process_event(
         .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
         .map_err(|error| tinybus::Error::failed(error.to_string()))?;
     serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+}
+
+fn output_contains_marker(output: &tinybox_bus::OutputBatch, marker: &str) -> bool {
+    let bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
+    String::from_utf8_lossy(&bytes).contains(marker)
 }
 
 async fn assert_process_event(
