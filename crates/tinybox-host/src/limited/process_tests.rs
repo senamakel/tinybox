@@ -6,6 +6,13 @@ use tinybox_core::Host;
 #[cfg(windows)]
 const WINDOWS_DESCENDANT_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+// The legacy Windows PowerShell executable is x64-only on the ARM64 runner.
+// Use the runner image's native PowerShell 7 installation for this fixture.
+#[cfg(all(windows, target_arch = "aarch64"))]
+const WINDOWS_PROCESS_TEST_SHELL: &str = "pwsh.exe";
+#[cfg(all(windows, not(target_arch = "aarch64")))]
+const WINDOWS_PROCESS_TEST_SHELL: &str = "powershell.exe";
+
 #[cfg(unix)]
 #[tokio::test]
 async fn cleanup_failures_are_retained_and_never_acknowledged_as_success() -> Result<()> {
@@ -140,17 +147,17 @@ async fn stopping_a_windows_job_terminates_its_spawned_descendant() -> Result<()
     let pid_file = directory.path().join("descendant.pid");
     let path = pid_file.to_string_lossy().replace('\'', "''");
     let script = format!(
-        "$child = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 600') -PassThru; [System.IO.File]::WriteAllText('{path}', [string]$child.Id); Start-Sleep -Seconds 600"
+        "$child = Start-Process -FilePath '{shell}' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 600') -PassThru; [System.IO.File]::WriteAllText('{path}', [string]$child.Id); Start-Sleep -Seconds 600",
+        shell = WINDOWS_PROCESS_TEST_SHELL,
     );
     let host = LimitedLocalHost::new(100);
     let mut process = host.spawn(&ExecRequest::new([
-        "powershell.exe",
+        WINDOWS_PROCESS_TEST_SHELL,
         "-NoProfile",
         "-Command",
         &script,
     ]))?;
-    // Windows 11 ARM runs this x64 legacy PowerShell child under emulation;
-    // allow startup to finish before treating the descendant as missing.
+    // Keep a finite readiness bound in case the fixture fails to start.
     let pid = tokio::time::timeout(WINDOWS_DESCENDANT_START_TIMEOUT, async {
         loop {
             if let Ok(contents) = std::fs::read_to_string(&pid_file)
@@ -172,7 +179,7 @@ async fn stopping_a_windows_job_terminates_its_spawned_descendant() -> Result<()
     host.drain_checked().await?;
     let check = host
         .run(&ExecRequest::new([
-            "powershell.exe",
+            WINDOWS_PROCESS_TEST_SHELL,
             "-NoProfile",
             "-Command",
             &format!(
@@ -195,17 +202,17 @@ async fn a_windows_parent_exit_reclaims_its_detached_descendant_without_explicit
     let pid_file = directory.path().join("descendant.pid");
     let path = pid_file.to_string_lossy().replace('\'', "''");
     let script = format!(
-        "$child = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 600') -PassThru; [System.IO.File]::WriteAllText('{path}', [string]$child.Id); exit 0"
+        "$child = Start-Process -FilePath '{shell}' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 600') -PassThru; [System.IO.File]::WriteAllText('{path}', [string]$child.Id); exit 0",
+        shell = WINDOWS_PROCESS_TEST_SHELL,
     );
     let host = LimitedLocalHost::new(100);
     let mut process = host.spawn(&ExecRequest::new([
-        "powershell.exe",
+        WINDOWS_PROCESS_TEST_SHELL,
         "-NoProfile",
         "-Command",
         &script,
     ]))?;
-    // The x64-emulated PowerShell child needs more startup time on ARM64,
-    // while this still bounds a stuck parent process.
+    // Bound the wait while allowing the fixture process to start.
     let completed = tokio::time::timeout(WINDOWS_DESCENDANT_START_TIMEOUT, async {
         while process.is_running() {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -228,7 +235,7 @@ async fn a_windows_parent_exit_reclaims_its_detached_descendant_without_explicit
             message: error.to_string(),
         })?;
     let check = host.run(&ExecRequest::new([
-        "powershell.exe", "-NoProfile", "-Command",
+        WINDOWS_PROCESS_TEST_SHELL, "-NoProfile", "-Command",
         &format!("if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 1 }} else {{ exit 0 }}"),
     ])).await?;
     assert_eq!(
