@@ -67,6 +67,12 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
         .wait_with_output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    assert!(
+        output.status.success(),
+        "the shell should continue after the denied child; status: {}, stdout: {stdout:?}, stderr: {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(stdout.contains("before"), "unexpected stdout: {stdout:?}");
     assert!(
         !stdout.contains("child-executed"),
