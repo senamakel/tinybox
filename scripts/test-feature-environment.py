@@ -37,7 +37,7 @@ class FeatureEnvironmentTests(unittest.TestCase):
             if Path("/usr/bin/sandbox-exec").is_file():
                 expected.append(
                     "test --locked -p tinybox-jail "
-                    "live_seatbelt_deny_subprocess_blocks_child_creation -- --nocapture"
+                    "live_seatbelt_ -- --nocapture"
                 )
             expected.extend([
                 "test --locked --workspace", "test --locked --workspace --all-features"])
