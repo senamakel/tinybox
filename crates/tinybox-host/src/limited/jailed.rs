@@ -50,11 +50,17 @@ impl MemoryEventReport {
         runtime_dir: &std::path::Path,
     ) -> Option<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        use std::io::Write;
 
         let has_scope = command
             .get_args()
             .filter_map(|arg| arg.to_str())
-            .any(|arg| arg.starts_with("--unit=tinybox-native-") && arg.ends_with(".scope"));
+            .any(|arg| {
+                arg.strip_prefix("--unit=")
+                    .and_then(|unit| std::path::Path::new(unit).extension())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
+                    && arg.starts_with("--unit=tinybox-native-")
+            });
         let has_memory_limit = command
             .get_args()
             .filter_map(|arg| arg.to_str())
@@ -62,7 +68,7 @@ impl MemoryEventReport {
         if !has_scope || !has_memory_limit {
             return None;
         }
-        let metadata = std::fs::metadata(&runtime_dir).ok()?;
+        let metadata = std::fs::metadata(runtime_dir).ok()?;
         let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
         if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
             return None;
@@ -81,7 +87,6 @@ impl MemoryEventReport {
             .mode(0o600)
             .open(&path)
             .ok()?;
-        use std::io::Write;
         if report.write_all(b"0\n").is_err() {
             let _ = std::fs::remove_file(&path);
             return None;
@@ -119,6 +124,20 @@ fn jail_exposes_path(jail: &Jail, path: &std::path::Path) -> bool {
         .chain(&jail.read_only)
         .chain(&jail.read_write)
         .any(|mount| path.starts_with(mount))
+}
+
+#[cfg(target_os = "linux")]
+fn report_memory_termination(
+    report: Option<&MemoryEventReport>,
+    observer: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report
+        .as_ref()
+        .is_some_and(MemoryEventReport::oom_kill_observed)
+        && let Some(observer) = observer
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
+    }
 }
 
 // Standard children do not kill on drop. Keep ownership across supervisor panics
@@ -389,13 +408,7 @@ impl JailLocalHost {
         drop(cancel);
         let output = result??;
         #[cfg(target_os = "linux")]
-        if memory_event_report
-            .as_ref()
-            .is_some_and(MemoryEventReport::oom_kill_observed)
-            && let Some(observer) = event_observer
-        {
-            observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
-        }
+        report_memory_termination(memory_event_report.as_ref(), event_observer.as_ref());
         Ok(output)
     }
 }
