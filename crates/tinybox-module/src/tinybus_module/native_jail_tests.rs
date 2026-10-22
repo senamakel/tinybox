@@ -686,6 +686,24 @@ async fn assert_memory_event_sequence(
 }
 
 #[cfg(target_os = "linux")]
+async fn assert_pids_event_sequence(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    process: &tinybox_bus::ProcessRef,
+) -> tinybus::Result<()> {
+    let started = next_memory_event(events).await?;
+    assert_eq!(started["process"], serde_json::json!(process));
+    assert_eq!(started["event"]["event"], "started");
+    let limit_hit = next_memory_event(events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
+    assert_eq!(limit_hit["event"]["event"], "limit_hit");
+    assert_eq!(limit_hit["event"]["limit"], "pids");
+    let exited = next_memory_event(events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
+    assert_eq!(exited["event"]["event"], "exited");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 async fn wait_for_memory_process_output(
     proxy: &tinybus::Proxy,
     process: &tinybox_bus::ProcessRef,
