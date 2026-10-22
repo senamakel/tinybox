@@ -131,9 +131,7 @@ fn report_memory_termination(
     report: Option<&MemoryEventReport>,
     observer: Option<&Arc<dyn ExecutionObserver>>,
 ) {
-    if report
-        .as_ref()
-        .is_some_and(MemoryEventReport::oom_kill_observed)
+    if report.is_some_and(|report| report.oom_kill_observed())
         && let Some(observer) = observer
     {
         observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
