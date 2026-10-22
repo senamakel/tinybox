@@ -457,8 +457,12 @@ pub trait OwnedProcess: Send {
     /// Native identifier, when one is available.
     fn id(&self) -> Option<u32>;
     /// Nonblocking completion check.
+    /// # Errors
+    /// Returns an operating-system error while inspecting the process.
     fn try_wait(&mut self) -> std::io::Result<Option<ChildStatus>>;
     /// Stop the owned process (and its descendants where the backend owns them).
+    /// # Errors
+    /// Returns an operating-system error while terminating the process.
     fn terminate(&mut self) -> std::io::Result<()>;
 }
 
@@ -478,7 +482,7 @@ impl std::fmt::Debug for OwnedChild {
             .field("has_stdin", &self.stdin.is_some())
             .field("has_stdout", &self.stdout.is_some())
             .field("has_stderr", &self.stderr.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -518,11 +522,15 @@ impl OwnedChild {
     }
 
     /// Nonblocking process completion check.
+    /// # Errors
+    /// Returns an operating-system error while inspecting the process.
     pub fn try_wait(&mut self) -> std::io::Result<Option<ChildStatus>> {
         self.process.try_wait()
     }
 
     /// Stop the process tree owned by this backend.
+    /// # Errors
+    /// Returns an operating-system error while terminating the process.
     pub fn terminate(&mut self) -> std::io::Result<()> {
         self.process.terminate()
     }
@@ -574,36 +582,42 @@ impl OwnedProcess for StdOwnedProcess {
 }
 
 #[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stdin_file(pipe: std::process::ChildStdin) -> std::io::Result<File> {
     use std::os::fd::OwnedFd;
     Ok(File::from(OwnedFd::from(pipe)))
 }
 
 #[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stdout_file(pipe: std::process::ChildStdout) -> std::io::Result<File> {
     use std::os::fd::OwnedFd;
     Ok(File::from(OwnedFd::from(pipe)))
 }
 
 #[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stderr_file(pipe: std::process::ChildStderr) -> std::io::Result<File> {
     use std::os::fd::OwnedFd;
     Ok(File::from(OwnedFd::from(pipe)))
 }
 
 #[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stdin_file(pipe: std::process::ChildStdin) -> std::io::Result<File> {
     use std::os::windows::io::OwnedHandle;
     Ok(File::from(OwnedHandle::from(pipe)))
 }
 
 #[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stdout_file(pipe: std::process::ChildStdout) -> std::io::Result<File> {
     use std::os::windows::io::OwnedHandle;
     Ok(File::from(OwnedHandle::from(pipe)))
 }
 
 #[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)] // Other targets return Unsupported for this conversion.
 fn child_stderr_file(pipe: std::process::ChildStderr) -> std::io::Result<File> {
     use std::os::windows::io::OwnedHandle;
     Ok(File::from(OwnedHandle::from(pipe)))
