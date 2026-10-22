@@ -221,6 +221,13 @@ impl BoxService {
     async fn capabilities(&self) -> TinyBusResult<tinybox_bus::ModuleCapabilities> {
         std::future::ready(Ok(capabilities_for(Platform::current()))).await
     }
+    /// Report the selected backend's constraint enforcement without allocating a resource.
+    async fn plan_check(
+        &self,
+        request: tinybox_bus::PlanCheckRequest,
+    ) -> TinyBusResult<tinybox_bus::PlanCheckResponse> {
+        std::future::ready(resources::plan_check(request, Platform::current())).await
+    }
     /// Mint a single-use startup reservation, without starting native work.
     async fn reserve(&self, request: tinybox_bus::ReserveRequest) -> TinyBusResult<ResourceId> {
         self.resources.reserve(request).await

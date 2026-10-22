@@ -1576,6 +1576,62 @@ fn make_sandbox(
     }
 }
 
+/// Inspect a backend's declarations without allocating resources or starting work.
+pub(super) fn plan_check(
+    request: tinybox_bus::PlanCheckRequest,
+    platform: super::Platform,
+) -> Result<tinybox_bus::PlanCheckResponse> {
+    validate_platform_backend(platform, &request.backend)?;
+    let host: Arc<dyn Host> = Arc::new(tinybox_host::LocalHost::new());
+    let store: Arc<dyn Store> = Arc::new(tinybox_core::MemoryStore::new());
+    let selection = make_sandbox(&request.backend, host, store, "plan-check")?;
+    let requested = request
+        .constraints
+        .iter()
+        .map(|item| core_constraint(item.constraint))
+        .collect::<Vec<_>>();
+    let checked = selection.sandbox.plan_check(&requested);
+    let results = request
+        .constraints
+        .into_iter()
+        .zip(checked.constraints)
+        .map(|(requested, (constraint, enforcement))| {
+            debug_assert_eq!(constraint, core_constraint(requested.constraint));
+            tinybox_bus::ConstraintResult {
+                constraint: requested.constraint,
+                hard: requested.hard,
+                enforcement: wire_enforcement(enforcement),
+            }
+        })
+        .collect();
+    Ok(tinybox_bus::PlanCheckResponse {
+        backend: request.backend,
+        results,
+    })
+}
+
+fn core_constraint(constraint: tinybox_bus::ResourceConstraint) -> tinybox_core::Constraint {
+    match constraint {
+        tinybox_bus::ResourceConstraint::Filesystem => tinybox_core::Constraint::Filesystem,
+        tinybox_bus::ResourceConstraint::Network => tinybox_core::Constraint::Network,
+        tinybox_bus::ResourceConstraint::Cpu => tinybox_core::Constraint::Cpu,
+        tinybox_bus::ResourceConstraint::Memory => tinybox_core::Constraint::Memory,
+        tinybox_bus::ResourceConstraint::Pids => tinybox_core::Constraint::Pids,
+        tinybox_bus::ResourceConstraint::Disk => tinybox_core::Constraint::Disk,
+        tinybox_bus::ResourceConstraint::Subprocess => tinybox_core::Constraint::Subprocess,
+    }
+}
+
+fn wire_enforcement(
+    enforcement: tinybox_core::Enforcement,
+) -> tinybox_bus::ConstraintEnforcement {
+    match enforcement {
+        tinybox_core::Enforcement::Unsupported => tinybox_bus::ConstraintEnforcement::Unsupported,
+        tinybox_core::Enforcement::BestEffort => tinybox_bus::ConstraintEnforcement::BestEffort,
+        tinybox_core::Enforcement::Enforced => tinybox_bus::ConstraintEnforcement::Enforced,
+    }
+}
+
 async fn published_port_facts(
     sandbox: &dyn Sandbox,
     id: &BoxId,
