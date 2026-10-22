@@ -4,7 +4,17 @@
 //! exchange them without sharing a dependency. They carry no policy: a sandbox
 //! reports what happened and the caller decides what to do about it.
 
+use crate::ProcessRef;
 use serde::{Deserialize, Serialize};
+
+/// One process-scoped sandbox observation sent by the TinyBox module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessEvent {
+    /// Resource and process identifiers chosen by the caller.
+    pub process: ProcessRef,
+    /// What the sandbox observed about this process.
+    pub event: SandboxEvent,
+}
 
 /// Hosts and ports an allowlisted box may reach.
 ///

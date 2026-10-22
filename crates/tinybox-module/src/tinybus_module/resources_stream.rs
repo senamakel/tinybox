@@ -23,6 +23,7 @@ pub(super) struct StreamExecution {
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     collector: Collector,
     timed_out: Arc<std::sync::atomic::AtomicBool>,
+    event_publisher_claimed: std::sync::atomic::AtomicBool,
 }
 #[derive(Clone)]
 enum Collector {
@@ -362,6 +363,28 @@ impl StreamExecution {
             task: Mutex::new(Some(task)),
             collector,
             timed_out,
+            event_publisher_claimed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+    pub(super) fn claim_event_publisher(&self) -> bool {
+        !self
+            .event_publisher_claimed
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+    pub(super) async fn wait_for_terminal_exit(&self) -> Option<i32> {
+        let mut task = self.task.lock().await;
+        if let Some(join) = task.as_mut()
+            && join.await.is_err()
+        {
+            task.take();
+            return None;
+        }
+        task.take();
+        match self.journal.read(0).ok()?.state {
+            tinybox_bus::ExecutionState::Exited { exit_code } => Some(exit_code),
+            tinybox_bus::ExecutionState::Running
+            | tinybox_bus::ExecutionState::Cancelled
+            | tinybox_bus::ExecutionState::Failed { .. } => None,
         }
     }
     pub(super) fn running(&self) -> bool {

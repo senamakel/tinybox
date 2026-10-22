@@ -27,6 +27,27 @@ fn events_keep_their_wire_labels() -> Result<(), serde_json::Error> {
 }
 
 #[test]
+fn process_event_signal_has_correlated_process_and_event_fields() -> Result<(), serde_json::Error> {
+    let process_event = ProcessEvent {
+        process: ProcessRef {
+            resource: ResourceId("resource-1".into()),
+            process: ResourceId("process-1".into()),
+        },
+        event: SandboxEvent::Exited { status: Some(7) },
+    };
+    let snapshot = serde_json::json!({
+        "process": {"resource":"resource-1", "process":"process-1"},
+        "event": {"event":"exited", "status":7}
+    });
+    assert_eq!(serde_json::to_value(&process_event)?, snapshot);
+    assert_eq!(serde_json::from_value::<ProcessEvent>(snapshot)?, process_event);
+    assert_eq!(names::PROCESS_EVENT, "ProcessEvent");
+    assert_eq!(SIGNALS, &[names::PROCESS_EVENT]);
+    assert_eq!(CONTRACT_VERSION, (2, 4));
+    Ok(())
+}
+
+#[test]
 fn an_allowlist_policy_round_trips_and_old_policies_still_parse() -> Result<(), serde_json::Error> {
     let policy = NetworkPolicy::Allowlist(EgressAllowlist {
         hosts: vec!["example.com".into()],

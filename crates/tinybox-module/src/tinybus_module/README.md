@@ -58,7 +58,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | KillStdio | ProcessRef | () |
 | StdioStatus | ProcessRef | StdioStatus |
 
-Capabilities advertises contract version 2.3. Hosts require equal majors and a
+Capabilities advertises contract version 2.4. Hosts require equal majors and a
 module minor at least as new as their vocabulary, using
 `tinybox_bus::is_compatible`. Contract 1.0 was the original discovery-only
 surface; 1.1 added reserved resource/process ownership and terminal shutdown;
@@ -73,6 +73,13 @@ Contract 2.3 adds `PlanCheck`, which reports the selected backend's declared
 enforcement for an ordered list of requested constraints without allocating a
 resource. Each result echoes the request's hard/soft flag; the caller decides
 how to act on `BestEffort` or `Unsupported` results.
+
+Contract 2.4 adds the `ProcessEvent` signal. The module emits a correlated
+`ProcessEvent { process: ProcessRef, event: SandboxEvent }` with `Started`
+after the first successful `StartExec` for a process reservation and `Exited`
+after the supervisor observes its terminal exit status. Replayed `StartExec`
+calls do not duplicate lifecycle events. Signal delivery is best-effort, and
+this initial path does not claim denial or resource-limit observations.
 
 Contract 1.22 was the one-release deprecation window for `AnalyzeCommand`,
 `CommandClass`, command classification fields, executor/environment-guard

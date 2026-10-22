@@ -47,6 +47,14 @@ async fn compiled_module_transfers_workspace_files_over_a_broker()
         .map(tinybus::MemberName::as_str)
         .collect();
     assert_eq!(declared, tinybox_bus::METHODS);
+    let declared_signals: Vec<&str> = loaded
+        .manifest
+        .provides
+        .iter()
+        .flat_map(|interface| interface.signals.iter())
+        .map(tinybus::MemberName::as_str)
+        .collect();
+    assert_eq!(declared_signals, tinybox_bus::SIGNALS);
 
     let client = Connection::connect(bus.connect().await?).await?;
     wait_until_serving(&client, &modules).await?;

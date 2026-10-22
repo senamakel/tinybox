@@ -12,8 +12,8 @@ use tinybox_bus::{
     AbortFileWriteRequest, BeginFileReadRequest, BeginFileWriteRequest, CloseForwardRequest,
     CreateRequest, ExecOutput, ExecRequest, FileChunk, FileReadInfo, FileWriteInfo,
     FileWriteProgress, FinishFileReadRequest, FinishFileWriteRequest, ForwardInfo, ForwardRequest,
-    INTERFACE, OBJECT_PATH, ProcessRef, ReadFileChunkRequest, ResourceId, ResourceInfo,
-    ShellAnalysis, SpawnRequest, WriteFileChunkRequest,
+    INTERFACE, OBJECT_PATH, ProcessEvent, ProcessRef, ReadFileChunkRequest, ResourceId,
+    ResourceInfo, SandboxEvent, ShellAnalysis, SpawnRequest, WriteFileChunkRequest,
 };
 
 mod docker;
@@ -50,6 +50,7 @@ impl Platform {
 #[derive(Default)]
 struct BoxService {
     resources: std::sync::Arc<resources::Resources>,
+    connection: Option<Connection>,
 }
 
 impl BoxService {
@@ -57,7 +58,8 @@ impl BoxService {
     /// `connection`.
     fn connected(connection: Connection) -> Self {
         Self {
-            resources: std::sync::Arc::new(resources::Resources::with_connection(connection)),
+            resources: std::sync::Arc::new(resources::Resources::with_connection(connection.clone())),
+            connection: Some(connection),
         }
     }
 }
@@ -268,10 +270,38 @@ impl BoxService {
     /// Start module-owned execution with replayable bounded output.
     async fn start_exec(&self, request: SpawnRequest) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(
+        let process = finish_operation(tokio::spawn(
             async move { resources.start_exec(request).await },
         ))
-        .await
+        .await?;
+        if let Some(connection) = self.connection.clone()
+            && let Ok(Some(stream)) = self.resources.stream(&process)
+            && stream.claim_event_publisher()
+        {
+            emit_process_event(
+                &connection,
+                ProcessEvent {
+                    process: process.clone(),
+                    event: SandboxEvent::Started,
+                },
+            )
+            .await;
+            tokio::spawn(async move {
+                if let Some(status) = stream.wait_for_terminal_exit().await {
+                    emit_process_event(
+                        &connection,
+                        ProcessEvent {
+                            process,
+                            event: SandboxEvent::Exited {
+                                status: Some(status),
+                            },
+                        },
+                    )
+                    .await;
+                }
+            });
+        }
+        Ok(process)
     }
     /// Start an execution in the resource's native directory jail.
     async fn start_jailed_exec(
@@ -484,6 +514,17 @@ impl BoxService {
     }
 }
 
+async fn emit_process_event(connection: &Connection, event: ProcessEvent) {
+    let (Ok(path), Ok(interface), Ok(member)) = (
+        OBJECT_PATH.try_into(),
+        INTERFACE.try_into(),
+        tinybox_bus::names::PROCESS_EVENT.try_into(),
+    ) else {
+        return;
+    };
+    let _ = connection.emit(path, interface, member, event).await;
+}
+
 fn capabilities_for(platform: Platform) -> tinybox_bus::ModuleCapabilities {
     let supervised: Vec<String> = if matches!(
         platform,
@@ -620,7 +661,7 @@ tinybus_module::module_export_optional_static! {
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box"],
     methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources", "StartNativeShellExecWithResources", "PlanCheck"],
-    signals = [],
+    signals = ["ProcessEvent"],
     requires = [],
     optional = [],
     lazy = false,
