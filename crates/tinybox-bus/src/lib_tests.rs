@@ -261,7 +261,8 @@ fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_js
 }
 
 #[test]
-fn plan_check_wire_vocabulary_covers_each_constraint_and_enforcement() -> Result<(), serde_json::Error> {
+fn plan_check_wire_vocabulary_covers_each_constraint_and_enforcement()
+-> Result<(), serde_json::Error> {
     let constraints = [
         ResourceConstraint::Filesystem,
         ResourceConstraint::Network,
@@ -273,7 +274,10 @@ fn plan_check_wire_vocabulary_covers_each_constraint_and_enforcement() -> Result
     ];
     for constraint in constraints {
         let encoded = serde_json::to_value(constraint)?;
-        assert_eq!(serde_json::from_value::<ResourceConstraint>(encoded)?, constraint);
+        assert_eq!(
+            serde_json::from_value::<ResourceConstraint>(encoded)?,
+            constraint
+        );
     }
     let enforcement = [
         ConstraintEnforcement::Unsupported,
