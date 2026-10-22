@@ -274,15 +274,12 @@ async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Resul
         .await?;
     sandbox.destroy(&info.id).await?;
 
-    assert_ne!(
+    assert_eq!(
         output.exit_code,
-        0,
-        "memory-capped child unexpectedly survived its 192 MiB allocation: {}",
-        output.stdout_lossy()
-    );
-    assert!(
-        !output.stdout_lossy().contains("allocation survived"),
-        "child reported that the over-budget allocation survived"
+        137,
+        "memory-capped child should be killed by the cgroup OOM limit; stdout: {}, stderr: {}",
+        output.stdout_lossy(),
+        output.stderr_lossy()
     );
     Ok(())
 }
