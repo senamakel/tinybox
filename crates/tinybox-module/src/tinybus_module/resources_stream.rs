@@ -14,7 +14,7 @@ enum NativeJailRequest {
     Resources(tinybox_bus::NativeJailRequest),
 }
 
-pub(super) struct StreamExecution {
+pub(in crate::tinybus_module) struct StreamExecution {
     request: SpawnRequest,
     shell: Option<tinybox_bus::ShellExecRequest>,
     platform_shell: Option<tinybox_bus::SelectShellRequest>,
