@@ -35,7 +35,7 @@ fn sandbox() -> NamespaceSandbox {
 #[test]
 fn namespace_probe_remains_constructible_from_its_public_fields() {
     let probe = NamespaceProbe {
-        bwrap: None,
+        bwrap: Some("/usr/bin/bwrap".into()),
         userns: UsernsStatus::DisabledBySysctl,
     };
 
