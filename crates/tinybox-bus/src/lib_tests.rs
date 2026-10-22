@@ -355,7 +355,10 @@ fn resource_aware_native_shell_contract_preserves_module_owned_shell_fields()
         disk_bytes: None,
     };
 
-    assert_eq!(START_NATIVE_SHELL_EXEC_WITH_RESOURCES, "StartNativeShellExecWithResources");
+    assert_eq!(
+        START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
+        "StartNativeShellExecWithResources"
+    );
     assert!(METHODS.contains(&START_NATIVE_SHELL_EXEC_WITH_RESOURCES));
     let encoded = serde_json::to_value((&shell, limits))?;
     let decoded: (ShellExecRequest, NativeJailResourceRequest) =
