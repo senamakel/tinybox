@@ -76,12 +76,14 @@ impl MemoryEventReport {
         use std::io::Write;
         report.write_all(b"0\n").ok()?;
         command.env(MEMORY_EVENT_FILE_ENV, &path);
+        eprintln!("memory event report prepared: {}", path.display());
         Some(Self(path))
     }
 
     fn oom_kill_observed(&self) -> bool {
-        std::fs::read_to_string(&self.0)
-            .ok()
+        let contents = std::fs::read_to_string(&self.0).ok();
+        eprintln!("memory event report content: {contents:?}");
+        contents
             .and_then(|contents| parse_oom_kill_counter(&contents))
             .is_some_and(|count| count > 0)
     }
