@@ -1,5 +1,52 @@
 use super::*;
 
+#[cfg(unix)]
+#[derive(Debug, Default)]
+struct InvocationBackend(std::sync::Mutex<Option<crate::JailInvocation>>);
+
+#[cfg(unix)]
+impl crate::JailBackend for InvocationBackend {
+    fn name(&self) -> &'static str {
+        "invocation-test"
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
+        [
+            tinybox_core::Constraint::Filesystem,
+            tinybox_core::Constraint::Cpu,
+            tinybox_core::Constraint::Memory,
+            tinybox_core::Constraint::Pids,
+        ]
+        .into_iter()
+        .fold(
+            tinybox_core::ConstraintSupport::NONE,
+            |support, constraint| support.with(constraint, tinybox_core::Enforcement::Enforced),
+        )
+    }
+
+    fn spawn(&self, _jail: &Jail, mut command: Command) -> std::io::Result<Child> {
+        command.spawn()
+    }
+
+    fn spawn_owned_invocation_captured(
+        &self,
+        jail: &Jail,
+        invocation: &crate::JailInvocation,
+        command: Command,
+    ) -> std::io::Result<crate::OwnedChild> {
+        *self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("invocation lock poisoned"))? =
+            Some(invocation.clone());
+        crate::OwnedChild::from_std(self.spawn_captured(jail, command)?)
+    }
+}
+
 #[test]
 fn defaults_are_permissive() {
     let j = Jail::new("/tmp", "x");
@@ -8,6 +55,154 @@ fn defaults_are_permissive() {
     assert_eq!(j.label, "x");
     assert_eq!(j.read_only.len(), 0);
     assert_eq!(j.resources, None);
+}
+
+#[cfg(unix)]
+#[test]
+fn typed_invocation_reaches_backend_without_losing_exec_fields_or_resource_plan()
+-> std::io::Result<()> {
+    use std::io::{Read, Write};
+    let root = tempfile::tempdir()?;
+    let backend = InvocationBackend::default();
+    let resources = crate::ResourceLimitPlan {
+        cpu_millis: Some(750),
+        memory_bytes: Some(32 * 1024 * 1024),
+        pids_max: Some(4),
+        disk_bytes: None,
+    };
+    let invocation = crate::JailInvocation::new(
+        tinybox_core::ExecRequest::new([
+            "/bin/sh",
+            "-c",
+            "printf '%s|%s|%s|%s|' \"$APPROVED\" \"${HOME-unset}\" \"$PWD\" \"$1\"; printf stderr-kept >&2; IFS= read -r input; printf '%s' \"$input\"",
+            "sh",
+            "argument-kept",
+        ])
+        .with_cwd(root.path())
+        .with_env("APPROVED", "yes")
+        .with_stdin(b"stdin-kept\n".to_vec()),
+        true,
+        Some(resources),
+    );
+    let jail = Jail::new(root.path(), "typed-invocation");
+    let mut child = crate::spawn_owned_invocation_captured_with(&backend, &jail, &invocation)?;
+    child
+        .take_stdin()
+        .ok_or_else(|| std::io::Error::other("captured stdin missing"))?
+        .write_all(b"stdin-kept\n")?;
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout_mut()
+        .ok_or_else(|| std::io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut stdout)?;
+    child
+        .take_stderr()
+        .ok_or_else(|| std::io::Error::other("captured stderr missing"))?
+        .read_to_string(&mut stderr)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "typed invocation child did not exit",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+
+    assert_eq!(status.code(), Some(0));
+    assert_eq!(
+        stdout,
+        format!(
+            "yes|unset|{}|argument-kept|stdin-kept",
+            root.path().display()
+        )
+    );
+    assert_eq!(stderr, "stderr-kept");
+    assert_eq!(
+        backend
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("invocation lock poisoned"))?
+            .as_ref(),
+        Some(&invocation)
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_invocation_refuses_an_unsupported_requested_dimension_before_spawn() -> std::io::Result<()>
+{
+    let root = tempfile::tempdir()?;
+    let marker = root.path().join("must-not-run");
+    let command =
+        tinybox_core::ExecRequest::new(["/bin/sh", "-c", "printf launched > must-not-run"])
+            .with_cwd(root.path());
+    let invocation = crate::JailInvocation::new(
+        command,
+        true,
+        Some(crate::ResourceLimitPlan {
+            disk_bytes: Some(1024),
+            ..crate::ResourceLimitPlan::default()
+        }),
+    );
+    let error = crate::spawn_owned_invocation_captured_with(
+        &crate::NoopBackend,
+        &Jail::new(root.path(), "unsupported-limit"),
+        &invocation,
+    )
+    .err();
+
+    assert_eq!(
+        error.map(|error| error.kind()),
+        Some(std::io::ErrorKind::Unsupported)
+    );
+    assert!(!marker.exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn default_typed_invocation_adapter_keeps_captured_output_and_status() -> std::io::Result<()> {
+    use std::io::Read;
+
+    let root = tempfile::tempdir()?;
+    let invocation = crate::JailInvocation::new(
+        tinybox_core::ExecRequest::new(["/bin/sh", "-c", "printf adapter-kept; exit 7"]),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &crate::NoopBackend,
+        &Jail::new(root.path(), "typed-adapter"),
+        &invocation,
+    )?;
+    let mut stdout = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| std::io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut stdout)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "typed adapter child did not exit",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+
+    assert_eq!(stdout, "adapter-kept");
+    assert_eq!(status.code(), Some(7));
+    Ok(())
 }
 
 #[test]

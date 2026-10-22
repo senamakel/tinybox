@@ -5,6 +5,7 @@
 //! top-level [`crate::spawn`] function — they
 //! never pick a backend by name.
 
+use crate::invocation::JailInvocation;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -426,6 +427,24 @@ pub trait JailBackend: Send + Sync {
     /// Returns the provider's confinement or native startup error.
     fn spawn_owned_captured(&self, jail: &Jail, cmd: Command) -> std::io::Result<OwnedChild> {
         OwnedChild::from_std(self.spawn_captured(jail, cmd)?)
+    }
+
+    /// Spawn a typed invocation while retaining its launch metadata at the
+    /// backend boundary.
+    ///
+    /// Platform owners may override this to configure a child from argv, cwd,
+    /// environment, stdio, and optional resource dimensions before resuming
+    /// it. The supplied command already reflects the invocation and may also
+    /// contain trusted host-side wrapper adjustments.
+    /// # Errors
+    /// Returns the provider's confinement or native startup error.
+    fn spawn_owned_invocation_captured(
+        &self,
+        jail: &Jail,
+        _invocation: &JailInvocation,
+        command: Command,
+    ) -> std::io::Result<OwnedChild> {
+        self.spawn_owned_captured(jail, command)
     }
 }
 

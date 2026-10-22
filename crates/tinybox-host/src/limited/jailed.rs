@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tinybox_core::{Error, ExecOutput, ExecRequest, ExecutionObserver, Host, OutputStream, Result};
-use tinybox_jail::{Jail, JailBackend, OwnedChild};
+use tinybox_jail::{Jail, JailBackend, JailInvocation, OwnedChild, ResourceLimitPlan};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{oneshot, watch};
 
@@ -25,6 +25,19 @@ impl Drop for Active {
         self.0
             .finished
             .send_modify(|generation| *generation = generation.wrapping_add(1));
+    }
+}
+
+fn spawn_owned(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    invocation: Option<&JailInvocation>,
+    command: std::process::Command,
+) -> std::io::Result<OwnedChild> {
+    if let Some(invocation) = invocation {
+        tinybox_jail::spawn_owned_invocation_with_command(backend, jail, invocation, command)
+    } else {
+        tinybox_jail::spawn_owned_captured_with(backend, jail, command)
     }
 }
 
@@ -466,6 +479,7 @@ impl Drop for RetainedOnDrop {
 pub struct JailLocalHost {
     jail: Jail,
     backend: Arc<dyn JailBackend>,
+    resource_plan: Option<ResourceLimitPlan>,
     limit: usize,
     state: Arc<State>,
 }
@@ -491,6 +505,25 @@ impl JailLocalHost {
         backend: Arc<dyn JailBackend>,
         limit: usize,
     ) -> std::io::Result<Self> {
+        let resource_plan = jail.resources.map(|resources| ResourceLimitPlan {
+            cpu_millis: Some(u64::from(resources.cpu_millis)),
+            memory_bytes: Some(resources.memory_bytes),
+            pids_max: Some(u64::from(resources.pids_max)),
+            disk_bytes: Some(resources.disk_bytes),
+        });
+        Self::with_backend_and_resource_plan(jail, backend, limit, resource_plan)
+    }
+
+    /// Use an explicitly selected provider and independently optional
+    /// resource dimensions from the native request.
+    /// # Errors
+    /// Rejects unavailable providers and unsupported native ownership platforms.
+    pub fn with_backend_and_resource_plan(
+        jail: Jail,
+        backend: Arc<dyn JailBackend>,
+        limit: usize,
+        resource_plan: Option<ResourceLimitPlan>,
+    ) -> std::io::Result<Self> {
         if !cfg!(unix) || !backend.is_available() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
@@ -501,6 +534,7 @@ impl JailLocalHost {
         Ok(Self {
             jail,
             backend,
+            resource_plan,
             limit,
             state: Arc::new(State {
                 active: AtomicUsize::new(0),
@@ -572,10 +606,11 @@ impl JailLocalHost {
         request: &ExecRequest,
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
-        let mut command = crate::LocalHost::command(request)?.into_std();
-        // The host explicitly supplies the approved environment for jailed code.
-        command.env_clear().envs(&request.env);
-        self.collect_command(command, request.stdin.clone(), observer)
+        let invocation = JailInvocation::new(request.clone(), true, self.resource_plan);
+        let command = invocation
+            .command()
+            .map_err(|error| Error::io("prepare native jail command", &error))?;
+        self.collect_command(command, request.stdin.clone(), observer, Some(invocation))
             .await
     }
 
@@ -594,7 +629,8 @@ impl JailLocalHost {
         } else {
             std::process::Stdio::null()
         });
-        self.collect_command(command, payload, Some(observer)).await
+        self.collect_command(command, payload, Some(observer), None)
+            .await
     }
 
     async fn collect_command(
@@ -602,6 +638,7 @@ impl JailLocalHost {
         mut command: std::process::Command,
         payload: Option<Vec<u8>>,
         observer: Option<Arc<dyn ExecutionObserver>>,
+        invocation: Option<JailInvocation>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
         let (memory_event_report, pids_event_report, cpu_event_report) =
@@ -612,6 +649,7 @@ impl JailLocalHost {
         let state = self.state.clone();
         let limit = self.limit;
         let event_observer = observer.clone();
+        let invocation = invocation.clone();
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|error| failure("supervise native jail", error.to_string()))?;
         let (cancel, mut cancelled) = oneshot::channel::<()>();
@@ -623,7 +661,7 @@ impl JailLocalHost {
                 return Err(failure("start native jail", "execution cancelled".into()));
             }
             let child = tokio::task::spawn_blocking(move || {
-                tinybox_jail::spawn_owned_captured_with(backend.as_ref(), &jail, command)
+                spawn_owned(backend.as_ref(), &jail, invocation.as_ref(), command)
             })
             .await
             .map_err(|error| failure("start native jail", error.to_string()))?

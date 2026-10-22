@@ -465,10 +465,22 @@ pub(super) fn collector_with_resources(
     command: &mut tinybox_core::ExecRequest,
 ) -> Result<Arc<tinybox_host::JailLocalHost>> {
     let backend = resource_backend();
+    let resources = request.resources.ok_or_else(invalid)?;
     let jail = prepare_with_resources(root, request, command, backend.as_ref())?;
-    tinybox_host::JailLocalHost::with_backend(jail, backend, tinybox_bus::MAX_OUTPUT_BYTES)
-        .map(Arc::new)
-        .map_err(|_| unavailable())
+    let resource_plan = tinybox_jail::ResourceLimitPlan {
+        cpu_millis: resources.cpu_millis,
+        memory_bytes: resources.memory_bytes,
+        pids_max: resources.pids_max,
+        disk_bytes: resources.disk_bytes,
+    };
+    tinybox_host::JailLocalHost::with_backend_and_resource_plan(
+        jail,
+        backend,
+        tinybox_bus::MAX_OUTPUT_BYTES,
+        Some(resource_plan),
+    )
+    .map(Arc::new)
+    .map_err(|_| unavailable())
 }
 
 #[cfg(test)]
