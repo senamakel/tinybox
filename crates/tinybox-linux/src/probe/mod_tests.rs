@@ -46,6 +46,7 @@ fn a_missing_bwrap_is_reported_before_the_namespace_state() {
     let probe = NamespaceProbe {
         bwrap: None,
         userns: UsernsStatus::RestrictedByAppArmor,
+        probe_error: None,
     };
     assert!(!probe.is_usable());
     assert!(probe.problem().unwrap_or_default().contains("bubblewrap"));
@@ -57,11 +58,13 @@ fn each_blocked_state_gives_an_actionable_message() {
     let ok = NamespaceProbe {
         bwrap: bwrap.clone(),
         userns: UsernsStatus::Available,
+        probe_error: None,
     };
     assert!(ok.is_usable());
     let disabled = NamespaceProbe {
         bwrap: bwrap.clone(),
         userns: UsernsStatus::DisabledBySysctl,
+        probe_error: None,
     };
     assert!(
         disabled
@@ -72,6 +75,7 @@ fn each_blocked_state_gives_an_actionable_message() {
     let restricted = NamespaceProbe {
         bwrap,
         userns: UsernsStatus::RestrictedByAppArmor,
+        probe_error: Some("Operation not permitted".to_owned()),
     };
     assert!(
         restricted
@@ -79,6 +83,36 @@ fn each_blocked_state_gives_an_actionable_message() {
             .unwrap_or_default()
             .contains("AppArmor")
     );
+}
+
+#[test]
+fn a_successful_bwrap_probe_overrides_the_app_armor_sysctl_hint() {
+    let probe = NamespaceProbe {
+        bwrap: Some(PathBuf::from("/usr/bin/bwrap")),
+        userns: UsernsStatus::RestrictedByAppArmor,
+        probe_error: None,
+    };
+
+    assert!(probe.is_usable());
+    assert_eq!(
+        probe.availability(),
+        tinybox_core::SandboxAvailability::Available
+    );
+}
+
+#[test]
+fn a_failed_bwrap_probe_becomes_typed_unavailability_with_actionable_context() {
+    let probe = NamespaceProbe {
+        bwrap: Some(PathBuf::from("/usr/bin/bwrap")),
+        userns: UsernsStatus::RestrictedByAppArmor,
+        probe_error: Some("exited with exit status: 1: Operation not permitted".to_owned()),
+    };
+
+    assert!(matches!(
+        probe.availability(),
+        tinybox_core::SandboxAvailability::Unavailable { reason }
+            if reason.contains("Operation not permitted") && reason.contains("AppArmor")
+    ));
 }
 
 #[cfg(unix)]
