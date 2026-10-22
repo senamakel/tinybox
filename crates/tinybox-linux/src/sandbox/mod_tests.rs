@@ -521,7 +521,8 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert!(scope_script.contains("/sys/fs/cgroup${control_group}/memory.events"));
     assert_eq!(argv[systemd_end + 6], "tinybox-memory-event-scope");
     assert_eq!(argv[systemd_end + 7], scope_unit);
-    assert_eq!(argv[systemd_end + 8], bubblewrap.as_str());
+    assert!(std::path::Path::new(&argv[systemd_end + 8]).is_absolute());
+    assert_eq!(argv[systemd_end + 9], "--unshare-user");
     assert!(
         !argv[..systemd_end]
             .iter()
