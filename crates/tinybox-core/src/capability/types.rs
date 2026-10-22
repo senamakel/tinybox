@@ -15,7 +15,10 @@ pub enum SandboxAvailability {
     /// The backend's required host prerequisites are available.
     Available,
     /// A required host prerequisite is unavailable, with actionable context.
-    Unavailable { reason: String },
+    Unavailable {
+        /// Host-specific explanation of the missing prerequisite.
+        reason: String,
+    },
 }
 
 /// How strongly a sandbox separates guest code from the host.

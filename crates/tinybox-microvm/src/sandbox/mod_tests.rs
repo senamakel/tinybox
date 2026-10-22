@@ -584,19 +584,22 @@ fn runtime_capabilities_explain_each_kvm_readiness_state() {
         (
             KvmStatus::Missing,
             SandboxAvailability::Unavailable {
-                reason: KvmStatus::Missing.advice().unwrap_or_default(),
+                reason: KvmStatus::Missing.advice().unwrap_or_default().to_owned(),
             },
         ),
         (
             KvmStatus::PermissionDenied,
             SandboxAvailability::Unavailable {
-                reason: KvmStatus::PermissionDenied.advice().unwrap_or_default(),
+                reason: KvmStatus::PermissionDenied
+                    .advice()
+                    .unwrap_or_default()
+                    .to_owned(),
             },
         ),
         (
             KvmStatus::Unusable,
             SandboxAvailability::Unavailable {
-                reason: KvmStatus::Unusable.advice().unwrap_or_default(),
+                reason: KvmStatus::Unusable.advice().unwrap_or_default().to_owned(),
             },
         ),
     ] {
