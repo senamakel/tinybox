@@ -145,7 +145,7 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
     assert!(!is_compatible((3, 0)));
     assert!(!is_compatible((2, 0)));
     assert!(!is_compatible((2, 1)));
-    assert!(is_compatible((2, 2)));
+    assert!(!is_compatible((2, 2)));
     assert!(is_compatible((2, 3)));
     assert!(!supports_native_jail_resources((2, 0)));
     assert!(supports_native_jail_resources((2, 1)));
@@ -522,6 +522,7 @@ fn named_members_resolve_to_the_method_catalogue_in_order() {
         STDIO_STATUS,
         START_JAILED_EXEC_WITH_RESOURCES,
         START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
+        PLAN_CHECK,
     ];
     assert_eq!(METHODS, &expected[..]);
     assert_eq!(DESCRIBE, "Describe");
