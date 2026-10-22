@@ -5,9 +5,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxInfo, BoxSpec, BoxState, Capability, Clock, Error, ExecOutput, ExecRequest, Host,
-    IsolationLevel, Result, Sandbox, SandboxCapabilities, SnapshotId, SnapshotSupport, Store,
-    SystemClock,
+    IsolationLevel, Result, Sandbox, SandboxAvailability, SandboxCapabilities, SnapshotId,
+    SnapshotSupport, Store, SystemClock,
 };
+
+use crate::NamespaceProbe;
 
 mod args;
 
@@ -107,6 +109,10 @@ impl Sandbox for NamespaceSandbox {
 
     fn capabilities(&self) -> SandboxCapabilities {
         Self::declared_capabilities(self.limits)
+    }
+
+    fn availability(&self) -> SandboxAvailability {
+        NamespaceProbe::detect().availability()
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {

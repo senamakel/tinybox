@@ -18,10 +18,10 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tinybox_core::{
     BoxId, BoxSpec, Error, ExecRequest, HostRef, MemoryStore, NetworkPolicy, Placement, Resources,
-    Result, Sandbox, SandboxRef, WorkspaceSource,
+    Result, Sandbox, SandboxAvailability, SandboxRef, WorkspaceSource,
 };
 use tinybox_host::LocalHost;
-use tinybox_linux::NamespaceSandbox;
+use tinybox_linux::{NamespaceProbe, NamespaceSandbox, UsernsStatus};
 
 /// Whether the live suite should run at all.
 fn enabled() -> bool {
@@ -30,6 +30,19 @@ fn enabled() -> bool {
 
 fn sandbox() -> NamespaceSandbox {
     NamespaceSandbox::new(Arc::new(LocalHost::new()), Arc::new(MemoryStore::new()))
+}
+
+#[test]
+fn namespace_probe_remains_constructible_from_its_public_fields() {
+    let probe = NamespaceProbe {
+        bwrap: Some("/usr/bin/bwrap".into()),
+        userns: UsernsStatus::DisabledBySysctl,
+    };
+
+    assert!(matches!(
+        probe.availability(),
+        SandboxAvailability::Unavailable { reason } if reason.contains("user namespaces are disabled")
+    ));
 }
 
 fn spec(workspace: &Path) -> Result<BoxSpec> {
@@ -45,6 +58,34 @@ fn workspace() -> Result<TempDir> {
     fs::write(dir.path().join("note.txt"), "workspace file\n")
         .map_err(|error| Error::io("write", &error))?;
     Ok(dir)
+}
+
+#[test]
+fn live_availability_confirms_bwrap_user_namespace_readiness()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    if !enabled() {
+        eprintln!(
+            "SKIP live_availability_confirms_bwrap_user_namespace_readiness: set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests"
+        );
+        return Ok(());
+    }
+
+    match sandbox().availability() {
+        SandboxAvailability::Available => Ok(()),
+        SandboxAvailability::Unavailable { reason }
+            if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_none() =>
+        {
+            eprintln!("SKIP live_availability_confirms_bwrap_user_namespace_readiness: {reason}");
+            Ok(())
+        }
+        SandboxAvailability::Unavailable { reason } => {
+            Err(format!("required namespace runner is unavailable: {reason}").into())
+        }
+        SandboxAvailability::Unknown => {
+            Err("namespace sandbox did not report runtime availability".into())
+        }
+        _ => Err("namespace sandbox reported an unknown availability state".into()),
+    }
 }
 
 /// Run a shell command in a fresh box and return its trimmed stdout.
@@ -195,9 +236,13 @@ fn namespace_resource_runtime_problem() -> Option<String> {
     {
         return Some("set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests".into());
     }
-    let probe = tinybox_linux::NamespaceProbe::detect();
-    if let Some(problem) = probe.problem() {
-        return Some(problem);
+    match sandbox().availability() {
+        SandboxAvailability::Available => {}
+        SandboxAvailability::Unavailable { reason } => return Some(reason),
+        SandboxAvailability::Unknown => {
+            return Some("namespace sandbox did not report runtime availability".into());
+        }
+        _ => return Some("namespace sandbox reported an unknown availability state".into()),
     }
     let scope = std::process::Command::new("systemd-run")
         .args([
