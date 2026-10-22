@@ -288,6 +288,96 @@ async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Resul
 }
 
 #[tokio::test]
+async fn live_pids_limit_rejects_additional_child_processes() -> Result<()> {
+    if let Some(problem) = namespace_resource_runtime_problem() {
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live resource-test prerequisites",
+                message: problem,
+            });
+        }
+        eprintln!("SKIP live_pids_limit_rejects_additional_child_processes: {problem}");
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        let problem = "python3 is unavailable for the process-pressure child";
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live resource-test prerequisites",
+                message: problem.to_owned(),
+            });
+        }
+        eprintln!("SKIP live_pids_limit_rejects_additional_child_processes: {problem}");
+        return Ok(());
+    }
+
+    let dir = workspace()?;
+    let sandbox = NamespaceSandbox::new(Arc::new(LocalHost::new()), Arc::new(MemoryStore::new()))
+        .with_cgroup_limits();
+    let spec = spec(dir.path())?.with_resources(Resources {
+        pids_max: 32,
+        ..Resources::DEFAULT
+    });
+    let info = sandbox.create(&spec).await?;
+    let output = sandbox
+        .exec(
+            &info.id,
+            &ExecRequest::new([
+                "python3",
+                "-c",
+                r#"import errno, os, signal
+children = []
+for _ in range(64):
+    try:
+        pid = os.fork()
+    except OSError as error:
+        if error.errno != errno.EAGAIN:
+            raise
+        print(f"PID_LIMIT_REACHED:{len(children)}")
+        break
+    if pid == 0:
+        os.execl("/bin/sleep", "sleep", "30")
+    children.append(pid)
+else:
+    print(f"PID_LIMIT_NOT_REACHED:{len(children)}")
+for pid in children:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+for pid in children:
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
+"#,
+            ]),
+        )
+        .await?;
+    sandbox.destroy(&info.id).await?;
+
+    let stdout = output.stdout_lossy();
+    let spawned = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("PID_LIMIT_REACHED:"))
+        .and_then(|count| count.parse::<usize>().ok());
+    assert!(
+        output.succeeded() && spawned.is_some_and(|count| (1..64).contains(&count)),
+        "pids-capped child should reach the kernel task limit after spawning some children; exit: {}, stdout: {}, stderr: {}",
+        output.exit_code,
+        stdout,
+        output.stderr_lossy()
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn live_a_denied_network_really_is_denied() -> Result<()> {
     if !enabled() {
         return Ok(());
