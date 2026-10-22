@@ -6,8 +6,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxInfo, BoxSpec, BoxState, Capability, Clock, Error, ExecOutput, ExecRequest, Host,
-    IsolationLevel, Result, Sandbox, SandboxCapabilities, SnapshotId, SnapshotSupport, Store,
-    SystemClock, WorkspaceSource,
+    IsolationLevel, Result, Sandbox, SandboxAvailability, SandboxCapabilities, SnapshotId,
+    SnapshotSupport, Store, SystemClock, WorkspaceSource,
 };
 
 mod config;
@@ -129,6 +129,18 @@ impl MicroVmSandbox {
         SandboxCapabilities::new(IsolationLevel::Hardware, SnapshotSupport::None)
     }
 
+    fn availability_for_kvm_status(status: crate::kvm::KvmStatus) -> SandboxAvailability {
+        match status {
+            crate::kvm::KvmStatus::Available => SandboxAvailability::Available,
+            unavailable => SandboxAvailability::Unavailable {
+                reason: unavailable
+                    .advice()
+                    .unwrap_or("KVM is unavailable")
+                    .to_owned(),
+            },
+        }
+    }
+
     /// The workspace directory a spec names.
     fn workspace(spec: &BoxSpec) -> Result<&std::path::Path> {
         let unsupported = |kind| Error::UnsupportedWorkspaceSource {
@@ -155,6 +167,10 @@ impl Sandbox for MicroVmSandbox {
 
     fn capabilities(&self) -> SandboxCapabilities {
         Self::declared_capabilities()
+    }
+
+    fn availability(&self) -> SandboxAvailability {
+        Self::availability_for_kvm_status(crate::kvm::probe())
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {

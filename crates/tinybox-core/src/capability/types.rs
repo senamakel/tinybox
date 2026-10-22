@@ -2,6 +2,22 @@
 
 use std::fmt;
 
+/// Whether a sandbox's host-specific prerequisites are currently satisfied.
+///
+/// Static sandbox features belong to [`SandboxCapabilities`](crate::SandboxCapabilities).
+/// This value reports runtime readiness, such as whether a microVM host can
+/// open its KVM device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SandboxAvailability {
+    /// The backend does not probe host readiness.
+    Unknown,
+    /// The backend's required host prerequisites are available.
+    Available,
+    /// A required host prerequisite is unavailable, with actionable context.
+    Unavailable { reason: String },
+}
+
 /// How strongly a sandbox separates guest code from the host.
 ///
 /// The ordering is meaningful and deliberate: each level subsumes the ones
