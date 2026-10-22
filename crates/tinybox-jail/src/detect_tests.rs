@@ -149,6 +149,85 @@ fn windows_default_required_spawn_fails_closed_without_appcontainer() -> std::io
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_typed_resource_requests_refuse_before_spawning_without_appcontainer()
+-> std::io::Result<()> {
+    use crate::{JailInvocation, ResourceLimitPlan, spawn_owned_invocation_captured_with};
+    use tinybox_core::{Constraint, Enforcement, ExecRequest};
+
+    let backend = pick_backend();
+    assert_eq!(backend.name(), UNSUPPORTED_BACKEND_NAME);
+    assert!(!backend.is_available());
+
+    let root = tempfile::tempdir()?;
+    let marker = root.path().join("typed-resource-payload-ran");
+    let marker_command = format!("echo launched > \"{}\"", marker.display());
+    let plans = [
+        (
+            Constraint::Cpu,
+            ResourceLimitPlan {
+                cpu_millis: Some(500),
+                ..ResourceLimitPlan::default()
+            },
+        ),
+        (
+            Constraint::Memory,
+            ResourceLimitPlan {
+                memory_bytes: Some(64 * 1024 * 1024),
+                ..ResourceLimitPlan::default()
+            },
+        ),
+        (
+            Constraint::Pids,
+            ResourceLimitPlan {
+                pids_max: Some(8),
+                ..ResourceLimitPlan::default()
+            },
+        ),
+        (
+            Constraint::Disk,
+            ResourceLimitPlan {
+                disk_bytes: Some(1024 * 1024),
+                ..ResourceLimitPlan::default()
+            },
+        ),
+    ];
+
+    for (constraint, resources) in plans {
+        assert_eq!(
+            backend.constraint_support().enforcement(constraint),
+            Enforcement::Unsupported,
+            "Windows without AppContainer must not claim {constraint:?}"
+        );
+        let invocation = JailInvocation::new(
+            ExecRequest::new([
+                "cmd.exe".to_owned(),
+                "/D".to_owned(),
+                "/C".to_owned(),
+                marker_command.clone(),
+            ])
+            .with_cwd(root.path()),
+            true,
+            Some(resources),
+        );
+        let error = spawn_owned_invocation_captured_with(
+            backend.as_ref(),
+            &crate::Jail::new(root.path(), "windows-typed-resource-refusal"),
+            &invocation,
+        )
+        .expect_err("unsupported Windows resource requests must fail closed");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+        assert!(
+            error.to_string().contains(&constraint.to_string()),
+            "refusal should identify the unsupported constraint: {error}"
+        );
+        assert!(!marker.exists(), "unsupported payload must never run");
+    }
+    Ok(())
+}
+
 #[test]
 fn selection_uses_the_first_available_candidate() {
     let picked = pick_from(vec![
