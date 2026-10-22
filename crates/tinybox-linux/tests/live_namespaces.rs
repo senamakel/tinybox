@@ -275,7 +275,8 @@ async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Resul
     sandbox.destroy(&info.id).await?;
 
     assert_ne!(
-        output.exit_code, 0,
+        output.exit_code,
+        0,
         "memory-capped child unexpectedly survived its 192 MiB allocation: {}",
         output.stdout_lossy()
     );
