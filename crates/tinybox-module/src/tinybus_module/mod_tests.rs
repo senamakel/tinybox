@@ -274,6 +274,43 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
 }
 
 #[test]
+fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness() {
+    let response = resources::plan_check(
+        tinybox_bus::PlanCheckRequest {
+            backend: "namespace".into(),
+            constraints: vec![
+                tinybox_bus::ConstraintRequest {
+                    constraint: tinybox_bus::ResourceConstraint::Cpu,
+                    hard: true,
+                },
+                tinybox_bus::ConstraintRequest {
+                    constraint: tinybox_bus::ResourceConstraint::Network,
+                    hard: false,
+                },
+            ],
+        },
+        Platform::Linux,
+    )
+    .expect("Linux namespace backend is registered");
+    assert_eq!(response.backend, "namespace");
+    assert_eq!(
+        response.results,
+        vec![
+            tinybox_bus::ConstraintResult {
+                constraint: tinybox_bus::ResourceConstraint::Cpu,
+                hard: true,
+                enforcement: tinybox_bus::ConstraintEnforcement::Unsupported,
+            },
+            tinybox_bus::ConstraintResult {
+                constraint: tinybox_bus::ResourceConstraint::Network,
+                hard: false,
+                enforcement: tinybox_bus::ConstraintEnforcement::Enforced,
+            },
+        ]
+    );
+}
+
+#[test]
 fn an_empty_registry_is_reported_as_none_rather_than_omitted() {
     // A build with no backends must say so plainly rather than leaving the
     // reader to infer it from an absent list.
