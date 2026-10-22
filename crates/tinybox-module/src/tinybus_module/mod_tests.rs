@@ -970,11 +970,19 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
         resource: resource.clone(),
         process: process_id.clone(),
     };
+    #[cfg(windows)]
+    let argv = vec![
+        "cmd.exe".into(),
+        "/C".into(),
+        "ping -n 6 127.0.0.1 >NUL & exit /b 7".into(),
+    ];
+    #[cfg(not(windows))]
+    let argv = vec!["/bin/sh".into(), "-c".into(), "sleep 5; exit 7".into()];
     let request = SpawnRequest {
         process: process_id.clone(),
         command: ExecRequest {
             resource: resource.clone(),
-            argv: vec!["/bin/sh".into(), "-c".into(), "exit 7".into()],
+            argv,
             cwd: None,
             env: std::collections::BTreeMap::new(),
             stdin: None,
@@ -992,7 +1000,7 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
     );
 
     let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
-        tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+        tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
             .await
             .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
             .map_err(|error| tinybus::Error::failed(error.to_string()))
