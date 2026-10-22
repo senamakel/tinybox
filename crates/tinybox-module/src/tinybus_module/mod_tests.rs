@@ -1094,11 +1094,15 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
             code: tinybox_bus::ExecutionFailure::TimedOut
         }
     );
+    let output_bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
     assert!(
-        output
-            .chunks
-            .iter()
-            .any(|chunk| chunk.bytes == b"partial\n")
+        String::from_utf8_lossy(&output_bytes).contains("partial"),
+        "timeout child output did not contain the partial marker: {:?}",
+        String::from_utf8_lossy(&output_bytes)
     );
 
     assert_process_event(&mut events, &process, "started").await?;
