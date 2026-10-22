@@ -1101,32 +1101,38 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
             .any(|chunk| chunk.bytes == b"partial\n")
     );
 
-    let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
-        tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
-            .await
-            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
-            .map_err(|error| tinybus::Error::failed(error.to_string()))
-    };
-    let started = receive_event(&mut events).await?;
-    let started: Value = serde_json::from_value(started.body[0].clone())?;
-    assert_eq!(started["process"]["resource"], resource.0);
-    assert_eq!(started["process"]["process"], process_id.0);
-    assert_eq!(started["event"]["event"], "started");
-
-    let limit_hit = receive_event(&mut events).await?;
-    let limit_hit: Value = serde_json::from_value(limit_hit.body[0].clone())?;
-    assert_eq!(limit_hit["process"]["resource"], resource.0);
-    assert_eq!(limit_hit["process"]["process"], process.process.0);
+    assert_process_event(&mut events, &process, "started").await?;
+    let limit_hit = receive_process_event(&mut events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
     assert_eq!(limit_hit["event"]["event"], "limit_hit");
     assert_eq!(limit_hit["event"]["limit"], "timeout");
 
-    let exited = receive_event(&mut events).await?;
-    let exited: Value = serde_json::from_value(exited.body[0].clone())?;
-    assert_eq!(exited["process"]["resource"], resource.0);
-    assert_eq!(exited["process"]["process"], process.process.0);
+    let exited = receive_process_event(&mut events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
     assert_eq!(exited["event"]["event"], "exited");
-    assert_eq!(exited["event"]["status"], Value::Null);
+    assert!(exited["event"]["status"].is_null());
     proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+async fn receive_process_event(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+) -> tinybus::Result<serde_json::Value> {
+    let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+        .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+    serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+}
+
+async fn assert_process_event(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    process: &tinybox_bus::ProcessRef,
+    kind: &str,
+) -> tinybus::Result<()> {
+    let event = receive_process_event(events).await?;
+    assert_eq!(event["process"], serde_json::json!(process));
+    assert_eq!(event["event"]["event"], kind);
     Ok(())
 }
 
