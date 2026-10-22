@@ -267,7 +267,8 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
     assert!(
         BoxService::default()
             .members()
-            .contains(&tinybox_bus::names::PLAN_CHECK)
+            .iter()
+            .any(|member| member.to_string() == tinybox_bus::names::PLAN_CHECK)
     );
     assert!(tinybox_bus::METHODS.contains(&tinybox_bus::names::PLAN_CHECK));
     assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 3));
@@ -277,7 +278,7 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
 
 #[test]
 fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness() {
-    let response = resources::plan_check(
+    let response = super::resources::plan_check(
         tinybox_bus::PlanCheckRequest {
             backend: "namespace".into(),
             constraints: vec![
