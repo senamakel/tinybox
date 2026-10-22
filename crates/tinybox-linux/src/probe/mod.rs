@@ -60,6 +60,11 @@ pub struct NamespaceProbe {
     pub bwrap: Option<PathBuf>,
     /// Whether user namespaces can be created without privilege.
     pub userns: UsernsStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetectedNamespace {
+    probe: NamespaceProbe,
     probe_error: Option<String>,
 }
 
@@ -72,11 +77,10 @@ impl NamespaceProbe {
     /// child on every call.
     #[must_use]
     pub fn detect() -> Self {
-        static DETECTED: OnceLock<NamespaceProbe> = OnceLock::new();
-        DETECTED.get_or_init(Self::detect_uncached).clone()
+        detected_namespace().probe.clone()
     }
 
-    fn detect_uncached() -> Self {
+    fn detect_uncached() -> DetectedNamespace {
         let path = std::env::var_os("PATH").unwrap_or_default();
         let read = |name: &str| std::fs::read_to_string(Path::new("/proc/sys").join(name)).ok();
         let bwrap = find_on_path("bwrap", &path);
@@ -91,9 +95,8 @@ impl NamespaceProbe {
             }
             _ => None,
         };
-        Self {
-            bwrap,
-            userns,
+        DetectedNamespace {
+            probe: Self { bwrap, userns },
             probe_error,
         }
     }
@@ -107,6 +110,14 @@ impl NamespaceProbe {
     /// The first thing wrong, phrased as what to do about it.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
+        let detected = detected_namespace();
+        let probe_error = (detected.probe == *self)
+            .then_some(detected.probe_error.as_deref())
+            .flatten();
+        self.problem_with_probe_error(probe_error)
+    }
+
+    fn problem_with_probe_error(&self, probe_error: Option<&str>) -> Option<String> {
         if self.bwrap.is_none() {
             return Some(
                 "bwrap is not on PATH; install bubblewrap (for example `apt install bubblewrap`)"
@@ -120,7 +131,7 @@ impl NamespaceProbe {
                     .to_owned(),
             );
         }
-        self.probe_error.as_ref().map(|error| {
+        probe_error.map(|error| {
             let hint = if self.userns == UsernsStatus::RestrictedByAppArmor {
                 "AppArmor may block unprivileged namespaces; install a bwrap profile that grants `userns` or use another backend"
             } else {
@@ -138,6 +149,11 @@ impl NamespaceProbe {
             None => tinybox_core::SandboxAvailability::Available,
         }
     }
+}
+
+fn detected_namespace() -> &'static DetectedNamespace {
+    static DETECTED: OnceLock<DetectedNamespace> = OnceLock::new();
+    DETECTED.get_or_init(NamespaceProbe::detect_uncached)
 }
 
 /// Run the fixed, read-only user-namespace check and bound its lifetime.
