@@ -49,8 +49,8 @@ impl MemoryEventReport {
         jail: &Jail,
         runtime_dir: &std::path::Path,
     ) -> Option<Self> {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         use std::io::Write;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
         let has_scope = command
             .get_args()
