@@ -17,6 +17,17 @@ impl ShellContext {
     ) -> Result<Arc<Self>> {
         Self::prepare_owned_with(move || Self::prepare(request, &root, &resolved)).await
     }
+    pub(super) async fn prepare_owned_with_resources(
+        request: ShellExecRequest,
+        root: std::path::PathBuf,
+        resolved: tinybox_core::ExecRequest,
+        resources: tinybox_bus::NativeJailResourceRequest,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_owned_with(move || {
+            Self::prepare_with_resource_limits(request, &root, &resolved, Some(resources))
+        })
+        .await
+    }
     async fn prepare_owned_with(
         prepare: impl FnOnce() -> Result<Arc<Self>> + Send + 'static,
     ) -> Result<Arc<Self>> {
@@ -32,12 +43,35 @@ impl ShellContext {
         root: &Path,
         resolved: &tinybox_core::ExecRequest,
     ) -> Result<Arc<Self>> {
-        Self::prepare_with_backend(request, root, resolved, tinybox_jail::default_backend())
+        Self::prepare_with_resource_limits(request, root, resolved, None)
     }
     fn prepare_with_backend(
         request: ShellExecRequest,
         root: &Path,
         resolved: &tinybox_core::ExecRequest,
+        backend: Arc<dyn tinybox_jail::JailBackend>,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_with_backend_and_resource_limits(request, root, resolved, None, backend)
+    }
+    fn prepare_with_resource_limits(
+        request: ShellExecRequest,
+        root: &Path,
+        resolved: &tinybox_core::ExecRequest,
+        resources: Option<tinybox_bus::NativeJailResourceRequest>,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_with_backend_and_resource_limits(
+            request,
+            root,
+            resolved,
+            resources,
+            tinybox_jail::default_backend(),
+        )
+    }
+    fn prepare_with_backend_and_resource_limits(
+        request: ShellExecRequest,
+        root: &Path,
+        resolved: &tinybox_core::ExecRequest,
+        resources: Option<tinybox_bus::NativeJailResourceRequest>,
         backend: Arc<dyn tinybox_jail::JailBackend>,
     ) -> Result<Arc<Self>> {
         validate_runtime(&request)?;
@@ -104,7 +138,31 @@ impl ShellContext {
         for name in selection.remove_environment {
             environment.remove(&name);
         }
-        let host = if let Some(config) = &request.jail {
+        let host = if let Some(resources) = resources {
+            let config = request.jail.as_ref().ok_or_else(invalid)?;
+            let mut jail = tinybox_bus::NativeJailRequest {
+                jail: config.clone(),
+                resources: Some(resources),
+            };
+            jail.jail
+                .read_write
+                .push(scratch.path().to_string_lossy().into_owned());
+            let selection = tinybox_host::select_shell(&request.shell);
+            let mut argv = vec![selection.program];
+            argv.extend(selection.arguments);
+            let mut native_request = tinybox_core::ExecRequest {
+                resource: request.resource.clone(),
+                argv,
+                cwd: resolved.cwd.clone(),
+                env: environment.clone(),
+                stdin: request.stdin.clone(),
+            };
+            ShellHost::Jailed(super::native_jail::collector_with_resources(
+                root,
+                &jail,
+                &mut native_request,
+            )?)
+        } else if let Some(config) = &request.jail {
             let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
             jail.read_write.push(scratch.path().to_path_buf());
             if config.enforcement == tinybox_bus::JailEnforcement::Enforced {

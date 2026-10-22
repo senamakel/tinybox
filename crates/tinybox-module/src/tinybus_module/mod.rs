@@ -321,7 +321,7 @@ impl BoxService {
         .await
     }
 
-    /// Start a module-owned shell in a native jail with explicit contract 2.1 limits.
+    /// Start a module-owned shell in a native jail with explicit contract 2.2 limits.
     async fn start_native_shell_exec_with_resources(
         &self,
         request: tinybox_bus::ShellExecRequest,

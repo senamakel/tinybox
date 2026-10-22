@@ -49,6 +49,7 @@ enum CollectorPreparation {
             tinybox_bus::ShellExecRequest,
             std::path::PathBuf,
             tinybox_core::ExecRequest,
+            Option<tinybox_bus::NativeJailResourceRequest>,
         )>,
     ),
 }
@@ -57,13 +58,17 @@ impl CollectorPreparation {
         match self {
             Self::Ready(collector) => Ok(collector),
             Self::Shell(preparation) => {
-                let (request, root, resolved) = *preparation;
-                Ok(Collector::Shell(
-                    super::super::native_shell::ShellContext::prepare_owned(
-                        request, root, resolved,
+                let (request, root, resolved, resources) = *preparation;
+                let context = if let Some(resources) = resources {
+                    super::super::native_shell::ShellContext::prepare_owned_with_resources(
+                        request, root, resolved, resources,
                     )
-                    .await?,
-                ))
+                    .await?
+                } else {
+                    super::super::native_shell::ShellContext::prepare_owned(request, root, resolved)
+                        .await?
+                };
+                Ok(Collector::Shell(context))
             }
         }
     }
@@ -209,7 +214,16 @@ fn select_execution_collector(
                 "native shell requires directory resource",
             )
         })?;
-        CollectorPreparation::Shell(Box::new((shell.clone(), root.clone(), resolved.clone())))
+        let resources = match jail {
+            Some(NativeJailRequest::Resources(request)) => request.resources,
+            Some(NativeJailRequest::Legacy(_)) | None => None,
+        };
+        CollectorPreparation::Shell(Box::new((
+            shell.clone(),
+            root.clone(),
+            resolved.clone(),
+            resources,
+        )))
     } else {
         CollectorPreparation::Ready(select_collector(entry, jail, resolved)?)
     })

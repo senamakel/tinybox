@@ -726,6 +726,49 @@ async fn resource_aware_native_shell_requires_jail_without_consuming_its_reserva
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn resource_aware_native_shell_runs_through_the_requested_resource_launcher()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    if !native_resource_bus_available() {
+        eprintln!("skipped: rootless systemd scope and bubblewrap namespaces are unavailable");
+        return Ok(());
+    }
+    let resources = Resources::default();
+    let resource = local_resource(&resources).await?;
+    let state = tempfile::tempdir()?;
+    let mut shell =
+        shell_request(&resources, &resource, state.path(), "printf resource-shell").await?;
+    shell.jail = Some(tinybox_bus::NativeJailConfig {
+        read_only: Vec::new(),
+        read_write: Vec::new(),
+        allow_net: false,
+        allow_subprocess: true,
+        enforcement: tinybox_bus::JailEnforcement::Enforced,
+        require_process_isolation: true,
+        deny_read: Vec::new(),
+        resources: None,
+    });
+    let process = resources
+        .start_native_shell_exec_with_resources(
+            shell,
+            tinybox_bus::NativeJailResourceRequest {
+                cpu_millis: Some(1000),
+                memory_bytes: Some(64 * 1024 * 1024),
+                pids_max: Some(16),
+                disk_bytes: None,
+            },
+        )
+        .await?;
+    completed(&resources, &process).await?;
+    let output = resources.read_output(&process, 0).await?;
+    assert_eq!(output.state, ExecutionState::Exited { exit_code: 0 });
+    assert_eq!(output.chunks[0].bytes, b"resource-shell");
+    resources.release_output(&process).await?;
+    resources.close(&resource).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn native_shell_timeout_acknowledges_child_cleanup_before_output_release()
 -> std::result::Result<(), Box<dyn std::error::Error>> {

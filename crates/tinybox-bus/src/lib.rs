@@ -232,7 +232,7 @@ pub mod names {
     pub const STDIO_STATUS: &str = "StdioStatus";
     /// Wire name of the 2.1 resource-aware jailed exec member.
     pub const START_JAILED_EXEC_WITH_RESOURCES: &str = "StartJailedExecWithResources";
-    /// Wire name of the 2.1 resource-aware native shell member.
+    /// Wire name of the 2.2 resource-aware native shell member.
     pub const START_NATIVE_SHELL_EXEC_WITH_RESOURCES: &str = "StartNativeShellExecWithResources";
 }
 
