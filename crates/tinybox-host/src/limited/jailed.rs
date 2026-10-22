@@ -128,10 +128,12 @@ fn jail_exposes_path(jail: &Jail, path: &std::path::Path) -> bool {
 
 #[cfg(target_os = "linux")]
 fn report_memory_termination(
-    confirmed: bool,
+    report: Option<&MemoryEventReport>,
     target: Option<&Arc<dyn ExecutionObserver>>,
 ) {
-    if confirmed && let Some(observer) = target {
+    if report.is_some_and(MemoryEventReport::oom_kill_observed)
+        && let Some(observer) = target
+    {
         observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
     }
 }
@@ -414,12 +416,7 @@ impl JailLocalHost {
         drop(cancel);
         let output = result??;
         #[cfg(target_os = "linux")]
-        report_memory_termination(
-            memory_event_report
-                .as_ref()
-                .is_some_and(MemoryEventReport::oom_kill_observed),
-            event_observer.as_ref(),
-        );
+        report_memory_termination(memory_event_report.as_ref(), event_observer.as_ref());
         Ok(output)
     }
 }
