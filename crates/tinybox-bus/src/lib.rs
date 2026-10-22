@@ -244,6 +244,8 @@ pub mod names {
     pub const START_JAILED_EXEC_WITH_RESOURCES: &str = "StartJailedExecWithResources";
     /// Wire name of the 2.2 resource-aware native shell member.
     pub const START_NATIVE_SHELL_EXEC_WITH_RESOURCES: &str = "StartNativeShellExecWithResources";
+    /// Wire name of the typed per-backend constraint preflight member.
+    pub const PLAN_CHECK: &str = "PlanCheck";
 }
 
 /// Supported methods in this contract, including the original discovery
@@ -292,7 +294,76 @@ pub const METHODS: &[&str] = &[
     names::STDIO_STATUS,
     names::START_JAILED_EXEC_WITH_RESOURCES,
     names::START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
+    names::PLAN_CHECK,
 ];
+
+/// A resource constraint requested for a sandbox backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResourceConstraint {
+    /// Confine filesystem reads and writes to granted paths.
+    Filesystem,
+    /// Deny external network access.
+    Network,
+    /// Cap CPU consumption.
+    Cpu,
+    /// Cap resident memory.
+    Memory,
+    /// Cap total processes and threads.
+    Pids,
+    /// Cap writable disk usage.
+    Disk,
+    /// Forbid creating child processes.
+    Subprocess,
+}
+
+/// Enforcement a selected backend declares for a requested constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConstraintEnforcement {
+    /// The backend does not implement the constraint.
+    Unsupported,
+    /// The backend provides partial or advisory behavior.
+    BestEffort,
+    /// The backend fully enforces the constraint.
+    Enforced,
+}
+
+/// One requested constraint and whether the caller requires full enforcement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstraintRequest {
+    /// Requested constraint.
+    pub constraint: ResourceConstraint,
+    /// Whether unsupported or best-effort support is unacceptable to the caller.
+    pub hard: bool,
+}
+
+/// Inspect enforcement for one explicit backend without creating a resource.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanCheckRequest {
+    /// Backend identifier, such as `docker`, `namespace`, or `passthrough`.
+    pub backend: String,
+    /// Constraints to inspect, in caller-selected diagnostic order.
+    pub constraints: Vec<ConstraintRequest>,
+}
+
+/// One backend's enforcement result for a requested constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstraintResult {
+    /// Constraint corresponding to the request entry.
+    pub constraint: ResourceConstraint,
+    /// Hardness flag copied from the request.
+    pub hard: bool,
+    /// Enforcement declared by the selected backend.
+    pub enforcement: ConstraintEnforcement,
+}
+
+/// Ordered, side-effect-free preflight result for one backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanCheckResponse {
+    /// Backend that was checked.
+    pub backend: String,
+    /// One result per request constraint, preserving request order.
+    pub results: Vec<ConstraintResult>,
+}
 
 /// Facts about the detected native directory-jail backend.
 /// Hosts apply their own execution policy to these facts.
