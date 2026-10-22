@@ -693,6 +693,11 @@ async fn assert_pids_event_sequence(
     let started = next_memory_event(events).await?;
     assert_eq!(started["process"], serde_json::json!(process));
     assert_eq!(started["event"]["event"], "started");
+    let denied = next_memory_event(events).await?;
+    assert_eq!(denied["process"], serde_json::json!(process));
+    assert_eq!(denied["event"]["event"], "denied");
+    assert_eq!(denied["event"]["kind"], "subprocess");
+    assert_eq!(denied["event"]["target"], serde_json::Value::Null);
     let limit_hit = next_memory_event(events).await?;
     assert_eq!(limit_hit["process"], serde_json::json!(process));
     assert_eq!(limit_hit["event"]["event"], "limit_hit");
