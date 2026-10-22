@@ -291,6 +291,145 @@ int main(int argc, char **argv) {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn live_seatbelt_canonicalizes_private_tmp_deny_aliases() -> std::io::Result<()> {
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let temp = tempfile::Builder::new()
+        .prefix("tinybox-private-alias-")
+        .tempdir_in("/tmp")?;
+    let alias_root = temp.path().to_path_buf();
+    let root = alias_root.canonicalize()?;
+    assert_ne!(
+        alias_root, root,
+        "the live test requires /tmp to resolve through its /private alias"
+    );
+    let allowed_file = root.join("allowed.txt");
+    let protected_via_alias = alias_root.join("protected.txt");
+    let protected_canonical = root.join("protected.txt");
+    fs::write(&allowed_file, b"allowed")?;
+    fs::write(&protected_via_alias, b"protected")?;
+
+    const READ_PROBE: &str = r#"
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    char byte;
+    int file = open(argv[1], O_RDONLY);
+    if (file < 0 || read(file, &byte, 1) != 1) return 3;
+    (void)close(file);
+    emit("control-readable\n", 17);
+
+    file = open(argv[2], O_RDONLY);
+    if (file < 0 && (errno == EACCES || errno == EPERM)) {
+        emit("alias-denied\n", 13);
+    } else if (file >= 0) {
+        emit("alias-readable\n", 15);
+        (void)close(file);
+    } else {
+        return 4;
+    }
+    emit("continued\n", 10);
+    return 0;
+}
+"#;
+    let source = root.join("private_alias_probe.c");
+    fs::write(&source, READ_PROBE)?;
+    let helper = root.join("private_alias_probe");
+    let compilation = Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()?;
+    assert!(
+        compilation.status.success(),
+        "could not compile private-alias probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let run_probe = |jail: &Jail| -> std::io::Result<std::process::Output> {
+        let mut command = Command::new(&helper);
+        command.arg(&allowed_file).arg(&protected_canonical);
+        SeatbeltBackend::new()
+            .spawn_captured(jail, command)?
+            .wait_with_output()
+    };
+
+    let control = run_probe(&Jail::new(&root, "private-alias-control"))?;
+    let control_stdout = String::from_utf8_lossy(&control.stdout);
+    assert!(
+        control.status.success(),
+        "unrestricted file-read control failed: status {}, stdout: {control_stdout:?}, stderr: {:?}",
+        control.status,
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("control-readable"),
+        "stdout: {control_stdout:?}"
+    );
+    assert!(
+        control_stdout.contains("alias-readable"),
+        "stdout: {control_stdout:?}"
+    );
+    assert!(
+        control_stdout.contains("continued"),
+        "stdout: {control_stdout:?}"
+    );
+
+    let mut jail = Jail::new(&root, "private-alias-denial");
+    jail.deny_read.push(protected_via_alias);
+    jail.canonicalize()?;
+    assert_eq!(jail.deny_read, [protected_canonical.clone()]);
+    let denied = run_probe(&jail)?;
+    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    assert!(
+        denied.status.success(),
+        "denied file-read probe did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
+        denied.status,
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("control-readable"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        denied_stdout.contains("alias-denied"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        !denied_stdout.contains("alias-readable"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        denied_stdout.contains("continued"),
+        "stdout: {denied_stdout:?}"
+    );
+    eprintln!("[seatbelt-live] /private tmp deny alias behavior passed");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn live_seatbelt_denies_configured_file_writes_without_stopping_the_process() -> std::io::Result<()>
 {
     use std::process::Command;
