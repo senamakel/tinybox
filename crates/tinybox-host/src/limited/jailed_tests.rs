@@ -4,6 +4,16 @@ use std::result::Result;
 use std::sync::Arc;
 use tinybox_core::{ExecRequest, Host};
 
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_event_report_accepts_only_a_valid_oom_kill_counter() {
+    assert_eq!(super::parse_oom_kill_counter("0\n"), Some(0));
+    assert_eq!(super::parse_oom_kill_counter("1\n"), Some(1));
+    assert_eq!(super::parse_oom_kill_counter("oom_kill 1\n"), None);
+    assert_eq!(super::parse_oom_kill_counter(""), None);
+    assert_eq!(super::parse_oom_kill_counter("1\n2\n"), None);
+}
+
 struct FixtureBackend;
 impl tinybox_jail::JailBackend for FixtureBackend {
     fn name(&self) -> &'static str {
