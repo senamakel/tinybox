@@ -493,11 +493,13 @@ fn nested_user_namespaces_are_blocked_on_a_hardened_backend() -> io::Result<()> 
         return Ok(());
     };
     if backend.isolation() < tinybox_core::IsolationLevel::Process {
-        // Only reachable on bubblewrap < 0.8; CI's bubblewrap has the flag.
-        if std::env::var_os("TINYBOX_REQUIRE_BWRAP").is_some_and(|v| v == "1") {
-            return Err(io::Error::other("bwrap lacks --disable-userns"));
-        }
-        eprintln!("skipped: bwrap lacks --disable-userns");
+        // `TINYBOX_REQUIRE_BWRAP` requires a functioning backend, not every
+        // optional bwrap feature. Older distro packages lack this flag; the
+        // backend must report the weaker capability rather than claim that it
+        // blocks nested user namespaces.
+        assert_eq!(backend.isolation(), tinybox_core::IsolationLevel::None);
+        assert!(!backend.is_suitable_for_untrusted_jail(&jail(tempfile::tempdir()?.path())));
+        eprintln!("skipped: installed bwrap lacks --disable-userns; isolation reported as none");
         return Ok(());
     }
     let start = Instant::now();
