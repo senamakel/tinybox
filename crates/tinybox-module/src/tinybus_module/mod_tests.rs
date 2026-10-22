@@ -271,9 +271,16 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
             .any(|member| member.to_string() == tinybox_bus::names::PLAN_CHECK)
     );
     assert!(tinybox_bus::METHODS.contains(&tinybox_bus::names::PLAN_CHECK));
-    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 3));
+    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 4));
     let capabilities = capabilities_for(Platform::Linux);
-    assert_eq!(capabilities.contract_version, (2, 3));
+    assert_eq!(capabilities.contract_version, (2, 4));
+}
+
+#[test]
+fn process_event_signal_is_declared_in_the_current_contract() {
+    assert_eq!(tinybox_bus::SIGNALS, &[tinybox_bus::names::PROCESS_EVENT]);
+    assert_eq!(tinybox_bus::names::PROCESS_EVENT, "ProcessEvent");
+    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 4));
 }
 
 #[test]
@@ -926,6 +933,90 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
             .await
             .is_err()
     );
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus::Result<()> {
+    use serde_json::Value;
+    use tinybox_bus::{
+        CreateRequest, ExecRequest, ProcessRef, ReserveRequest, ResourceId, SpawnRequest, Workspace,
+    };
+
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(".".into()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    #[cfg(windows)]
+    let argv = vec![
+        "cmd.exe".into(),
+        "/C".into(),
+        "ping -n 6 127.0.0.1 >NUL & exit /b 7".into(),
+    ];
+    #[cfg(not(windows))]
+    let argv = vec!["/bin/sh".into(), "-c".into(), "sleep 5; exit 7".into()];
+    let request = SpawnRequest {
+        process: process_id.clone(),
+        command: ExecRequest {
+            resource: resource.clone(),
+            argv,
+            cwd: None,
+            env: std::collections::BTreeMap::new(),
+            stdin: None,
+        },
+    };
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>("StartExec", (request.clone(),))
+            .await?,
+        process
+    );
+    assert_eq!(
+        proxy.call::<ProcessRef>("StartExec", (request,)).await?,
+        process
+    );
+
+    let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
+        tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+            .await
+            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+            .map_err(|error| tinybus::Error::failed(error.to_string()))
+    };
+    let started = receive_event(&mut events).await?;
+    let started: Value = serde_json::from_value(started.body[0].clone())?;
+    assert_eq!(started["process"]["resource"], resource.0);
+    assert_eq!(started["process"]["process"], process_id.0);
+    assert_eq!(started["event"]["event"], "started");
+
+    let exited = receive_event(&mut events).await?;
+    let exited: Value = serde_json::from_value(exited.body[0].clone())?;
+    assert_eq!(exited["process"]["resource"], resource.0);
+    assert_eq!(exited["process"]["process"], process.process.0);
+    assert_eq!(exited["event"]["event"], "exited");
+    assert_eq!(exited["event"]["status"], 7);
     proxy.call::<()>("Close", (resource,)).await?;
     Ok(())
 }
