@@ -8,11 +8,17 @@ use tinybox_bus::{ExecutionFailure, OutputBatch};
 
 pub(super) const MAX_STREAM_EXECUTIONS: usize = 32;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NativeJailRequest {
+    Legacy(tinybox_bus::NativeJailConfig),
+    Resources(tinybox_bus::NativeJailRequest),
+}
+
 pub(super) struct StreamExecution {
     request: SpawnRequest,
     shell: Option<tinybox_bus::ShellExecRequest>,
     platform_shell: Option<tinybox_bus::SelectShellRequest>,
-    jail: Option<tinybox_bus::NativeJailConfig>,
+    jail: Option<NativeJailRequest>,
     journal: Arc<OutputJournal>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     collector: Collector,
@@ -43,6 +49,7 @@ enum CollectorPreparation {
             tinybox_bus::ShellExecRequest,
             std::path::PathBuf,
             tinybox_core::ExecRequest,
+            Option<tinybox_bus::NativeJailResourceRequest>,
         )>,
     ),
 }
@@ -51,13 +58,17 @@ impl CollectorPreparation {
         match self {
             Self::Ready(collector) => Ok(collector),
             Self::Shell(preparation) => {
-                let (request, root, resolved) = *preparation;
-                Ok(Collector::Shell(
-                    super::super::native_shell::ShellContext::prepare_owned(
-                        request, root, resolved,
+                let (request, root, resolved, resources) = *preparation;
+                let context = if let Some(resources) = resources {
+                    super::super::native_shell::ShellContext::prepare_owned_with_resources(
+                        request, root, resolved, resources,
                     )
-                    .await?,
-                ))
+                    .await?
+                } else {
+                    super::super::native_shell::ShellContext::prepare_owned(request, root, resolved)
+                        .await?
+                };
+                Ok(Collector::Shell(context))
             }
         }
     }
@@ -128,8 +139,8 @@ impl Collector {
 }
 fn select_collector(
     entry: &super::Resource,
-    jail: Option<&tinybox_bus::NativeJailConfig>,
-    resolved: &tinybox_core::ExecRequest,
+    jail: Option<&NativeJailRequest>,
+    resolved: &mut tinybox_core::ExecRequest,
 ) -> Result<Collector> {
     Ok(if let Some(config) = jail {
         if !entry.native_host || entry.local_sandbox.is_none() {
@@ -144,12 +155,17 @@ fn select_collector(
                 "native jail requires a directory resource",
             )
         })?;
-        Collector::Jailed(super::super::native_jail::collector(
-            root,
-            config,
-            resolved,
-            tinybox_jail::default_backend(),
-        )?)
+        Collector::Jailed(match config {
+            NativeJailRequest::Legacy(config) => super::super::native_jail::collector(
+                root,
+                config,
+                resolved,
+                tinybox_jail::default_backend(),
+            )?,
+            NativeJailRequest::Resources(config) => {
+                super::super::native_jail::collector_with_resources(root, config, resolved)?
+            }
+        })
     } else {
         let native = Arc::new(tinybox_host::LimitedLocalHost::new(
             tinybox_bus::MAX_OUTPUT_BYTES,
@@ -181,9 +197,9 @@ fn require_owned_collector(entry: &super::Resource) -> Result<()> {
 }
 fn select_execution_collector(
     entry: &super::Resource,
-    jail: Option<&tinybox_bus::NativeJailConfig>,
+    jail: Option<&NativeJailRequest>,
     shell: Option<&tinybox_bus::ShellExecRequest>,
-    resolved: &tinybox_core::ExecRequest,
+    resolved: &mut tinybox_core::ExecRequest,
 ) -> Result<CollectorPreparation> {
     Ok(if let Some(shell) = shell {
         if !entry.native_host || entry.local_sandbox.is_none() {
@@ -198,7 +214,16 @@ fn select_execution_collector(
                 "native shell requires directory resource",
             )
         })?;
-        CollectorPreparation::Shell(Box::new((shell.clone(), root.clone(), resolved.clone())))
+        let resources = match jail {
+            Some(NativeJailRequest::Resources(request)) => request.resources,
+            Some(NativeJailRequest::Legacy(_)) | None => None,
+        };
+        CollectorPreparation::Shell(Box::new((
+            shell.clone(),
+            root.clone(),
+            resolved.clone(),
+            resources,
+        )))
     } else {
         CollectorPreparation::Ready(select_collector(entry, jail, resolved)?)
     })
@@ -206,7 +231,7 @@ fn select_execution_collector(
 fn prepare_execution(
     entry: &super::Resource,
     request: &SpawnRequest,
-    jail: Option<&tinybox_bus::NativeJailConfig>,
+    jail: Option<&NativeJailRequest>,
     shell: Option<&tinybox_bus::ShellExecRequest>,
     platform_shell: Option<&tinybox_bus::SelectShellRequest>,
 ) -> Result<(tinybox_core::ExecRequest, CollectorPreparation)> {
@@ -233,7 +258,7 @@ fn prepare_execution(
         // Resolve resource cwd and environment; the shell builder supplies argv.
         native_request.argv = vec!["shell".into()];
     }
-    let resolved = if let Some(sandbox) = &entry.local_sandbox {
+    let mut resolved = if let Some(sandbox) = &entry.local_sandbox {
         sandbox
             .resolve_command(&entry.id, &native_request)
             .map_err(|error| backend_error(&error))?
@@ -252,7 +277,7 @@ fn prepare_execution(
             shell.clone(),
         ))
     } else {
-        select_execution_collector(entry, jail, shell, &resolved)?
+        select_execution_collector(entry, jail, shell, &mut resolved)?
     };
     Ok((resolved, collector))
 }
@@ -260,7 +285,7 @@ impl StreamExecution {
     fn check_replay(
         &self,
         request: &SpawnRequest,
-        jail: Option<&tinybox_bus::NativeJailConfig>,
+        jail: Option<&NativeJailRequest>,
         shell: Option<&tinybox_bus::ShellExecRequest>,
         platform_shell: Option<&tinybox_bus::SelectShellRequest>,
     ) -> Result<()> {
@@ -284,7 +309,7 @@ impl StreamExecution {
         request: SpawnRequest,
         resolved: tinybox_core::ExecRequest,
         collector: Collector,
-        jail: Option<tinybox_bus::NativeJailConfig>,
+        jail: Option<NativeJailRequest>,
         shell: Option<tinybox_bus::ShellExecRequest>,
         platform_shell: Option<tinybox_bus::SelectShellRequest>,
     ) -> Self {
@@ -407,8 +432,21 @@ impl Resources {
         request: SpawnRequest,
         config: tinybox_bus::NativeJailConfig,
     ) -> Result<ProcessRef> {
-        self.start_with_jail(request, Some(config), None, None)
+        self.start_with_jail(request, Some(NativeJailRequest::Legacy(config)), None, None)
             .await
+    }
+    pub(in crate::tinybus_module) async fn start_jailed_exec_with_resources(
+        &self,
+        request: SpawnRequest,
+        config: tinybox_bus::NativeJailRequest,
+    ) -> Result<ProcessRef> {
+        self.start_with_jail(
+            request,
+            Some(NativeJailRequest::Resources(config)),
+            None,
+            None,
+        )
+        .await
     }
     pub(in crate::tinybus_module) async fn start_shell_exec(
         &self,
@@ -424,8 +462,44 @@ impl Resources {
                 stdin: shell.stdin.clone(),
             },
         };
-        self.start_with_jail(request, shell.jail.clone(), Some(shell), None)
-            .await
+        self.start_with_jail(
+            request,
+            shell.jail.clone().map(NativeJailRequest::Legacy),
+            Some(shell),
+            None,
+        )
+        .await
+    }
+    pub(in crate::tinybus_module) async fn start_native_shell_exec_with_resources(
+        &self,
+        shell: tinybox_bus::ShellExecRequest,
+        resources: tinybox_bus::NativeJailResourceRequest,
+    ) -> Result<ProcessRef> {
+        let jail = shell
+            .jail
+            .clone()
+            .ok_or_else(|| failure(tinybox_bus::INVALID_ID, "native shell requires jail config"))?;
+        let request = SpawnRequest {
+            process: shell.process.clone(),
+            command: tinybox_bus::ExecRequest {
+                resource: shell.resource.clone(),
+                argv: vec![tinybox_host::select_shell(&shell.shell).program],
+                cwd: shell.cwd.clone(),
+                env: shell.extra_env.clone(),
+                stdin: shell.stdin.clone(),
+            },
+        };
+        let jail = tinybox_bus::NativeJailRequest {
+            jail,
+            resources: Some(resources),
+        };
+        self.start_with_jail(
+            request,
+            Some(NativeJailRequest::Resources(jail)),
+            Some(shell),
+            None,
+        )
+        .await
     }
     pub(in crate::tinybus_module) async fn start_platform_shell_exec(
         &self,
@@ -443,7 +517,7 @@ impl Resources {
     async fn start_with_jail(
         &self,
         request: SpawnRequest,
-        jail: Option<tinybox_bus::NativeJailConfig>,
+        jail: Option<NativeJailRequest>,
         shell: Option<tinybox_bus::ShellExecRequest>,
         platform_shell: Option<tinybox_bus::SelectShellRequest>,
     ) -> Result<ProcessRef> {
@@ -459,7 +533,7 @@ impl Resources {
     async fn start_with_preparation<Fut>(
         &self,
         request: SpawnRequest,
-        jail: Option<tinybox_bus::NativeJailConfig>,
+        jail: Option<NativeJailRequest>,
         shell: Option<tinybox_bus::ShellExecRequest>,
         platform_shell: Option<tinybox_bus::SelectShellRequest>,
         prepare: impl FnOnce(CollectorPreparation) -> Fut,

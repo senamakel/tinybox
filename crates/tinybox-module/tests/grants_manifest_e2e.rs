@@ -1,5 +1,7 @@
 //! Unconditional compiled-artifact admission and local grant discovery proof.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
 
@@ -12,15 +14,15 @@ async fn compiled_manifest_admits_and_executes_grant_and_shell_discovery()
     let mut staging = tempfile::Builder::new();
     staging.prefix("admitted-module-");
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        staging.permissions(std::fs::Permissions::from_mode(0o700));
-    }
+    staging.permissions(std::fs::Permissions::from_mode(0o700));
     let staged = staging.tempdir_in(std::env::temp_dir())?;
     #[cfg(windows)]
     secure_staging_directory(staged.path())?;
-    let staging_path = staged.path().canonicalize()?;
-    let artifact = staging_path.join(
+    // macOS exposes the temporary root through symlinked system paths such as
+    // /var. Native module admission walks every path component without
+    // following symlinks, so pass it the canonical private staging path.
+    let staging_root = staged.path().canonicalize()?;
+    let artifact = staging_root.join(
         built_artifact
             .file_name()
             .ok_or("artifact has no filename")?,

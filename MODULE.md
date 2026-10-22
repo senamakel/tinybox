@@ -9,6 +9,12 @@ takes no arguments and returns a summary of this build: the crate version, the
 sandbox backends compiled into it, and which of those are strong enough for code
 the operator does not trust.
 
+The bus contract is version 2.2. It includes the resource-aware native shell
+member `StartNativeShellExecWithResources`, which keeps shell selection,
+environment setup, scratch, supervision, and cleanup in the module while
+accepting explicit optional hard resource limits. See
+[`docs/specs/contract-2-2.md`](docs/specs/contract-2-2.md) for the wire contract.
+
 The archive contains one `.so`, `.dylib`, or `.dll` plus `modules.toml`. Keep
 those files together when copying them into a TinyBus module directory. The
 allowlist binds the native library filename to its SHA-256 digest so TinyBus can

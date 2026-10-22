@@ -17,6 +17,17 @@ impl ShellContext {
     ) -> Result<Arc<Self>> {
         Self::prepare_owned_with(move || Self::prepare(request, &root, &resolved)).await
     }
+    pub(super) async fn prepare_owned_with_resources(
+        request: ShellExecRequest,
+        root: std::path::PathBuf,
+        resolved: tinybox_core::ExecRequest,
+        resources: tinybox_bus::NativeJailResourceRequest,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_owned_with(move || {
+            Self::prepare_with_resource_limits(request, &root, &resolved, Some(resources))
+        })
+        .await
+    }
     async fn prepare_owned_with(
         prepare: impl FnOnce() -> Result<Arc<Self>> + Send + 'static,
     ) -> Result<Arc<Self>> {
@@ -32,12 +43,36 @@ impl ShellContext {
         root: &Path,
         resolved: &tinybox_core::ExecRequest,
     ) -> Result<Arc<Self>> {
-        Self::prepare_with_backend(request, root, resolved, tinybox_jail::default_backend())
+        Self::prepare_with_resource_limits(request, root, resolved, None)
     }
+    #[cfg(test)]
     fn prepare_with_backend(
         request: ShellExecRequest,
         root: &Path,
         resolved: &tinybox_core::ExecRequest,
+        backend: Arc<dyn tinybox_jail::JailBackend>,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_with_backend_and_resource_limits(request, root, resolved, None, backend)
+    }
+    fn prepare_with_resource_limits(
+        request: ShellExecRequest,
+        root: &Path,
+        resolved: &tinybox_core::ExecRequest,
+        resources: Option<tinybox_bus::NativeJailResourceRequest>,
+    ) -> Result<Arc<Self>> {
+        Self::prepare_with_backend_and_resource_limits(
+            request,
+            root,
+            resolved,
+            resources,
+            tinybox_jail::default_backend(),
+        )
+    }
+    fn prepare_with_backend_and_resource_limits(
+        request: ShellExecRequest,
+        root: &Path,
+        resolved: &tinybox_core::ExecRequest,
+        resources: Option<tinybox_bus::NativeJailResourceRequest>,
         backend: Arc<dyn tinybox_jail::JailBackend>,
     ) -> Result<Arc<Self>> {
         validate_runtime(&request)?;
@@ -104,38 +139,22 @@ impl ShellContext {
         for name in selection.remove_environment {
             environment.remove(&name);
         }
-        let host = if let Some(config) = &request.jail {
-            let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
-            jail.read_write.push(scratch.path().to_path_buf());
-            if config.enforcement == tinybox_bus::JailEnforcement::Enforced {
-                backend.require(&jail).map_err(|_| invalid())?;
-            } else if backend
-                .plan_check(&jail)
-                .constraints
-                .iter()
-                .any(|(_, support)| *support == tinybox_core::Enforcement::Unsupported)
-            {
-                return Err(invalid());
-            }
-            ShellHost::Jailed(
-                tinybox_host::JailLocalHost::with_backend(
-                    jail,
-                    backend,
-                    tinybox_bus::MAX_OUTPUT_BYTES,
-                )
-                .map_err(|_| invalid())?,
-            )
-        } else {
-            ShellHost::Local(tinybox_host::LimitedLocalHost::new(
-                tinybox_bus::MAX_OUTPUT_BYTES,
-            ))
-        };
+        let (host, native_launcher) = prepare_host(
+            &request,
+            root,
+            resolved,
+            &environment,
+            scratch.path(),
+            resources,
+            backend,
+        )?;
         Ok(Arc::new(Self {
             request,
             environment,
             scratch: Arc::new(std::sync::Mutex::new(Some(scratch))),
             scratch_cleanup_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host,
+            native_launcher,
             #[cfg(test)]
             scratch_deletion_blocked: std::sync::atomic::AtomicBool::new(false),
         }))
@@ -145,6 +164,9 @@ impl ShellContext {
         resolved: &tinybox_core::ExecRequest,
         observer: Arc<super::output::OutputJournal>,
     ) -> tinybox_core::Result<tinybox_core::ExecOutput> {
+        if let (ShellHost::Jailed(host), Some(launcher)) = (&self.host, &self.native_launcher) {
+            return tinybox_core::Host::run_observed(host.as_ref(), launcher, observer).await;
+        }
         let mut command = tinybox_host::build_shell_command(&self.request.shell);
         apply_window_flags(&mut command, self.request.hide_window);
         command.env_clear().envs(&self.environment);
@@ -229,6 +251,60 @@ impl ShellContext {
         })?
     }
 }
+fn prepare_host(
+    request: &ShellExecRequest,
+    root: &Path,
+    resolved: &tinybox_core::ExecRequest,
+    environment: &std::collections::BTreeMap<String, String>,
+    scratch: &Path,
+    resources: Option<tinybox_bus::NativeJailResourceRequest>,
+    backend: Arc<dyn tinybox_jail::JailBackend>,
+) -> Result<(ShellHost, Option<tinybox_core::ExecRequest>)> {
+    if let Some(resources) = resources {
+        let config = request.jail.as_ref().ok_or_else(invalid)?;
+        let mut jail = tinybox_bus::NativeJailRequest {
+            jail: config.clone(),
+            resources: Some(resources),
+        };
+        jail.jail
+            .read_write
+            .push(scratch.to_string_lossy().into_owned());
+        let selection = tinybox_host::select_shell(&request.shell);
+        let mut argv = vec![selection.program];
+        argv.extend(selection.arguments);
+        let mut native_request = tinybox_core::ExecRequest::new(argv)
+            .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
+        native_request.env.clone_from(environment);
+        native_request.stdin.clone_from(&request.stdin);
+        let host = super::native_jail::collector_with_resources(root, &jail, &mut native_request)?;
+        Ok((ShellHost::Jailed(host), Some(native_request)))
+    } else if let Some(config) = &request.jail {
+        let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
+        jail.read_write.push(scratch.to_path_buf());
+        if config.enforcement == tinybox_bus::JailEnforcement::Enforced {
+            backend.require(&jail).map_err(|_| invalid())?;
+        } else if backend
+            .plan_check(&jail)
+            .constraints
+            .iter()
+            .any(|(_, support)| *support == tinybox_core::Enforcement::Unsupported)
+        {
+            return Err(invalid());
+        }
+        let host =
+            tinybox_host::JailLocalHost::with_backend(jail, backend, tinybox_bus::MAX_OUTPUT_BYTES)
+                .map_err(|_| invalid())?;
+        Ok((ShellHost::Jailed(Arc::new(host)), None))
+    } else {
+        Ok((
+            ShellHost::Local(tinybox_host::LimitedLocalHost::new(
+                tinybox_bus::MAX_OUTPUT_BYTES,
+            )),
+            None,
+        ))
+    }
+}
+
 /// Windows: `CREATE_NO_WINDOW`, so a GUI host's shell child flashes no console.
 /// Other platforms have no console window to hide.
 fn apply_window_flags(command: &mut std::process::Command, hide_window: bool) {

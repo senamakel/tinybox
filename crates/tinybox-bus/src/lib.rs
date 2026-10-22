@@ -19,7 +19,7 @@ mod grants;
 pub use grants::{LocalGrantConfig, LocalGrants, ProtectedPaths, ResolveLocalGrantsRequest};
 
 mod jail;
-pub use jail::{JailEnforcement, NativeJailConfig};
+pub use jail::{JailEnforcement, NativeJailConfig, NativeJailRequest, NativeJailResourceRequest};
 
 mod shell_execution;
 mod shell_selection;
@@ -82,7 +82,30 @@ pub use files::{
 /// 2.0 removes TinyBox-owned command policy classification and the
 /// `AnalyzeShell.hidden_execution` policy signal. Generic shell structure facts
 /// and transport helpers remain.
-pub const CONTRACT_VERSION: (u32, u32) = (2, 0);
+/// 2.1 adds separate resource-aware native jail request members without
+/// changing the 2.0 Rust request shapes. 2.2 adds a resource-aware native
+/// shell member that retains module-owned shell selection, environment and
+/// scratch setup.
+pub const CONTRACT_VERSION: (u32, u32) = (2, 2);
+
+/// Minimum contract version required for resource-aware native jail members.
+pub const NATIVE_JAIL_RESOURCES_VERSION: (u32, u32) = (2, 1);
+
+/// Minimum contract version required for resource-aware native shell execution.
+pub const NATIVE_SHELL_RESOURCES_VERSION: (u32, u32) = (2, 2);
+
+/// Whether a module explicitly advertises support for the resource-aware
+/// native jail members. Hosts must check this before sending a 2.1 request.
+#[must_use]
+pub fn supports_native_jail_resources(module: (u32, u32)) -> bool {
+    module.0 == NATIVE_JAIL_RESOURCES_VERSION.0 && module.1 >= NATIVE_JAIL_RESOURCES_VERSION.1
+}
+
+/// Whether a module advertises the resource-aware native shell member.
+#[must_use]
+pub fn supports_native_shell_resources(module: (u32, u32)) -> bool {
+    module.0 == NATIVE_SHELL_RESOURCES_VERSION.0 && module.1 >= NATIVE_SHELL_RESOURCES_VERSION.1
+}
 
 /// Whether this host vocabulary can bind to a module's advertised version.
 /// The major must match and the module's minor must include every host member.
@@ -207,6 +230,10 @@ pub mod names {
     pub const KILL_STDIO: &str = "KillStdio";
     /// Wire name of the `StdioStatus` member.
     pub const STDIO_STATUS: &str = "StdioStatus";
+    /// Wire name of the 2.1 resource-aware jailed exec member.
+    pub const START_JAILED_EXEC_WITH_RESOURCES: &str = "StartJailedExecWithResources";
+    /// Wire name of the 2.2 resource-aware native shell member.
+    pub const START_NATIVE_SHELL_EXEC_WITH_RESOURCES: &str = "StartNativeShellExecWithResources";
 }
 
 /// Supported methods in this contract, including the original discovery
@@ -253,6 +280,8 @@ pub const METHODS: &[&str] = &[
     names::CLOSE_STDIN,
     names::KILL_STDIO,
     names::STDIO_STATUS,
+    names::START_JAILED_EXEC_WITH_RESOURCES,
+    names::START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
 ];
 
 /// Facts about the detected native directory-jail backend.
