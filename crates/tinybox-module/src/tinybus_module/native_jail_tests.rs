@@ -657,6 +657,7 @@ fn native_memory_limit_kills_a_workload_that_touches_past_its_budget()
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
@@ -666,6 +667,16 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
     use tinybus::Connection;
     use tinybus::broker::Broker;
     use tinybus::transport::memory::MemoryBus;
+
+    async fn next_event(
+        events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    ) -> tinybus::Result<serde_json::Value> {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+            .await
+            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+            .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+        serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+    }
 
     if !native_resource_runtime_available() {
         eprintln!(
@@ -783,15 +794,6 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         "the memory-pressure child completed normally"
     );
 
-    async fn next_event(
-        events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
-    ) -> tinybus::Result<serde_json::Value> {
-        let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
-            .await
-            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
-            .map_err(|error| tinybus::Error::failed(error.to_string()))?;
-        serde_json::from_value(message.body[0].clone()).map_err(Into::into)
-    }
     let started = next_event(&mut events).await?;
     assert_eq!(started["process"], serde_json::json!(process));
     assert_eq!(started["event"]["event"], "started");
