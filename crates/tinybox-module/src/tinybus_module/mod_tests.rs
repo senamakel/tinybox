@@ -314,6 +314,29 @@ fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness
     Ok(())
 }
 
+#[tokio::test]
+async fn plan_check_bus_member_returns_the_backend_preflight() -> tinybus::Result<()> {
+    let response = BoxService::default()
+        .plan_check(tinybox_bus::PlanCheckRequest {
+            backend: "passthrough".into(),
+            constraints: vec![tinybox_bus::ConstraintRequest {
+                constraint: tinybox_bus::ResourceConstraint::Filesystem,
+                hard: true,
+            }],
+        })
+        .await?;
+    assert_eq!(response.backend, "passthrough");
+    assert_eq!(
+        response.results,
+        vec![tinybox_bus::ConstraintResult {
+            constraint: tinybox_bus::ResourceConstraint::Filesystem,
+            hard: true,
+            enforcement: tinybox_bus::ConstraintEnforcement::Unsupported,
+        }]
+    );
+    Ok(())
+}
+
 #[test]
 fn an_empty_registry_is_reported_as_none_rather_than_omitted() {
     // A build with no backends must say so plainly rather than leaving the
