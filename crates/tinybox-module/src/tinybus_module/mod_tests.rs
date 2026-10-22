@@ -939,7 +939,6 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
 
 #[tokio::test]
 async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus::Result<()> {
-    use serde_json::Value;
     use tinybox_bus::{
         CreateRequest, ExecRequest, ProcessRef, ReserveRequest, ResourceId, SpawnRequest, Workspace,
     };
@@ -999,25 +998,148 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
         process
     );
 
-    let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
-        tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
-            .await
-            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
-            .map_err(|error| tinybus::Error::failed(error.to_string()))
-    };
-    let started = receive_event(&mut events).await?;
-    let started: Value = serde_json::from_value(started.body[0].clone())?;
-    assert_eq!(started["process"]["resource"], resource.0);
-    assert_eq!(started["process"]["process"], process_id.0);
-    assert_eq!(started["event"]["event"], "started");
-
-    let exited = receive_event(&mut events).await?;
-    let exited: Value = serde_json::from_value(exited.body[0].clone())?;
-    assert_eq!(exited["process"]["resource"], resource.0);
-    assert_eq!(exited["process"]["process"], process.process.0);
+    assert_process_event(&mut events, &process, "started").await?;
+    let exited = receive_process_event(&mut events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
     assert_eq!(exited["event"]["event"], "exited");
     assert_eq!(exited["event"]["status"], 7);
     proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tinybus::Result<()> {
+    use tinybox_bus::{
+        CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest,
+        ShellExecRequest, Workspace,
+    };
+
+    let state = tempfile::tempdir().map_err(tinybus::Error::failed)?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(".".into()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    #[cfg(windows)]
+    let command =
+        "echo partial & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"";
+    #[cfg(not(windows))]
+    let command = "echo partial; sleep 60";
+    let request = ShellExecRequest {
+        process: process_id.clone(),
+        resource: resource.clone(),
+        shell: SelectShellRequest {
+            command: command.into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir: state.path().to_string_lossy().into_owned(),
+        timeout_ms: 1_000,
+        stdin: None,
+        jail: None,
+        hide_window: false,
+    };
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>("StartNativeShellExec", (request.clone(),))
+            .await?,
+        process
+    );
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>("StartNativeShellExec", (request,))
+            .await?,
+        process
+    );
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let output: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
+            if !matches!(output.state, tinybox_bus::ExecutionState::Running) {
+                return Ok::<_, tinybus::Error>(output);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .map_err(|_| tinybus::Error::failed("native shell did not reach its configured deadline"))??;
+    assert_eq!(
+        output.state,
+        tinybox_bus::ExecutionState::Failed {
+            code: tinybox_bus::ExecutionFailure::TimedOut
+        }
+    );
+    assert!(
+        output_contains_marker(&output, "partial"),
+        "timeout child output did not contain the partial marker"
+    );
+
+    assert_process_event(&mut events, &process, "started").await?;
+    let limit_hit = receive_process_event(&mut events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
+    assert_eq!(limit_hit["event"]["event"], "limit_hit");
+    assert_eq!(limit_hit["event"]["limit"], "timeout");
+
+    let exited = receive_process_event(&mut events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
+    assert_eq!(exited["event"]["event"], "exited");
+    assert!(exited["event"]["status"].is_null());
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+async fn receive_process_event(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+) -> tinybus::Result<serde_json::Value> {
+    let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+        .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+    serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+}
+
+fn output_contains_marker(output: &tinybox_bus::OutputBatch, marker: &str) -> bool {
+    let bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
+    String::from_utf8_lossy(&bytes).contains(marker)
+}
+
+async fn assert_process_event(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    process: &tinybox_bus::ProcessRef,
+    kind: &str,
+) -> tinybus::Result<()> {
+    let event = receive_process_event(events).await?;
+    assert_eq!(event["process"], serde_json::json!(process));
+    assert_eq!(event["event"]["event"], kind);
     Ok(())
 }
 
