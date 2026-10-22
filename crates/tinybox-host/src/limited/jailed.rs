@@ -274,6 +274,18 @@ fn prepare_pids_event_report(
         .flatten()
 }
 
+#[cfg(target_os = "linux")]
+fn prepare_event_reports(
+    command: &mut std::process::Command,
+    jail: &Jail,
+    observer_attached: bool,
+) -> (Option<MemoryEventReport>, Option<PidsEventReport>) {
+    (
+        prepare_memory_event_report(command, jail, observer_attached),
+        prepare_pids_event_report(command, jail, observer_attached),
+    )
+}
+
 // Standard children do not kill on drop. Keep ownership across supervisor panics
 // and aborts so the module can acknowledge cleanup through its normal drain path.
 struct RetainedOnDrop {
@@ -446,11 +458,8 @@ impl JailLocalHost {
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let memory_event_report =
-            prepare_memory_event_report(&mut command, &self.jail, observer.is_some());
-        #[cfg(target_os = "linux")]
-        let pids_event_report =
-            prepare_pids_event_report(&mut command, &self.jail, observer.is_some());
+        let (memory_event_report, pids_event_report) =
+            prepare_event_reports(&mut command, &self.jail, observer.is_some());
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
