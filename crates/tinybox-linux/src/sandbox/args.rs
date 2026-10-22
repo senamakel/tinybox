@@ -284,6 +284,19 @@ if [ -n "$report" ]; then
     fi
     printf '%s\n' "$oom_kill" > "$report" 2>/dev/null || :
 fi
+pids_report=${TINYBOX_INTERNAL_PIDS_EVENT_FILE:-}
+if [ -n "$pids_report" ]; then
+    control_group=$(/usr/bin/systemctl --user show --property=ControlGroup --value "$unit" 2>/dev/null)
+    events=
+    case $control_group in /*) events=/sys/fs/cgroup${control_group}/pids.events;; esac
+    pids_max=0
+    if [ -r "$events" ]; then
+        while IFS=' ' read -r key value; do
+            if [ "$key" = max ]; then pids_max=$value; break; fi
+        done < "$events"
+    fi
+    printf '%s\n' "$pids_max" > "$pids_report" 2>/dev/null || :
+fi
 exit "$status"
 "#;
 

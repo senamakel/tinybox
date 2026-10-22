@@ -519,6 +519,8 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
         .get(systemd_end + 5)
         .ok_or("missing in-scope telemetry script")?;
     assert!(scope_script.contains("/sys/fs/cgroup${control_group}/memory.events"));
+    assert!(scope_script.contains("/sys/fs/cgroup${control_group}/pids.events"));
+    assert!(scope_script.contains("TINYBOX_INTERNAL_PIDS_EVENT_FILE"));
     assert_eq!(argv[systemd_end + 6], "tinybox-memory-event-scope");
     assert_eq!(argv[systemd_end + 7], scope_unit);
     assert!(std::path::Path::new(&argv[systemd_end + 8]).is_absolute());
