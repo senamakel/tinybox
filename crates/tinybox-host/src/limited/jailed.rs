@@ -128,12 +128,23 @@ fn jail_exposes_path(jail: &Jail, path: &std::path::Path) -> bool {
 
 #[cfg(target_os = "linux")]
 fn report_memory_termination(
-    observed: bool,
-    observer: Option<&Arc<dyn ExecutionObserver>>,
+    confirmed: bool,
+    target: Option<&Arc<dyn ExecutionObserver>>,
 ) {
-    if observed && let Some(observer) = observer {
+    if confirmed && let Some(observer) = target {
         observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_memory_event_report(
+    command: &mut std::process::Command,
+    jail: &Jail,
+    observer_attached: bool,
+) -> Option<MemoryEventReport> {
+    observer_attached
+        .then(|| MemoryEventReport::prepare(command, jail))
+        .flatten()
 }
 
 // Standard children do not kill on drop. Keep ownership across supervisor panics
@@ -308,9 +319,8 @@ impl JailLocalHost {
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let memory_event_report = observer
-            .as_ref()
-            .and_then(|_| MemoryEventReport::prepare(&mut command, &self.jail));
+        let memory_event_report =
+            prepare_memory_event_report(&mut command, &self.jail, observer.is_some());
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
