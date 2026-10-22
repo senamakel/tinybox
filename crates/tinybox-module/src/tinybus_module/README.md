@@ -31,6 +31,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | Spawn | SpawnRequest | ProcessRef |
 | StartExec | SpawnRequest | ProcessRef |
 | StartJailedExec | SpawnRequest, NativeJailConfig | ProcessRef |
+| StartJailedExecWithResources | SpawnRequest, NativeJailRequest | ProcessRef |
 | ReadOutput | ProcessRef, cursor | OutputBatch |
 | ReleaseOutput | ProcessRef | unit |
 | IsRunning | ProcessRef | bool |
@@ -47,6 +48,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | SelectShell | SelectShellRequest | ShellInvocation |
 | StartShellExec | SpawnRequest, SelectShellRequest | ProcessRef |
 | StartNativeShellExec | ShellExecRequest | ProcessRef |
+| StartNativeShellExecWithResources | ShellExecRequest, NativeJailResourceRequest | ProcessRef |
 | ValidateDockerPolicy | DockerPolicyRequest | DockerPolicyReport |
 | StartStdio | StdioStartRequest | ProcessRef |
 | WriteStdio | StdioWriteRequest | () |
@@ -55,7 +57,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | KillStdio | ProcessRef | () |
 | StdioStatus | ProcessRef | StdioStatus |
 
-Capabilities advertises contract version 2.0. Hosts require equal majors and a
+Capabilities advertises contract version 2.2. Hosts require equal majors and a
 module minor at least as new as their vocabulary, using
 `tinybox_bus::is_compatible`. Contract 1.0 was the original discovery-only
 surface; 1.1 added reserved resource/process ownership and terminal shutdown;
@@ -75,6 +77,15 @@ occurs outside heredoc data. TinySecurity owns command classification and
 execution policy. Old 1.x hosts must reject a 2.x module; there is no fallback
 that applies or reconstructs command policy in TinyBox. Describe remains
 unchanged.
+
+Contract 2.1 adds `StartJailedExecWithResources` and `NativeJailRequest` for
+explicit, independently optional hard limits. Contract 2.2 adds
+`StartNativeShellExecWithResources`, carrying the existing `ShellExecRequest`
+and separate `NativeJailResourceRequest`. This preserves module-owned shell
+selection, environment setup, scratch, and supervision while allowing a host
+to send only resource dimensions the plan explicitly requests. Older shell
+members and their request shapes remain available for callers that do not need
+the additional resource fields.
 
 Version 1.5 adds bounded file transfer for mounted directory workspaces.
 Reserve `FileRead(resource)` or `FileWrite(resource)` before opening a transfer.

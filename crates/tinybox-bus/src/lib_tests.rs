@@ -129,7 +129,7 @@ fn host_gateway_and_docker_facts_are_additive_and_default_safely() -> Result<(),
 #[test]
 fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
 -> Result<(), serde_json::Error> {
-    assert_eq!(CONTRACT_VERSION, (2, 1));
+    assert_eq!(CONTRACT_VERSION, (2, 2));
     assert!(is_compatible(CONTRACT_VERSION));
     assert!(!is_compatible((1, 21)));
     assert!(!is_compatible((1, 8)));
