@@ -225,7 +225,10 @@ fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_js
         ]
     });
     assert_eq!(serde_json::to_value(&request)?, request_json);
-    assert_eq!(serde_json::from_value::<PlanCheckRequest>(request_json)?, request);
+    assert_eq!(
+        serde_json::from_value::<PlanCheckRequest>(request_json)?,
+        request
+    );
 
     let response = PlanCheckResponse {
         backend: "namespace".into(),
@@ -250,7 +253,10 @@ fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_js
         ]
     });
     assert_eq!(serde_json::to_value(&response)?, response_json);
-    assert_eq!(serde_json::from_value::<PlanCheckResponse>(response_json)?, response);
+    assert_eq!(
+        serde_json::from_value::<PlanCheckResponse>(response_json)?,
+        response
+    );
     Ok(())
 }
 

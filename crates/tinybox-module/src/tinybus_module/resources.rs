@@ -1622,9 +1622,7 @@ fn core_constraint(constraint: tinybox_bus::ResourceConstraint) -> tinybox_core:
     }
 }
 
-fn wire_enforcement(
-    enforcement: tinybox_core::Enforcement,
-) -> tinybox_bus::ConstraintEnforcement {
+fn wire_enforcement(enforcement: tinybox_core::Enforcement) -> tinybox_bus::ConstraintEnforcement {
     match enforcement {
         tinybox_core::Enforcement::Unsupported => tinybox_bus::ConstraintEnforcement::Unsupported,
         tinybox_core::Enforcement::BestEffort => tinybox_bus::ConstraintEnforcement::BestEffort,

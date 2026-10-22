@@ -264,9 +264,11 @@ fn declared_methods_match_the_dispatch_table() {
 
 #[test]
 fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
-    assert!(BoxService::default()
-        .members()
-        .contains(&tinybox_bus::names::PLAN_CHECK));
+    assert!(
+        BoxService::default()
+            .members()
+            .contains(&tinybox_bus::names::PLAN_CHECK)
+    );
     assert!(tinybox_bus::METHODS.contains(&tinybox_bus::names::PLAN_CHECK));
     assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 3));
     let capabilities = capabilities_for(Platform::Linux);
