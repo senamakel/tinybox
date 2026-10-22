@@ -237,8 +237,8 @@ async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Resul
     }
     if !std::process::Command::new("python3")
         .arg("--version")
-        .status()
-        .is_ok_and(|status| status.success())
+        .output()
+        .is_ok_and(|output| output.status.success())
     {
         let problem = "python3 is unavailable for the memory-pressure child";
         if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_some() {
