@@ -286,6 +286,15 @@ fn prepare_event_reports(
     )
 }
 
+#[cfg(target_os = "linux")]
+fn report_event_terminations(
+    reports: &(Option<MemoryEventReport>, Option<PidsEventReport>),
+    observer: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    report_memory_termination(reports.0.as_ref(), observer);
+    report_pids_termination(reports.1.as_ref(), observer);
+}
+
 // Standard children do not kill on drop. Keep ownership across supervisor panics
 // and aborts so the module can acknowledge cleanup through its normal drain path.
 struct RetainedOnDrop {
@@ -553,9 +562,10 @@ impl JailLocalHost {
         drop(cancel);
         let output = result??;
         #[cfg(target_os = "linux")]
-        report_memory_termination(memory_event_report.as_ref(), event_observer.as_ref());
-        #[cfg(target_os = "linux")]
-        report_pids_termination(pids_event_report.as_ref(), event_observer.as_ref());
+        report_event_terminations(
+            &(memory_event_report, pids_event_report),
+            event_observer.as_ref(),
+        );
         Ok(output)
     }
 }
