@@ -151,6 +151,144 @@ int main(void) {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn live_seatbelt_denies_configured_file_reads() -> std::io::Result<()> {
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().canonicalize()?;
+    let allowed_file = root.join("allowed.txt");
+    let protected_file = root.join("protected.txt");
+    fs::write(&allowed_file, b"allowed")?;
+    fs::write(&protected_file, b"protected")?;
+
+    const READ_PROBE: &str = r#"
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    char byte;
+    int allowed = open(argv[1], O_RDONLY);
+    if (allowed < 0 || read(allowed, &byte, 1) != 1) return 3;
+    (void)close(allowed);
+    emit("allowed-read\n", 13);
+
+    int protected = open(argv[2], O_RDONLY);
+    if (protected < 0) {
+        if (errno != EACCES && errno != EPERM) return 4;
+        emit("protected-denied\n", 17);
+    } else {
+        emit("protected-read\n", 15);
+        (void)close(protected);
+    }
+    emit("continued\n", 10);
+    return 0;
+}
+"#;
+    let source = root.join("file_probe.c");
+    fs::write(&source, READ_PROBE)?;
+    let helper = root.join("file_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile file probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let run_probe = |jail: &Jail| -> std::io::Result<std::process::Output> {
+        let mut command = Command::new(&helper);
+        command.arg(&allowed_file).arg(&protected_file);
+        SeatbeltBackend::new()
+            .spawn_captured(jail, command)?
+            .wait_with_output()
+    };
+
+    let allowed = run_probe(&Jail::new(&root, "seatbelt-file-read-control"))?;
+    let allowed_stdout = String::from_utf8_lossy(&allowed.stdout);
+    assert!(
+        allowed.status.success(),
+        "unrestricted file-read control failed: status {}, stdout: {allowed_stdout:?}, stderr: {:?}",
+        allowed.status,
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(
+        allowed_stdout.contains("allowed-read"),
+        "stdout: {allowed_stdout:?}"
+    );
+    assert!(
+        allowed_stdout.contains("protected-read"),
+        "stdout: {allowed_stdout:?}"
+    );
+    assert!(
+        allowed_stdout.contains("continued"),
+        "stdout: {allowed_stdout:?}"
+    );
+
+    let mut jail = Jail::new(&root, "seatbelt-deny-file-read");
+    jail.deny_read.push(protected_file.clone());
+    jail.canonicalize()?;
+    let denied = run_probe(&jail)?;
+    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    assert!(
+        denied.status.success(),
+        "denied file-read probe did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
+        denied.status,
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("allowed-read"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        denied_stdout.contains("protected-denied"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        !denied_stdout.contains("protected-read"),
+        "Seatbelt allowed the protected file read; stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("continued"),
+        "stdout: {denied_stdout:?}"
+    );
+    eprintln!("[seatbelt-live] deny-file-read behavior passed");
+    Ok(())
+}
+
 #[test]
 fn profile_allow_subprocess_default_has_no_process_deny() {
     let jail = Jail::new("/tmp", "x");
