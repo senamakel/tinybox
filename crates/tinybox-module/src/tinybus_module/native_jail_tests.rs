@@ -686,6 +686,43 @@ async fn assert_memory_event_sequence(
 }
 
 #[cfg(target_os = "linux")]
+async fn wait_for_memory_process_output(
+    proxy: &tinybus::Proxy,
+    process: &tinybox_bus::ProcessRef,
+) -> tinybus::Result<tinybox_bus::OutputBatch> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let output: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
+            if output.state != tinybox_bus::ExecutionState::Running {
+                return Ok(output);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .map_err(|_| tinybus::Error::failed("timed out waiting for memory-limited process"))?
+}
+
+#[cfg(target_os = "linux")]
+fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
+    assert_eq!(
+        output.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 137 },
+        "memory-pressure child did not terminate from the limit: {output:?}"
+    );
+    let output_bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
+    assert!(
+        !String::from_utf8_lossy(&output_bytes).contains("allocation survived"),
+        "the memory-pressure child completed normally"
+    );
+}
+
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -787,31 +824,8 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         process
     );
 
-    let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let output: tinybox_bus::OutputBatch =
-                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
-            if output.state != tinybox_bus::ExecutionState::Running {
-                return Ok::<_, tinybus::Error>(output);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await??;
-    assert_eq!(
-        output.state,
-        tinybox_bus::ExecutionState::Exited { exit_code: 137 },
-        "memory-pressure child did not terminate from the limit: {output:?}"
-    );
-    let output_bytes: Vec<u8> = output
-        .chunks
-        .iter()
-        .flat_map(|chunk| chunk.bytes.iter().copied())
-        .collect();
-    assert!(
-        !String::from_utf8_lossy(&output_bytes).contains("allocation survived"),
-        "the memory-pressure child completed normally"
-    );
+    let output = wait_for_memory_process_output(&proxy, &process).await?;
+    assert_memory_process_was_killed(&output);
 
     assert_memory_event_sequence(&mut events, &process).await?;
     proxy.call::<()>("Close", (resource,)).await?;
