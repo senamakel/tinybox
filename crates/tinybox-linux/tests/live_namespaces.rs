@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use tinybox_core::{
-    BoxId, BoxSpec, Error, ExecRequest, HostRef, MemoryStore, NetworkPolicy, Placement, Result,
-    Sandbox, SandboxRef, WorkspaceSource,
+    BoxId, BoxSpec, Error, ExecRequest, HostRef, MemoryStore, NetworkPolicy, Placement, Resources,
+    Result, Sandbox, SandboxRef, WorkspaceSource,
 };
 use tinybox_host::LocalHost;
 use tinybox_linux::NamespaceSandbox;
@@ -182,6 +182,106 @@ async fn live_the_host_configuration_is_not_handed_over_wholesale() -> Result<()
     assert!(
         entries < 10,
         "expected a minimal /etc, saw {entries} entries"
+    );
+    Ok(())
+}
+
+/// Whether this runner can exercise a real resource-limited namespace box.
+/// The CI resource job sets `TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS=1`,
+/// which turns a missing prerequisite into a failure instead of a skip.
+fn namespace_resource_runtime_problem() -> Option<String> {
+    if std::env::var_os("TINYBOX_LIVE_NAMESPACES").is_none()
+        && std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_none()
+    {
+        return Some("set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests".into());
+    }
+    let probe = tinybox_linux::NamespaceProbe::detect();
+    if let Some(problem) = probe.problem() {
+        return Some(problem);
+    }
+    let scope = std::process::Command::new("systemd-run")
+        .args([
+            "--user",
+            "--scope",
+            "--quiet",
+            "--property=MemoryMax=67108864",
+            "--property=MemorySwapMax=0",
+            "--property=CPUQuota=100%",
+            "--property=TasksMax=16",
+            "--",
+            "/bin/true",
+        ])
+        .output();
+    match scope {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "delegated systemd resource scopes are unavailable: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("cannot run systemd-run resource probe: {error}")),
+    }
+}
+
+#[tokio::test]
+async fn live_memory_limit_kills_a_child_that_touches_past_its_budget() -> Result<()> {
+    if let Some(problem) = namespace_resource_runtime_problem() {
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live resource-test prerequisites",
+                message: problem,
+            });
+        }
+        eprintln!("SKIP live_memory_limit_kills_a_child_that_touches_past_its_budget: {problem}");
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        let problem = "python3 is unavailable for the memory-pressure child";
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live resource-test prerequisites",
+                message: problem.to_owned(),
+            });
+        }
+        eprintln!("SKIP live_memory_limit_kills_a_child_that_touches_past_its_budget: {problem}");
+        return Ok(());
+    }
+
+    let dir = workspace()?;
+    let sandbox = NamespaceSandbox::new(Arc::new(LocalHost::new()), Arc::new(MemoryStore::new()))
+        .with_cgroup_limits();
+    let spec = spec(dir.path())?.with_resources(Resources {
+        cpu_millis: 1_000,
+        memory_bytes: 64 * 1024 * 1024,
+        pids_max: 32,
+        disk_bytes: Resources::DEFAULT.disk_bytes,
+    });
+    let info = sandbox.create(&spec).await?;
+    let output = sandbox
+        .exec(
+            &info.id,
+            &ExecRequest::new([
+                "python3",
+                "-c",
+                "data=bytearray(192*1024*1024)\nfor i in range(0,len(data),4096): data[i]=1\nprint('allocation survived')",
+            ]),
+        )
+        .await?;
+    sandbox.destroy(&info.id).await?;
+
+    assert_ne!(
+        output.exit_code, 0,
+        "memory-capped child unexpectedly survived its 192 MiB allocation: {}",
+        output.stdout_lossy()
+    );
+    assert!(
+        !output.stdout_lossy().contains("allocation survived"),
+        "child reported that the over-budget allocation survived"
     );
     Ok(())
 }
