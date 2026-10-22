@@ -28,6 +28,79 @@ impl Drop for Active {
     }
 }
 
+#[cfg(target_os = "linux")]
+const MEMORY_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_MEMORY_EVENT_FILE";
+#[cfg(target_os = "linux")]
+static MEMORY_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
+
+/// Private handoff written by the trusted launcher before it stops the scope.
+#[cfg(target_os = "linux")]
+struct MemoryEventReport(std::path::PathBuf);
+
+#[cfg(target_os = "linux")]
+impl MemoryEventReport {
+    fn prepare(command: &mut std::process::Command) -> Option<Self> {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        let has_scope = command.get_args().filter_map(|arg| arg.to_str()).any(|arg| {
+            arg.starts_with("--unit=tinybox-native-") && arg.ends_with(".scope")
+        });
+        let has_memory_limit = command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| arg.contains("MemoryMax="));
+        if !has_scope || !has_memory_limit {
+            return None;
+        }
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        let runtime_dir = std::path::PathBuf::from(runtime_dir);
+        let metadata = std::fs::metadata(&runtime_dir).ok()?;
+        if !metadata.is_dir()
+            || metadata.uid() != nix::unistd::geteuid().as_raw()
+            || metadata.mode() & 0o077 != 0
+        {
+            return None;
+        }
+        let sequence = MEMORY_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = runtime_dir.join(format!(
+            "tinybox-memory-event-{}-{sequence}",
+            std::process::id()
+        ));
+        let mut report = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        use std::io::Write;
+        report.write_all(b"0\n").ok()?;
+        command.env(MEMORY_EVENT_FILE_ENV, &path);
+        Some(Self(path))
+    }
+
+    fn oom_kill_observed(&self) -> bool {
+        std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|contents| parse_oom_kill_counter(&contents))
+            .is_some_and(|count| count > 0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for MemoryEventReport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_oom_kill_counter(events: &str) -> Option<u64> {
+    events
+        .lines()
+        .find_map(|line| line.strip_prefix("oom_kill "))
+        .and_then(|count| count.parse().ok())
+}
+
 // Standard children do not kill on drop. Keep ownership across supervisor panics
 // and aborts so the module can acknowledge cleanup through its normal drain path.
 struct RetainedOnDrop {
@@ -199,6 +272,8 @@ impl JailLocalHost {
         payload: Option<Vec<u8>>,
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
+        #[cfg(target_os = "linux")]
+        let memory_event_report = MemoryEventReport::prepare(&mut command);
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -211,6 +286,7 @@ impl JailLocalHost {
         let backend = self.backend.clone();
         let state = self.state.clone();
         let limit = self.limit;
+        let event_observer = observer.clone();
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|error| failure("supervise native jail", error.to_string()))?;
         let (cancel, mut cancelled) = oneshot::channel::<()>();
@@ -289,7 +365,16 @@ impl JailLocalHost {
             .await
             .map_err(|error| failure("collect native jail", error.to_string()));
         drop(cancel);
-        result?
+        let output = result?;
+        #[cfg(target_os = "linux")]
+        if memory_event_report
+            .as_ref()
+            .is_some_and(MemoryEventReport::oom_kill_observed)
+            && let Some(observer) = event_observer
+        {
+            observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
+        }
+        Ok(output)
     }
 }
 

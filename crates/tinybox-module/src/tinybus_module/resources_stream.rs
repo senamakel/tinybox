@@ -390,6 +390,9 @@ impl StreamExecution {
     pub(in crate::tinybus_module) fn timed_out(&self) -> bool {
         self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
     }
+    pub(in crate::tinybus_module) fn memory_limit_hit(&self) -> bool {
+        self.journal.memory_limit_hit()
+    }
     pub(super) fn running(&self) -> bool {
         !self.journal.cleanup_acknowledged()
     }
