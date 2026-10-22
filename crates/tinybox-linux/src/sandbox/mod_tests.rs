@@ -133,7 +133,7 @@ fn it_declares_kernel_isolation_and_nothing_it_cannot_do() {
 #[test]
 fn runtime_availability_reports_the_namespace_probe_result() {
     let (sandbox, _) = sandbox();
-    let probe = super::super::super::probe::NamespaceProbe::detect();
+    let probe = crate::NamespaceProbe::detect();
 
     assert_eq!(sandbox.availability(), probe.availability());
     assert_ne!(sandbox.availability(), SandboxAvailability::Unknown);
