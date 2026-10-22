@@ -83,7 +83,8 @@ pub use files::{
 /// `AnalyzeShell.hidden_execution` policy signal. Generic shell structure facts
 /// and transport helpers remain.
 /// 2.1 adds separate resource-aware native jail request members without
-/// changing the 2.0 Rust request shapes.
+/// changing the 2.0 Rust request shapes. The resource-aware native shell
+/// member retains module-owned shell selection, environment and scratch setup.
 pub const CONTRACT_VERSION: (u32, u32) = (2, 1);
 
 /// Minimum contract version required for resource-aware native jail members.
@@ -221,6 +222,8 @@ pub mod names {
     pub const STDIO_STATUS: &str = "StdioStatus";
     /// Wire name of the 2.1 resource-aware jailed exec member.
     pub const START_JAILED_EXEC_WITH_RESOURCES: &str = "StartJailedExecWithResources";
+    /// Wire name of the 2.1 resource-aware native shell member.
+    pub const START_NATIVE_SHELL_EXEC_WITH_RESOURCES: &str = "StartNativeShellExecWithResources";
 }
 
 /// Supported methods in this contract, including the original discovery
@@ -268,6 +271,7 @@ pub const METHODS: &[&str] = &[
     names::KILL_STDIO,
     names::STDIO_STATUS,
     names::START_JAILED_EXEC_WITH_RESOURCES,
+    names::START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
 ];
 
 /// Facts about the detected native directory-jail backend.

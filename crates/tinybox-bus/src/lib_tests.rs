@@ -361,11 +361,11 @@ fn resource_aware_native_shell_contract_preserves_module_owned_shell_fields()
     let decoded: (ShellExecRequest, NativeJailResourceRequest) =
         serde_json::from_value(encoded.clone())?;
     assert_eq!(decoded, (shell.clone(), limits));
-    assert_eq!(encoded.0["shell"]["command"], shell.shell.command);
-    assert_eq!(encoded.0["extra_env"]["MODE"], "safe");
-    assert_eq!(encoded.0["state_dir"], "/state/openhuman");
-    assert_eq!(encoded.1["cpu_millis"], 250);
-    assert!(encoded.1.get("disk_bytes").is_none());
+    assert_eq!(encoded[0]["shell"]["command"], shell.shell.command);
+    assert_eq!(encoded[0]["extra_env"]["MODE"], "safe");
+    assert_eq!(encoded[0]["state_dir"], "/state/openhuman");
+    assert_eq!(encoded[1]["cpu_millis"], 250);
+    assert!(encoded[1].get("disk_bytes").is_none());
     Ok(())
 }
 
@@ -415,6 +415,7 @@ fn named_members_resolve_to_the_method_catalogue_in_order() {
         KILL_STDIO,
         STDIO_STATUS,
         START_JAILED_EXEC_WITH_RESOURCES,
+        START_NATIVE_SHELL_EXEC_WITH_RESOURCES,
     ];
     assert_eq!(METHODS, &expected[..]);
     assert_eq!(DESCRIBE, "Describe");
