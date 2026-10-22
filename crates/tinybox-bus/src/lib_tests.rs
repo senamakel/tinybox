@@ -318,6 +318,58 @@ fn native_shell_wire_defaults_close_stdin_and_keep_a_bounded_runtime()
 }
 
 #[test]
+fn resource_aware_native_shell_contract_preserves_module_owned_shell_fields()
+-> Result<(), serde_json::Error> {
+    use names::START_NATIVE_SHELL_EXEC_WITH_RESOURCES;
+
+    let shell = ShellExecRequest {
+        process: ResourceId("process-1".into()),
+        resource: ResourceId("resource-1".into()),
+        shell: SelectShellRequest {
+            command: "printf '%s' \"$MODE\"".into(),
+            preserve_pipeline_status: true,
+            runtime_path: Some("/runtime/bin".into()),
+            python_utf8: false,
+        },
+        cwd: Some("/workspace/project".into()),
+        extra_env: BTreeMap::from([("MODE".into(), "safe".into())]),
+        state_dir: "/state/openhuman".into(),
+        timeout_ms: 5_000,
+        stdin: Some(b"input".to_vec()),
+        jail: Some(NativeJailConfig {
+            read_only: vec!["/usr".into()],
+            read_write: vec!["/workspace/project".into()],
+            allow_net: false,
+            allow_subprocess: false,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: vec!["/home/operator/.ssh".into()],
+            resources: None,
+        }),
+        hide_window: false,
+    };
+    let limits = NativeJailResourceRequest {
+        cpu_millis: Some(250),
+        memory_bytes: Some(64 * 1024 * 1024),
+        pids_max: Some(8),
+        disk_bytes: None,
+    };
+
+    assert_eq!(START_NATIVE_SHELL_EXEC_WITH_RESOURCES, "StartNativeShellExecWithResources");
+    assert!(METHODS.contains(&START_NATIVE_SHELL_EXEC_WITH_RESOURCES));
+    let encoded = serde_json::to_value((&shell, limits))?;
+    let decoded: (ShellExecRequest, NativeJailResourceRequest) =
+        serde_json::from_value(encoded.clone())?;
+    assert_eq!(decoded, (shell.clone(), limits));
+    assert_eq!(encoded.0["shell"]["command"], shell.shell.command);
+    assert_eq!(encoded.0["extra_env"]["MODE"], "safe");
+    assert_eq!(encoded.0["state_dir"], "/state/openhuman");
+    assert_eq!(encoded.1["cpu_millis"], 250);
+    assert!(encoded.1.get("disk_bytes").is_none());
+    Ok(())
+}
+
+#[test]
 fn named_members_resolve_to_the_method_catalogue_in_order() {
     use names::*;
     let expected = [
