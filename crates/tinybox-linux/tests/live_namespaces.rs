@@ -21,7 +21,7 @@ use tinybox_core::{
     Result, Sandbox, SandboxAvailability, SandboxRef, WorkspaceSource,
 };
 use tinybox_host::LocalHost;
-use tinybox_linux::NamespaceSandbox;
+use tinybox_linux::{NamespaceProbe, NamespaceSandbox, UsernsStatus};
 
 /// Whether the live suite should run at all.
 fn enabled() -> bool {
@@ -30,6 +30,19 @@ fn enabled() -> bool {
 
 fn sandbox() -> NamespaceSandbox {
     NamespaceSandbox::new(Arc::new(LocalHost::new()), Arc::new(MemoryStore::new()))
+}
+
+#[test]
+fn namespace_probe_remains_constructible_from_its_public_fields() {
+    let probe = NamespaceProbe {
+        bwrap: None,
+        userns: UsernsStatus::DisabledBySysctl,
+    };
+
+    assert!(matches!(
+        probe.availability(),
+        SandboxAvailability::Unavailable { reason } if reason.contains("user namespaces are disabled")
+    ));
 }
 
 fn spec(workspace: &Path) -> Result<BoxSpec> {
