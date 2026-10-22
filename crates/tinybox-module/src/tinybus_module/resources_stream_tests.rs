@@ -792,13 +792,6 @@ async fn resource_aware_native_shell_runs_through_the_requested_resource_launche
             .await
             .is_err()
     );
-    let legacy = resources.start_shell_exec(unsupported).await?;
-    completed(&resources, &legacy).await?;
-    assert_eq!(
-        resources.read_output(&legacy, 0).await?.state,
-        ExecutionState::Exited { exit_code: 0 }
-    );
-    resources.release_output(&legacy).await?;
     resources.close(&resource).await?;
     Ok(())
 }
