@@ -436,6 +436,13 @@ pub struct ChildStatus {
 }
 
 impl ChildStatus {
+    /// Construct status from the native process exit code. Signal termination
+    /// is represented by `None` on platforms that expose it that way.
+    #[must_use]
+    pub const fn from_code(code: Option<i32>) -> Self {
+        Self { code }
+    }
+
     /// Exit code when the process has one (signal termination has none).
     #[must_use]
     pub const fn code(self) -> Option<i32> {
@@ -550,12 +557,12 @@ impl OwnedChild {
         self.stderr.take()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn stdout_mut(&mut self) -> Option<&mut File> {
         self.stdout.as_mut()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn stderr_mut(&mut self) -> Option<&mut File> {
         self.stderr.as_mut()
     }
