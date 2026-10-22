@@ -277,7 +277,7 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
 }
 
 #[test]
-fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness() {
+fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness() -> tinybus::Result<()> {
     let response = super::resources::plan_check(
         tinybox_bus::PlanCheckRequest {
             backend: "namespace".into(),
@@ -293,8 +293,7 @@ fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness
             ],
         },
         Platform::Linux,
-    )
-    .expect("Linux namespace backend is registered");
+    )?;
     assert_eq!(response.backend, "namespace");
     assert_eq!(
         response.results,
@@ -311,6 +310,7 @@ fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness
             },
         ]
     );
+    Ok(())
 }
 
 #[test]
