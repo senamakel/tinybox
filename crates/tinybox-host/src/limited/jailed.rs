@@ -33,9 +33,13 @@ const MEMORY_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_MEMORY_EVENT_FILE";
 #[cfg(target_os = "linux")]
 const PIDS_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_PIDS_EVENT_FILE";
 #[cfg(target_os = "linux")]
+const CPU_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_CPU_EVENT_FILE";
+#[cfg(target_os = "linux")]
 static MEMORY_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
 #[cfg(target_os = "linux")]
 static PIDS_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
+#[cfg(target_os = "linux")]
+static CPU_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
 
 /// Private handoff written by the trusted launcher before it stops the scope.
 #[cfg(target_os = "linux")]
@@ -274,25 +278,158 @@ fn prepare_pids_event_report(
         .flatten()
 }
 
+/// Private handoff for a proven cgroup-v2 CPU quota throttling event.
+#[cfg(target_os = "linux")]
+struct CpuEventReport(std::path::PathBuf);
+
+#[cfg(target_os = "linux")]
+impl CpuEventReport {
+    fn prepare(command: &mut std::process::Command, jail: &Jail) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, jail, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &mut std::process::Command,
+        jail: &Jail,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
+        use std::io::Write;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        let has_scope = args.iter().any(|arg| {
+            arg.strip_prefix("--unit=")
+                .and_then(|unit| std::path::Path::new(unit).extension())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
+                && arg.starts_with("--unit=tinybox-native-")
+        });
+        let has_cpu_limit = args
+            .iter()
+            .any(|arg| arg.starts_with("--property=CPUQuota="));
+        let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
+        let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
+        let clears_target_environment = args.contains(&"--clearenv");
+        if !has_scope
+            || !has_cpu_limit
+            || !masks_runtime
+            || !masks_cgroup
+            || !clears_target_environment
+        {
+            return None;
+        }
+        let metadata = std::fs::metadata(runtime_dir).ok()?;
+        let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
+        if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
+            return None;
+        }
+        let sequence = CPU_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = runtime_dir.join(format!(
+            "tinybox-cpu-event-{}-{sequence}",
+            std::process::id()
+        ));
+        if jail_exposes_path(jail, &path) {
+            return None;
+        }
+        let mut report = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        if report.write_all(b"nr_throttled 0\n").is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        command.env(CPU_EVENT_FILE_ENV, &path);
+        Some(Self(path))
+    }
+
+    fn throttling_observed(&self) -> bool {
+        // The fresh systemd scope's `nr_throttled` counter increments only
+        // when its own CPU quota throttles execution.
+        std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|contents| parse_cpu_throttled_counter(&contents))
+            .is_some_and(|count| count > 0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for CpuEventReport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_cpu_throttled_counter(events: &str) -> Option<u64> {
+    let mut count = None;
+    let mut found_counter = false;
+    for line in events.lines() {
+        if let Some(value) = line.strip_prefix("nr_throttled ") {
+            if found_counter {
+                return None;
+            }
+            found_counter = true;
+            count = Some(value.parse().ok()?);
+        }
+    }
+    count
+}
+
+#[cfg(target_os = "linux")]
+fn report_cpu_termination(
+    report: Option<&CpuEventReport>,
+    target: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report.is_some_and(CpuEventReport::throttling_observed)
+        && let Some(observer) = target
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_cpu_event_report(
+    command: &mut std::process::Command,
+    jail: &Jail,
+    observer_attached: bool,
+) -> Option<CpuEventReport> {
+    observer_attached
+        .then(|| CpuEventReport::prepare(command, jail))
+        .flatten()
+}
+
 #[cfg(target_os = "linux")]
 fn prepare_event_reports(
     command: &mut std::process::Command,
     jail: &Jail,
     observer_attached: bool,
-) -> (Option<MemoryEventReport>, Option<PidsEventReport>) {
+) -> (
+    Option<MemoryEventReport>,
+    Option<PidsEventReport>,
+    Option<CpuEventReport>,
+) {
     (
         prepare_memory_event_report(command, jail, observer_attached),
         prepare_pids_event_report(command, jail, observer_attached),
+        prepare_cpu_event_report(command, jail, observer_attached),
     )
 }
 
 #[cfg(target_os = "linux")]
 fn report_event_terminations(
-    reports: &(Option<MemoryEventReport>, Option<PidsEventReport>),
+    reports: &(
+        Option<MemoryEventReport>,
+        Option<PidsEventReport>,
+        Option<CpuEventReport>,
+    ),
     observer: Option<&Arc<dyn ExecutionObserver>>,
 ) {
     report_memory_termination(reports.0.as_ref(), observer);
     report_pids_termination(reports.1.as_ref(), observer);
+    report_cpu_termination(reports.2.as_ref(), observer);
 }
 
 // Standard children do not kill on drop. Keep ownership across supervisor panics
@@ -467,7 +604,7 @@ impl JailLocalHost {
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let (memory_event_report, pids_event_report) =
+        let (memory_event_report, pids_event_report, cpu_event_report) =
             prepare_event_reports(&mut command, &self.jail, observer.is_some());
         prepare_supervised_command(&mut command);
         let jail = self.jail.clone();
@@ -556,7 +693,7 @@ impl JailLocalHost {
         let output = result??;
         #[cfg(target_os = "linux")]
         report_event_terminations(
-            &(memory_event_report, pids_event_report),
+            &(memory_event_report, pids_event_report, cpu_event_report),
             event_observer.as_ref(),
         );
         Ok(output)

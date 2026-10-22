@@ -399,6 +399,9 @@ impl StreamExecution {
     pub(in crate::tinybus_module) fn pids_subprocess_denied(&self) -> bool {
         self.journal.pids_subprocess_denied()
     }
+    pub(in crate::tinybus_module) fn cpu_quota_hit(&self) -> bool {
+        self.journal.cpu_quota_hit()
+    }
     pub(in crate::tinybus_module) fn terminal_events(
         &self,
         status: Option<i32>,
@@ -419,6 +422,11 @@ impl StreamExecution {
             events.push(SandboxEvent::Denied {
                 kind: DenialKind::Subprocess,
                 target: None,
+            });
+        }
+        if self.cpu_quota_hit() {
+            events.push(SandboxEvent::LimitHit {
+                limit: LimitKind::Cpu,
             });
         }
         if self.memory_limit_hit() {

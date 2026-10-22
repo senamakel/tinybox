@@ -26,6 +26,32 @@ fn pids_event_report_accepts_only_a_single_max_counter() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn cpu_event_report_accepts_only_a_single_nr_throttled_counter() {
+    assert_eq!(
+        super::parse_cpu_throttled_counter("usage_usec 10\nnr_periods 2\nnr_throttled 0\n"),
+        Some(0)
+    );
+    assert_eq!(
+        super::parse_cpu_throttled_counter("usage_usec 10\nnr_throttled 3\nthrottled_usec 55\n"),
+        Some(3)
+    );
+    assert_eq!(
+        super::parse_cpu_throttled_counter("nr_throttled nope\n"),
+        None
+    );
+    assert_eq!(
+        super::parse_cpu_throttled_counter("nr_throttled nope\nnr_throttled 2\n"),
+        None
+    );
+    assert_eq!(super::parse_cpu_throttled_counter("usage_usec 10\n"), None);
+    assert_eq!(
+        super::parse_cpu_throttled_counter("nr_throttled 1\nnr_throttled 2\n"),
+        None
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn memory_event_report_is_disabled_when_a_jail_mount_can_expose_it() {
     let jail = tinybox_jail::Jail::new("/workspace", "memory-report-test");
     assert!(!super::jail_exposes_path(
@@ -135,6 +161,61 @@ fn pids_event_report_hands_off_the_scope_counter_and_removes_its_file()
     ]);
     assert!(
         super::PidsEventReport::prepare_in(&mut exposed_report, &exposed_jail, &runtime).is_none()
+    );
+    let path = report.0.clone();
+    drop(report);
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cpu_event_report_hands_off_the_scope_counter_and_removes_its_file()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runtime_parent = tempfile::tempdir()?;
+    let runtime = runtime_parent.path().join("runtime");
+    std::fs::create_dir(&runtime)?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700))?;
+    let workspace = tempfile::tempdir()?;
+    let jail = tinybox_jail::Jail::new(workspace.path(), "cpu-report-test");
+    let mut command = std::process::Command::new("/bin/bash");
+    command.args([
+        "--unit=tinybox-native-123-1.scope",
+        "--property=CPUQuota=10%",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    let report = super::CpuEventReport::prepare_in(&mut command, &jail, &runtime)
+        .ok_or("private runtime directory should support CPU event reporting")?;
+    assert!(report.0.starts_with(&runtime));
+    assert_eq!(std::fs::read_to_string(&report.0)?, "nr_throttled 0\n");
+    std::fs::write(&report.0, "usage_usec 10\nnr_throttled 2\n")?;
+    assert!(report.throttling_observed());
+    assert!(command.get_envs().any(|(name, value)| {
+        name == super::CPU_EVENT_FILE_ENV
+            && value.is_some_and(|value| value == report.0.as_os_str())
+    }));
+    let mut no_cpu_limit = std::process::Command::new("/bin/bash");
+    no_cpu_limit.arg("--unit=tinybox-native-123-2.scope");
+    assert!(super::CpuEventReport::prepare_in(&mut no_cpu_limit, &jail, &runtime).is_none());
+    let exposed_jail = jail.clone().add_read_write(&runtime);
+    let mut exposed_report = std::process::Command::new("/bin/bash");
+    exposed_report.args([
+        "--unit=tinybox-native-123-3.scope",
+        "--property=CPUQuota=10%",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    assert!(
+        super::CpuEventReport::prepare_in(&mut exposed_report, &exposed_jail, &runtime).is_none()
     );
     let path = report.0.clone();
     drop(report);
