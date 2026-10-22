@@ -943,7 +943,7 @@ async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
                 (
                     request,
                     NativeJailResourceRequest {
-                        cpu_millis: Some(1000),
+                        cpu_millis: None,
                         memory_bytes: None,
                         pids_max: Some(16),
                         disk_bytes: None,
