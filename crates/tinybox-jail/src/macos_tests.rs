@@ -38,6 +38,21 @@ fn live_seatbelt_deny_subprocess_blocks_child_execution() -> std::io::Result<()>
     }
 
     let root = tempfile::tempdir()?;
+    let mut allowed_command = Command::new("/bin/sh");
+    allowed_command.args([
+        "-c",
+        "echo before; /usr/bin/printf child-executed; echo after",
+    ]);
+    let allowed = SeatbeltBackend::new()
+        .spawn_captured(&Jail::new(root.path(), "seatbelt-subprocess-control"), allowed_command)?
+        .wait_with_output()?;
+    let allowed_stdout = String::from_utf8_lossy(&allowed.stdout);
+    assert!(
+        allowed_stdout.contains("child-executed"),
+        "unrestricted control did not run the child; stdout: {allowed_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+
     let jail = Jail::new(root.path(), "seatbelt-no-subprocess").deny_subprocess();
     let mut command = Command::new("/bin/sh");
     command.args([
