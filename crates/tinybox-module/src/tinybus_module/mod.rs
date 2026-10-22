@@ -286,12 +286,13 @@ impl BoxService {
                 },
             )
             .await;
+            let event_process = process.clone();
             tokio::spawn(async move {
                 if let Some(status) = stream.wait_for_terminal_exit().await {
                     emit_process_event(
                         &connection,
                         ProcessEvent {
-                            process,
+                            process: event_process,
                             event: SandboxEvent::Exited {
                                 status: Some(status),
                             },
