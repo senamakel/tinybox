@@ -467,6 +467,158 @@ int main(int argc, char **argv) {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn live_seatbelt_denies_network_connections_without_stopping_the_process() -> std::io::Result<()> {
+    use std::net::TcpListener;
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().canonicalize()?;
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port().to_string();
+
+    const CONNECT_PROBE: &str = r#"
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    unsigned long port = strtoul(argv[1], NULL, 10);
+    if (port == 0 || port > 65535) return 3;
+
+    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) return 4;
+    struct sockaddr_in address = {0};
+    address.sin_family = AF_INET;
+    address.sin_port = htons((unsigned short)port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    int result = connect(socket_fd, (struct sockaddr *)&address, sizeof(address));
+    if (strcmp(argv[2], "control") == 0) {
+        if (result != 0) return 5;
+        emit("control-connected\n", 18);
+    } else if (result < 0 && (errno == EACCES || errno == EPERM)) {
+        emit("connection-denied\n", 18);
+    } else if (result == 0) {
+        emit("connection-allowed\n", 19);
+    } else {
+        return 6;
+    }
+
+    emit("continued\n", 10);
+    (void)close(socket_fd);
+    return 0;
+}
+"#;
+    let source = root.join("connect_probe.c");
+    fs::write(&source, CONNECT_PROBE)?;
+    let helper = root.join("connect_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile network probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let run_probe = |jail: &Jail, mode: &str| -> std::io::Result<std::process::Output> {
+        let mut command = Command::new(&helper);
+        command.arg(&port).arg(mode);
+        SeatbeltBackend::new()
+            .spawn_captured(jail, command)?
+            .wait_with_output()
+    };
+
+    let control = run_probe(&Jail::new(&root, "seatbelt-network-control"), "control")?;
+    let control_stdout = String::from_utf8_lossy(&control.stdout);
+    assert!(
+        control.status.success(),
+        "unrestricted network control failed: status {}, stdout: {control_stdout:?}, stderr: {:?}",
+        control.status,
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("control-connected"),
+        "unrestricted helper could not connect to the loopback listener: stdout: {control_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("continued"),
+        "stdout: {control_stdout:?}"
+    );
+    listener.accept()?;
+    listener.set_nonblocking(true)?;
+
+    let jail = Jail::new(&root, "seatbelt-deny-network").deny_net();
+    let profile = render_profile(&jail);
+    assert!(
+        profile.contains("(deny network*)\n"),
+        "profile does not contain the configured network denial: {profile}"
+    );
+    let denied = run_probe(&jail, "deny")?;
+    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    assert!(
+        denied.status.success(),
+        "denied network probe did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
+        denied.status,
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("connection-denied"),
+        "loopback connect was not denied with EPERM/EACCES: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        !denied_stdout.contains("connection-allowed"),
+        "Seatbelt allowed the jailed connection: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("continued"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+        "the jailed process established a connection to the loopback listener"
+    );
+    eprintln!("[seatbelt-live] deny-network behavior passed");
+    Ok(())
+}
+
 #[test]
 fn profile_allow_subprocess_default_has_no_process_deny() {
     let jail = Jail::new("/tmp", "x");
