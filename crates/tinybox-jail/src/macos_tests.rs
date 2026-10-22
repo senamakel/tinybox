@@ -17,7 +17,138 @@ fn profile_deny_subprocess_emits_deny_rules() {
     let jail = Jail::new("/tmp", "x").deny_subprocess();
     let p = render_profile(&jail);
     assert!(p.contains("(deny process-fork)"));
-    assert!(p.contains("(deny process-exec)"));
+    assert!(!p.contains("(deny process-exec)"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn live_seatbelt_deny_subprocess_blocks_child_creation() -> std::io::Result<()> {
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let root = tempfile::tempdir()?;
+    const FORK_PROBE: &str = r#"
+#include <errno.h>
+#include <stddef.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+int main(void) {
+    emit("before\n", 7);
+    pid_t child = fork();
+    if (child == 0) {
+        emit("child-executed\n", 15);
+        _exit(0);
+    }
+    if (child < 0) {
+        if (errno == EPERM) {
+            emit("fork-denied\n", 12);
+            emit("after\n", 6);
+            return 0;
+        }
+        return 2;
+    }
+    int status = 0;
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return 3;
+    }
+    emit("after\n", 6);
+    return 0;
+}
+"#;
+    let source = root.path().join("fork_probe.c");
+    std::fs::write(&source, FORK_PROBE)?;
+    let helper = root.path().join("fork_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile fork probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let allowed_command = Command::new(&helper);
+    let allowed = SeatbeltBackend::new()
+        .spawn_captured(
+            &Jail::new(root.path(), "seatbelt-subprocess-control"),
+            allowed_command,
+        )?
+        .wait_with_output()?;
+    let allowed_stdout = String::from_utf8_lossy(&allowed.stdout);
+    assert!(
+        allowed.status.success(),
+        "unrestricted control failed: status {}, stdout: {allowed_stdout:?}, stderr: {:?}",
+        allowed.status,
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(
+        allowed_stdout.contains("before"),
+        "unexpected stdout: {allowed_stdout:?}"
+    );
+    assert!(
+        allowed_stdout.contains("child-executed"),
+        "unrestricted control did not run the child; stdout: {allowed_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(
+        allowed_stdout.contains("after"),
+        "unexpected stdout: {allowed_stdout:?}"
+    );
+
+    let jail = Jail::new(root.path(), "seatbelt-no-subprocess").deny_subprocess();
+    let command = Command::new(&helper);
+    let output = SeatbeltBackend::new()
+        .spawn_captured(&jail, command)?
+        .wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "the jailed process should continue after fork is denied; status: {}, stdout: {stdout:?}, stderr: {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("before"), "unexpected stdout: {stdout:?}");
+    assert!(
+        stdout.contains("fork-denied"),
+        "fork was not denied: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("child-executed"),
+        "Seatbelt allowed the child process; stdout: {stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("after"), "unexpected stdout: {stdout:?}");
+    eprintln!("[seatbelt-live] deny-subprocess behavior passed");
+    Ok(())
 }
 
 #[test]

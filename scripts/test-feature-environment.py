@@ -33,8 +33,15 @@ class FeatureEnvironmentTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "scripts/test-features.sh")],
                                     env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(calls.read_text().splitlines(), [
+            expected = []
+            if Path("/usr/bin/sandbox-exec").is_file():
+                expected.append(
+                    "test --locked -p tinybox-jail "
+                    "live_seatbelt_deny_subprocess_blocks_child_creation -- --nocapture"
+                )
+            expected.extend([
                 "test --locked --workspace", "test --locked --workspace --all-features"])
+            self.assertEqual(calls.read_text().splitlines(), expected)
 
 class WindowsFeatureEnvironmentTests(unittest.TestCase):
     def test_windows_supplies_native_shell_before_running_both_test_suites(self):
