@@ -47,6 +47,32 @@ fn workspace() -> Result<TempDir> {
     Ok(dir)
 }
 
+#[test]
+fn live_availability_confirms_bwrap_user_namespace_readiness() {
+    if !enabled() {
+        eprintln!(
+            "SKIP live_availability_confirms_bwrap_user_namespace_readiness: set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests"
+        );
+        return;
+    }
+
+    match sandbox().availability() {
+        SandboxAvailability::Available => {}
+        SandboxAvailability::Unavailable { reason }
+            if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_none() =>
+        {
+            eprintln!("SKIP live_availability_confirms_bwrap_user_namespace_readiness: {reason}");
+        }
+        SandboxAvailability::Unavailable { reason } => {
+            panic!("required namespace runner is unavailable: {reason}");
+        }
+        SandboxAvailability::Unknown => {
+            panic!("namespace sandbox did not report runtime availability");
+        }
+        _ => panic!("namespace sandbox reported an unknown availability state"),
+    }
+}
+
 /// Run a shell command in a fresh box and return its trimmed stdout.
 async fn run_in_box(sandbox: &NamespaceSandbox, spec: &BoxSpec, script: &str) -> Result<String> {
     let info = sandbox.create(spec).await?;
