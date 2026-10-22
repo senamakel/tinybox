@@ -48,28 +48,30 @@ fn workspace() -> Result<TempDir> {
 }
 
 #[test]
-fn live_availability_confirms_bwrap_user_namespace_readiness() {
+fn live_availability_confirms_bwrap_user_namespace_readiness()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     if !enabled() {
         eprintln!(
             "SKIP live_availability_confirms_bwrap_user_namespace_readiness: set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests"
         );
-        return;
+        return Ok(());
     }
 
     match sandbox().availability() {
-        SandboxAvailability::Available => {}
+        SandboxAvailability::Available => Ok(()),
         SandboxAvailability::Unavailable { reason }
             if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS").is_none() =>
         {
             eprintln!("SKIP live_availability_confirms_bwrap_user_namespace_readiness: {reason}");
+            Ok(())
         }
         SandboxAvailability::Unavailable { reason } => {
-            panic!("required namespace runner is unavailable: {reason}");
+            Err(format!("required namespace runner is unavailable: {reason}").into())
         }
         SandboxAvailability::Unknown => {
-            panic!("namespace sandbox did not report runtime availability");
+            Err("namespace sandbox did not report runtime availability".into())
         }
-        _ => panic!("namespace sandbox reported an unknown availability state"),
+        _ => Err("namespace sandbox reported an unknown availability state".into()),
     }
 }
 
