@@ -469,14 +469,7 @@ impl JailLocalHost {
         #[cfg(target_os = "linux")]
         let (memory_event_report, pids_event_report) =
             prepare_event_reports(&mut command, &self.jail, observer.is_some());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        command
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+        prepare_supervised_command(&mut command);
         let jail = self.jail.clone();
         let backend = self.backend.clone();
         let state = self.state.clone();
@@ -568,6 +561,17 @@ impl JailLocalHost {
         );
         Ok(output)
     }
+}
+
+fn prepare_supervised_command(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 }
 
 #[async_trait]
