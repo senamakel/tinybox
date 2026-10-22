@@ -325,9 +325,10 @@ fn deny_masks(denied: &[PathBuf], mounts: &[Mount]) -> io::Result<Vec<OsString>>
                 os("/dev/null"),
                 deny.clone().into_os_string(),
             ]),
-            // Bubblewrap creates a missing --tmpfs destination on the host
-            // before mounting over it. Refuse instead of mutating a granted
-            // directory or preventing a future file from being created there.
+            // Bubblewrap's `--tmpfs` creates a missing destination on the host
+            // before mounting it. Refuse prospective denials rather than
+            // mutating a granted host directory or preventing that path from
+            // later being created as a file.
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
