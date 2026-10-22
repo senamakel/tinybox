@@ -1,9 +1,12 @@
 //! Module-owned bounded output journal and cooperative execution cancellation.
-use std::sync::Mutex;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tinybox_bus::{
     ExecutionFailure, ExecutionState, MAX_OUTPUT_BYTES, OutputBatch, OutputChunk, OutputStream,
 };
-use tinybox_core::{Error, ExecutionObserver, Result};
+use tinybox_core::{Error, ExecutionObserver, Result, TerminationCause};
 
 const FRAME_BYTES: usize = 8192;
 const BATCH_BYTES: usize = 64 * 1024;
@@ -30,8 +33,12 @@ impl Default for JournalState {
 pub(super) struct OutputJournal {
     state: Mutex<JournalState>,
     cancelled: tokio::sync::Notify,
+    memory_limit_hit: AtomicBool,
 }
 impl OutputJournal {
+    pub(super) fn memory_limit_hit(&self) -> bool {
+        self.memory_limit_hit.load(Ordering::SeqCst)
+    }
     pub(super) fn read(&self, cursor: u64) -> Result<OutputBatch> {
         let state = self
             .state
@@ -144,6 +151,11 @@ impl ExecutionObserver for OutputJournal {
         }
         state.bytes = total;
         Ok(())
+    }
+    fn termination_cause(&self, cause: TerminationCause) {
+        if cause == TerminationCause::MemoryLimit {
+            self.memory_limit_hit.store(true, Ordering::SeqCst);
+        }
     }
     async fn cancelled(&self) {
         let cancelled = self.cancelled.notified();

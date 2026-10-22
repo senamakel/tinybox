@@ -28,6 +28,136 @@ impl Drop for Active {
     }
 }
 
+#[cfg(target_os = "linux")]
+const MEMORY_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_MEMORY_EVENT_FILE";
+#[cfg(target_os = "linux")]
+static MEMORY_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
+
+/// Private handoff written by the trusted launcher before it stops the scope.
+#[cfg(target_os = "linux")]
+struct MemoryEventReport(std::path::PathBuf);
+
+#[cfg(target_os = "linux")]
+impl MemoryEventReport {
+    fn prepare(command: &mut std::process::Command, jail: &Jail) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, jail, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &mut std::process::Command,
+        jail: &Jail,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
+        use std::io::Write;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        let has_scope = command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| {
+                arg.strip_prefix("--unit=")
+                    .and_then(|unit| std::path::Path::new(unit).extension())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
+                    && arg.starts_with("--unit=tinybox-native-")
+            });
+        let has_memory_limit = command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| arg.contains("MemoryMax="));
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
+        let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
+        let clears_target_environment = args.contains(&"--clearenv");
+        if !has_scope
+            || !has_memory_limit
+            || !masks_runtime
+            || !masks_cgroup
+            || !clears_target_environment
+        {
+            return None;
+        }
+        let metadata = std::fs::metadata(runtime_dir).ok()?;
+        let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
+        if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
+            return None;
+        }
+        let sequence = MEMORY_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = runtime_dir.join(format!(
+            "tinybox-memory-event-{}-{sequence}",
+            std::process::id()
+        ));
+        if jail_exposes_path(jail, &path) {
+            return None;
+        }
+        let mut report = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        if report.write_all(b"0\n").is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        command.env(MEMORY_EVENT_FILE_ENV, &path);
+        Some(Self(path))
+    }
+
+    fn oom_kill_observed(&self) -> bool {
+        // This launcher names a fresh systemd scope for every run, so the
+        // cgroup-v2 counter begins at zero; a positive final value proves the
+        // scope's own OOM-kill event rather than an unrelated SIGKILL.
+        std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|contents| parse_oom_kill_counter(&contents))
+            .is_some_and(|count| count > 0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for MemoryEventReport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_oom_kill_counter(events: &str) -> Option<u64> {
+    events.trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn jail_exposes_path(jail: &Jail, path: &std::path::Path) -> bool {
+    std::iter::once(&jail.root)
+        .chain(&jail.read_only)
+        .chain(&jail.read_write)
+        .any(|mount| path.starts_with(mount))
+}
+
+#[cfg(target_os = "linux")]
+fn report_memory_termination(
+    report: Option<&MemoryEventReport>,
+    target: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report.is_some_and(MemoryEventReport::oom_kill_observed)
+        && let Some(observer) = target
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_memory_event_report(
+    command: &mut std::process::Command,
+    jail: &Jail,
+    observer_attached: bool,
+) -> Option<MemoryEventReport> {
+    observer_attached
+        .then(|| MemoryEventReport::prepare(command, jail))
+        .flatten()
+}
+
 // Standard children do not kill on drop. Keep ownership across supervisor panics
 // and aborts so the module can acknowledge cleanup through its normal drain path.
 struct RetainedOnDrop {
@@ -199,6 +329,9 @@ impl JailLocalHost {
         payload: Option<Vec<u8>>,
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
+        #[cfg(target_os = "linux")]
+        let memory_event_report =
+            prepare_memory_event_report(&mut command, &self.jail, observer.is_some());
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -211,6 +344,7 @@ impl JailLocalHost {
         let backend = self.backend.clone();
         let state = self.state.clone();
         let limit = self.limit;
+        let event_observer = observer.clone();
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|error| failure("supervise native jail", error.to_string()))?;
         let (cancel, mut cancelled) = oneshot::channel::<()>();
@@ -289,7 +423,10 @@ impl JailLocalHost {
             .await
             .map_err(|error| failure("collect native jail", error.to_string()));
         drop(cancel);
-        result?
+        let output = result??;
+        #[cfg(target_os = "linux")]
+        report_memory_termination(memory_event_report.as_ref(), event_observer.as_ref());
+        Ok(output)
     }
 }
 

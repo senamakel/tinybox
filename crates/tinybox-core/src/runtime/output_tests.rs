@@ -55,6 +55,7 @@ async fn a_host_without_workspace_writes_refuses_them_explicitly() {
 #[test]
 fn a_default_observer_does_not_spuriously_request_cancellation() {
     let observer = Observer;
+    observer.termination_cause(TerminationCause::MemoryLimit);
     let mut future = std::pin::pin!(observer.cancelled());
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());

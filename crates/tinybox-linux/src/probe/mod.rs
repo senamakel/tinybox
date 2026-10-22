@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 const BWRAP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const BWRAP_PROBE_STDERR_LIMIT: usize = 4096;
+const BWRAP_PROBE_ARGS: [&str; 6] = ["--unshare-user", "--ro-bind", "/", "/", "--", "/bin/true"];
 
 /// Whether an unprivileged process may create a user namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,8 +170,16 @@ fn detected_namespace() -> &'static DetectedNamespace {
 
 /// Run the fixed, read-only user-namespace check and bound its lifetime.
 fn probe_bwrap_with_timeout(program: &Path, timeout: Duration) -> Result<(), String> {
+    probe_program_with_timeout(program, &BWRAP_PROBE_ARGS, timeout)
+}
+
+fn probe_program_with_timeout(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(), String> {
     let mut child = Command::new(program)
-        .args(["--unshare-user", "--ro-bind", "/", "/", "--", "/bin/true"])
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

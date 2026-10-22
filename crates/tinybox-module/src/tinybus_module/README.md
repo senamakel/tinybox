@@ -81,8 +81,12 @@ after the first successful `StartExec`, `StartNativeShellExec`, or
 `Exited { status: Some(code) }` after an observed exit status. When native
 shell supervision reaches its configured timeout, it emits `LimitHit::Timeout`
 followed by `Exited { status: None }`. Replayed starts do not duplicate
-process events. Signal delivery is best-effort; the module does not claim
-denial or CPU, memory, process-count, or disk-limit observations.
+process events. On Linux cgroup v2, a native shell memory-limit event is
+reported only when the trusted launcher observes a nonzero
+`memory.events` `oom_kill` counter before scope teardown; it is never inferred
+from SIGKILL or an exit code. Other platforms and runs without that evidence do
+not claim a memory event. Signal delivery is best-effort; the module does not
+claim denial, CPU, process-count, or disk-limit observations.
 
 Contract 1.22 was the one-release deprecation window for `AnalyzeCommand`,
 `CommandClass`, command classification fields, executor/environment-guard

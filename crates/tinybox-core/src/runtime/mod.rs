@@ -32,7 +32,7 @@ use crate::identity::{BoxId, ProcessId, SnapshotId};
 use crate::spec::BoxSpec;
 
 mod output;
-pub use output::{ExecutionObserver, OutputStream};
+pub use output::{ExecutionObserver, OutputStream, TerminationCause};
 
 mod forward;
 #[cfg(test)]

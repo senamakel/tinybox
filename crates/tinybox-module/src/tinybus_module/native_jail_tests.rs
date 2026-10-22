@@ -656,6 +656,183 @@ fn native_memory_limit_kills_a_workload_that_touches_past_its_budget()
 }
 
 #[cfg(target_os = "linux")]
+async fn next_memory_event(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+) -> tinybus::Result<serde_json::Value> {
+    let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+        .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+    serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+}
+
+#[cfg(target_os = "linux")]
+async fn assert_memory_event_sequence(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    process: &tinybox_bus::ProcessRef,
+) -> tinybus::Result<()> {
+    let started = next_memory_event(events).await?;
+    assert_eq!(started["process"], serde_json::json!(process));
+    assert_eq!(started["event"]["event"], "started");
+    let limit_hit = next_memory_event(events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
+    assert_eq!(limit_hit["event"]["event"], "limit_hit");
+    assert_eq!(limit_hit["event"]["limit"], "memory");
+    let exited = next_memory_event(events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
+    assert_eq!(exited["event"]["event"], "exited");
+    assert_eq!(exited["event"]["status"], 137);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_memory_process_output(
+    proxy: &tinybus::Proxy,
+    process: &tinybox_bus::ProcessRef,
+) -> tinybus::Result<tinybox_bus::OutputBatch> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let output: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), 0_u64)).await?;
+            if output.state != tinybox_bus::ExecutionState::Running {
+                return Ok(output);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .map_err(|_| tinybus::Error::failed("timed out waiting for memory-limited process"))?
+}
+
+#[cfg(target_os = "linux")]
+fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
+    assert_eq!(
+        output.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 137 },
+        "memory-pressure child did not terminate from the limit: {output:?}"
+    );
+    let output_bytes: Vec<u8> = output
+        .chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.iter().copied())
+        .collect();
+    assert!(
+        !String::from_utf8_lossy(&output_bytes).contains("allocation survived"),
+        "the memory-pressure child completed normally"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn native_memory_limit_emits_provenance_before_terminal_exit()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use tinybox_bus::{
+        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
+        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+    };
+    use tinybus::Connection;
+    use tinybus::broker::Broker;
+    use tinybus::transport::memory::MemoryBus;
+
+    if !native_resource_runtime_available() {
+        eprintln!(
+            "skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable"
+        );
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .status()?
+        .success()
+    {
+        eprintln!("skipped: python3 is unavailable for the memory pressure fixture");
+        return Ok(());
+    }
+
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    super::super::setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(
+        super::super::INTERFACE,
+        super::super::OBJECT_PATH,
+        super::super::INTERFACE,
+    )?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(state.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    let request = ShellExecRequest {
+        process: process_id,
+        resource: resource.clone(),
+        shell: SelectShellRequest {
+            command: "python3 -c 'import os; assert \"TINYBOX_INTERNAL_MEMORY_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); data=bytearray(256*1024*1024); [data.__setitem__(i, 1) for i in range(0, len(data), 4096)]; print(\"allocation survived\")'".into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir: state.path().to_string_lossy().into_owned(),
+        timeout_ms: 30_000,
+        stdin: None,
+        jail: Some(NativeJailConfig {
+            read_only: Vec::new(),
+            read_write: Vec::new(),
+            allow_net: false,
+            allow_subprocess: true,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: Vec::new(),
+            resources: None,
+        }),
+        hide_window: false,
+    };
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>(
+                "StartNativeShellExecWithResources",
+                (
+                    request,
+                    NativeJailResourceRequest {
+                        cpu_millis: Some(1000),
+                        memory_bytes: Some(64 * 1024 * 1024),
+                        pids_max: Some(16),
+                        disk_bytes: None,
+                    }
+                ),
+            )
+            .await?,
+        process
+    );
+
+    let output = wait_for_memory_process_output(&proxy, &process).await?;
+    assert_memory_process_was_killed(&output);
+
+    assert_memory_event_sequence(&mut events, &process).await?;
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn active_scope_cgroup(
     argv: &[String],
     child: &mut std::process::Child,

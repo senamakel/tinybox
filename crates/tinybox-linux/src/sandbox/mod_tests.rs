@@ -498,6 +498,7 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert!(has(&argv, "--tmpfs"));
     assert!(has(&argv, "/run"));
     assert!(has(&argv, "/sys"));
+    assert!(has(&argv, "--clearenv"));
     assert!(has(&argv, "--ro-bind"));
     assert!(has(&argv, grant.to_str().ok_or("grant path is not UTF-8")?));
     assert!(has(&argv, "BASH_ENV"));
@@ -505,6 +506,23 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
         .iter()
         .position(|part| part == "--")
         .ok_or("missing systemd delimiter")?;
+    assert_eq!(
+        &argv[systemd_end + 1..systemd_end + 5],
+        ["/bin/bash", "--noprofile", "--norc", "-c"],
+        "a trusted supervisor must sample cgroup events from inside the scope"
+    );
+    let scope_unit = argv[..systemd_end]
+        .iter()
+        .find_map(|part| part.strip_prefix("--unit="))
+        .ok_or("missing transient scope name")?;
+    let scope_script = argv
+        .get(systemd_end + 5)
+        .ok_or("missing in-scope telemetry script")?;
+    assert!(scope_script.contains("/sys/fs/cgroup${control_group}/memory.events"));
+    assert_eq!(argv[systemd_end + 6], "tinybox-memory-event-scope");
+    assert_eq!(argv[systemd_end + 7], scope_unit);
+    assert!(std::path::Path::new(&argv[systemd_end + 8]).is_absolute());
+    assert_eq!(argv[systemd_end + 9], "--unshare-user");
     assert!(
         !argv[..systemd_end]
             .iter()

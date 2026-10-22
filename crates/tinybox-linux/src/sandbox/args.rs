@@ -237,8 +237,55 @@ pub fn native_jail_argv_with_programs(
     let bwrap = validate_trusted_program(bwrap)?;
     let supports_expand_environment = systemd_run_supports_safe_arguments(&systemd_run)?;
     let argv = native_bwrap_argv(request, supports_expand_environment, &systemd_run, &bwrap);
-    Ok(native_launcher_argv(argv))
+    Ok(native_launcher_argv(wrap_scope_command(argv)))
 }
+
+/// Run the trusted telemetry wrapper inside the transient scope, so it can
+/// sample cgroup counters before systemd tears the scope down.
+fn wrap_scope_command(mut argv: Vec<String>) -> Vec<String> {
+    let Some(delimiter) = argv.iter().position(|arg| arg == "--") else {
+        return argv;
+    };
+    let Some(unit) = argv
+        .iter()
+        .find_map(|arg| arg.strip_prefix("--unit=").map(str::to_owned))
+    else {
+        return argv;
+    };
+    let workload = argv.split_off(delimiter + 1);
+    argv.extend([
+        "/bin/bash".to_owned(),
+        "--noprofile".to_owned(),
+        "--norc".to_owned(),
+        "-c".to_owned(),
+        MEMORY_EVENT_SCOPE_WRAPPER.to_owned(),
+        "tinybox-memory-event-scope".to_owned(),
+        unit,
+    ]);
+    argv.extend(workload);
+    argv
+}
+
+const MEMORY_EVENT_SCOPE_WRAPPER: &str = r#"
+unit=$1
+shift
+"$@"
+status=$?
+report=${TINYBOX_INTERNAL_MEMORY_EVENT_FILE:-}
+if [ -n "$report" ]; then
+    control_group=$(/usr/bin/systemctl --user show --property=ControlGroup --value "$unit" 2>/dev/null)
+    events=
+    case $control_group in /*) events=/sys/fs/cgroup${control_group}/memory.events;; esac
+    oom_kill=0
+    if [ -r "$events" ]; then
+        while IFS=' ' read -r key value; do
+            if [ "$key" = oom_kill ]; then oom_kill=$value; break; fi
+        done < "$events"
+    fi
+    printf '%s\n' "$oom_kill" > "$report" 2>/dev/null || :
+fi
+exit "$status"
+"#;
 
 /// Find systemd-run only in fixed system locations and return its trusted
 /// canonical path. This does not consult the caller's `PATH`.
@@ -506,7 +553,27 @@ fn native_launcher_argv(argv: Vec<String>) -> Vec<String> {
         "--noprofile".to_owned(),
         "--norc".to_owned(),
         "-c".to_owned(),
-        "[ -d /proc/self/fd ] || exit 125; shopt -s nullglob; fdpaths=(/proc/self/fd/*); ((${#fdpaths[@]} > 0)) || exit 125; for fdpath in \"${fdpaths[@]}\"; do fd=${fdpath##*/}; case $fd in 0|1|2|*[!0-9]*) continue;; esac; eval \"exec ${fd}>&-\" || exit 125; done; unit=; for arg in \"$@\"; do case $arg in --unit=*) unit=${arg#--unit=};; esac; done; [ -n \"$unit\" ] || exit 125; \"$@\"; status=$?; if ! /usr/bin/systemctl --user stop \"$unit\"; then /usr/bin/systemctl --user is-active --quiet \"$unit\" && exit 125; fi; exit \"$status\"".to_owned(),
+        r#"[ -d /proc/self/fd ] || exit 125
+shopt -s nullglob
+fdpaths=(/proc/self/fd/*)
+((${#fdpaths[@]} > 0)) || exit 125
+for fdpath in "${fdpaths[@]}"; do
+    fd=${fdpath##*/}
+    case $fd in 0|1|2|*[!0-9]*) continue;; esac
+    eval "exec ${fd}>&-" || exit 125
+done
+unit=
+for arg in "$@"; do
+    case $arg in --unit=*) unit=${arg#--unit=};; esac
+done
+[ -n "$unit" ] || exit 125
+"$@"
+status=$?
+if ! /usr/bin/systemctl --user stop "$unit"; then
+    /usr/bin/systemctl --user is-active --quiet "$unit" && exit 125
+fi
+exit "$status""#
+            .to_owned(),
         "tinybox-native-launcher".to_owned(),
     ];
     launcher.extend(argv);
