@@ -939,7 +939,6 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
 
 #[tokio::test]
 async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus::Result<()> {
-    use serde_json::Value;
     use tinybox_bus::{
         CreateRequest, ExecRequest, ProcessRef, ReserveRequest, ResourceId, SpawnRequest, Workspace,
     };
@@ -999,22 +998,9 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
         process
     );
 
-    let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
-        tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
-            .await
-            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
-            .map_err(|error| tinybus::Error::failed(error.to_string()))
-    };
-    let started = receive_event(&mut events).await?;
-    let started: Value = serde_json::from_value(started.body[0].clone())?;
-    assert_eq!(started["process"]["resource"], resource.0);
-    assert_eq!(started["process"]["process"], process_id.0);
-    assert_eq!(started["event"]["event"], "started");
-
-    let exited = receive_event(&mut events).await?;
-    let exited: Value = serde_json::from_value(exited.body[0].clone())?;
-    assert_eq!(exited["process"]["resource"], resource.0);
-    assert_eq!(exited["process"]["process"], process.process.0);
+    assert_process_event(&mut events, &process, "started").await?;
+    let exited = receive_process_event(&mut events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
     assert_eq!(exited["event"]["event"], "exited");
     assert_eq!(exited["event"]["status"], 7);
     proxy.call::<()>("Close", (resource,)).await?;
@@ -1023,7 +1009,6 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
 
 #[tokio::test]
 async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tinybus::Result<()> {
-    use serde_json::Value;
     use tinybox_bus::{
         CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest,
         ShellExecRequest, Workspace,
