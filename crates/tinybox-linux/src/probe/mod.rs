@@ -204,7 +204,9 @@ fn read_bounded_diagnostic(mut stderr: impl Read) -> String {
 }
 
 fn join_diagnostic(reader: std::thread::JoinHandle<String>) -> String {
-    reader.join().unwrap_or_else(|_| "probe diagnostic reader failed".to_owned())
+    reader
+        .join()
+        .unwrap_or_else(|_| "probe diagnostic reader failed".to_owned())
 }
 
 fn diagnostic_suffix(diagnostic: &str) -> String {
