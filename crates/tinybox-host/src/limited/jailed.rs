@@ -446,6 +446,9 @@ impl JailLocalHost {
         #[cfg(target_os = "linux")]
         let memory_event_report =
             prepare_memory_event_report(&mut command, &self.jail, observer.is_some());
+        #[cfg(target_os = "linux")]
+        let pids_event_report =
+            prepare_pids_event_report(&mut command, &self.jail, observer.is_some());
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -540,6 +543,8 @@ impl JailLocalHost {
         let output = result??;
         #[cfg(target_os = "linux")]
         report_memory_termination(memory_event_report.as_ref(), event_observer.as_ref());
+        #[cfg(target_os = "linux")]
+        report_pids_termination(pids_event_report.as_ref(), event_observer.as_ref());
         Ok(output)
     }
 }

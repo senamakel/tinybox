@@ -34,10 +34,14 @@ pub(super) struct OutputJournal {
     state: Mutex<JournalState>,
     cancelled: tokio::sync::Notify,
     memory_limit_hit: AtomicBool,
+    pids_limit_hit: AtomicBool,
 }
 impl OutputJournal {
     pub(super) fn memory_limit_hit(&self) -> bool {
         self.memory_limit_hit.load(Ordering::SeqCst)
+    }
+    pub(super) fn pids_limit_hit(&self) -> bool {
+        self.pids_limit_hit.load(Ordering::SeqCst)
     }
     pub(super) fn read(&self, cursor: u64) -> Result<OutputBatch> {
         let state = self
@@ -155,6 +159,8 @@ impl ExecutionObserver for OutputJournal {
     fn termination_cause(&self, cause: TerminationCause) {
         if cause == TerminationCause::MemoryLimit {
             self.memory_limit_hit.store(true, Ordering::SeqCst);
+        } else if cause == TerminationCause::PidsLimit {
+            self.pids_limit_hit.store(true, Ordering::SeqCst);
         }
     }
     async fn cancelled(&self) {

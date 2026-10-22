@@ -142,6 +142,9 @@ fn empty_output_does_not_consume_sequence_or_memory()
 fn provider_memory_termination_is_retained_for_the_process_event_publisher() {
     let journal = OutputJournal::default();
     assert!(!journal.memory_limit_hit());
+    assert!(!journal.pids_limit_hit());
     journal.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
     assert!(journal.memory_limit_hit());
+    journal.termination_cause(tinybox_core::TerminationCause::PidsLimit);
+    assert!(journal.pids_limit_hit());
 }
