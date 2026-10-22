@@ -571,30 +571,25 @@ async fn dropping_jail_call_before_supervisor_start_does_not_spawn()
 }
 
 #[test]
-fn jail_supervisor_fault_retains_child_for_cleanup_acknowledgement()
--> Result<(), Box<dyn std::error::Error>> {
+fn owned_file_pipes_work_without_a_tokio_io_driver() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let host = JailLocalHost::with_backend(
         tinybox_jail::Jail::new(root.path(), "runtime-fault-fixture"),
         Arc::new(FixtureBackend),
         64,
     )?;
-    // Pipe registration panics without an I/O driver after native startup.
+    // File-backed owned pipes use Tokio's blocking pool and do not require the
+    // process I/O driver that ChildStdout::from_std required.
     let missing_io = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()?;
-    let result =
-        missing_io.block_on(host.run(&ExecRequest::new(["/bin/sh", "-c", "sleep 600 & wait"])));
-    assert!(result.is_err());
-    assert!(
-        host.has_pending_cleanup(),
-        "a supervisor fault must keep native ownership"
-    );
-    drop(missing_io);
-    let recovery = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    recovery.block_on(host.drain_checked())?;
+    let output = missing_io.block_on(host.run(&ExecRequest::new([
+        "/bin/sh",
+        "-c",
+        "printf owned-pipes",
+    ])))?;
+    assert_eq!(output.stdout, b"owned-pipes");
+    missing_io.block_on(host.drain_checked())?;
     assert!(!host.has_pending_cleanup());
     Ok(())
 }
