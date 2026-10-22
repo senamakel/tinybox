@@ -297,6 +297,15 @@ if [ -n "$pids_report" ]; then
     fi
     printf '%s\n' "$pids_max" > "$pids_report" 2>/dev/null || :
 fi
+cpu_report=${TINYBOX_INTERNAL_CPU_EVENT_FILE:-}
+if [ -n "$cpu_report" ]; then
+    control_group=$(/usr/bin/systemctl --user show --property=ControlGroup --value "$unit" 2>/dev/null)
+    stats=
+    case $control_group in /*) stats=/sys/fs/cgroup${control_group}/cpu.stat;; esac
+    if [ -r "$stats" ]; then
+        cat "$stats" > "$cpu_report" 2>/dev/null || :
+    fi
+fi
 exit "$status"
 "#;
 

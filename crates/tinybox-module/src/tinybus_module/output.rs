@@ -36,6 +36,7 @@ pub(super) struct OutputJournal {
     memory_limit_hit: AtomicBool,
     pids_limit_hit: AtomicBool,
     pids_subprocess_denied: AtomicBool,
+    cpu_quota_hit: AtomicBool,
 }
 impl OutputJournal {
     pub(super) fn memory_limit_hit(&self) -> bool {
@@ -46,6 +47,9 @@ impl OutputJournal {
     }
     pub(super) fn pids_subprocess_denied(&self) -> bool {
         self.pids_subprocess_denied.load(Ordering::SeqCst)
+    }
+    pub(super) fn cpu_quota_hit(&self) -> bool {
+        self.cpu_quota_hit.load(Ordering::SeqCst)
     }
     pub(super) fn read(&self, cursor: u64) -> Result<OutputBatch> {
         let state = self
@@ -161,7 +165,9 @@ impl ExecutionObserver for OutputJournal {
         Ok(())
     }
     fn termination_cause(&self, cause: TerminationCause) {
-        if cause == TerminationCause::MemoryLimit {
+        if cause == TerminationCause::CpuQuota {
+            self.cpu_quota_hit.store(true, Ordering::SeqCst);
+        } else if cause == TerminationCause::MemoryLimit {
             self.memory_limit_hit.store(true, Ordering::SeqCst);
         } else if cause == TerminationCause::PidsLimit {
             self.pids_limit_hit.store(true, Ordering::SeqCst);

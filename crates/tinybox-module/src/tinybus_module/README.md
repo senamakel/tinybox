@@ -90,7 +90,12 @@ same fresh scope. That evidence emits one aggregate
 does not identify a particular fork or child. Neither event is inferred from a
 signal or exit code. Other platforms and runs without the corresponding
 counter evidence do not claim these events. Signal delivery is best-effort;
-the module does not claim CPU or disk-limit observations.
+native shell CPU-quota events are reported only when the trusted launcher
+observes a nonzero `cpu.stat` `nr_throttled` counter before scope teardown.
+`LimitHit::Cpu` means quota throttling was observed; it does not claim CPU
+exhaustion or process termination. Other platforms and runs without the
+corresponding counter evidence do not claim CPU events. The module does not
+claim disk-limit observations.
 
 Contract 1.22 was the one-release deprecation window for `AnalyzeCommand`,
 `CommandClass`, command classification fields, executor/environment-guard

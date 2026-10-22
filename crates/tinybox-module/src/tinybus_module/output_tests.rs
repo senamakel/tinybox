@@ -144,6 +144,9 @@ fn provider_limit_termination_is_retained_for_the_process_event_publisher() {
     assert!(!journal.memory_limit_hit());
     assert!(!journal.pids_limit_hit());
     assert!(!journal.pids_subprocess_denied());
+    assert!(!journal.cpu_quota_hit());
+    journal.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    assert!(journal.cpu_quota_hit());
     journal.termination_cause(tinybox_core::TerminationCause::MemoryLimit);
     assert!(journal.memory_limit_hit());
     assert!(!journal.pids_subprocess_denied());
