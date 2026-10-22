@@ -49,6 +49,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | StartShellExec | SpawnRequest, SelectShellRequest | ProcessRef |
 | StartNativeShellExec | ShellExecRequest | ProcessRef |
 | StartNativeShellExecWithResources | ShellExecRequest, NativeJailResourceRequest | ProcessRef |
+| PlanCheck | PlanCheckRequest | PlanCheckResponse |
 | ValidateDockerPolicy | DockerPolicyRequest | DockerPolicyReport |
 | StartStdio | StdioStartRequest | ProcessRef |
 | WriteStdio | StdioWriteRequest | () |
@@ -57,7 +58,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | KillStdio | ProcessRef | () |
 | StdioStatus | ProcessRef | StdioStatus |
 
-Capabilities advertises contract version 2.2. Hosts require equal majors and a
+Capabilities advertises contract version 2.3. Hosts require equal majors and a
 module minor at least as new as their vocabulary, using
 `tinybox_bus::is_compatible`. Contract 1.0 was the original discovery-only
 surface; 1.1 added reserved resource/process ownership and terminal shutdown;
@@ -67,6 +68,11 @@ published-port facts, and module-owned forwarding. Version 1.3 adds
 availability, process isolation, and filesystem, network, and subprocess
 enforcement. The module probes the backend; the host applies its own policy to
 the returned facts. This version is independent of package/artifact releases.
+
+Contract 2.3 adds `PlanCheck`, which reports the selected backend's declared
+enforcement for an ordered list of requested constraints without allocating a
+resource. Each result echoes the request's hard/soft flag; the caller decides
+how to act on `BestEffort` or `Unsupported` results.
 
 Contract 1.22 was the one-release deprecation window for `AnalyzeCommand`,
 `CommandClass`, command classification fields, executor/environment-guard

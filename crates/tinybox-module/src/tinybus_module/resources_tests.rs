@@ -3023,3 +3023,31 @@ async fn cancelling_one_live_execution_does_not_wait_for_another_running_stream(
     );
     Ok(())
 }
+#[test]
+fn plan_check_wire_mappings_cover_every_constraint_and_enforcement() {
+    use tinybox_bus::{
+        ConstraintEnforcement as WireEnforcement, ResourceConstraint as WireConstraint,
+    };
+    use tinybox_core::{Constraint, Enforcement};
+
+    let constraints = [
+        (WireConstraint::Filesystem, Constraint::Filesystem),
+        (WireConstraint::Network, Constraint::Network),
+        (WireConstraint::Cpu, Constraint::Cpu),
+        (WireConstraint::Memory, Constraint::Memory),
+        (WireConstraint::Pids, Constraint::Pids),
+        (WireConstraint::Disk, Constraint::Disk),
+        (WireConstraint::Subprocess, Constraint::Subprocess),
+    ];
+    for (wire, core) in constraints {
+        assert_eq!(super::core_constraint(wire), core);
+    }
+    let enforcement = [
+        (Enforcement::Unsupported, WireEnforcement::Unsupported),
+        (Enforcement::BestEffort, WireEnforcement::BestEffort),
+        (Enforcement::Enforced, WireEnforcement::Enforced),
+    ];
+    for (core, wire) in enforcement {
+        assert_eq!(super::wire_enforcement(core), wire);
+    }
+}
