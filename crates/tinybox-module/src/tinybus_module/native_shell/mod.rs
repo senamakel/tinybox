@@ -139,6 +139,7 @@ impl ShellContext {
         for name in selection.remove_environment {
             environment.remove(&name);
         }
+        let mut native_launcher = None;
         let host = if let Some(resources) = resources {
             let config = request.jail.as_ref().ok_or_else(invalid)?;
             let mut jail = tinybox_bus::NativeJailRequest {
@@ -160,6 +161,7 @@ impl ShellContext {
                 &jail,
                 &mut native_request,
             )?)
+            .tap(|_| native_launcher = Some(native_request))
         } else if let Some(config) = &request.jail {
             let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
             jail.read_write.push(scratch.path().to_path_buf());
@@ -192,6 +194,7 @@ impl ShellContext {
             scratch: Arc::new(std::sync::Mutex::new(Some(scratch))),
             scratch_cleanup_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host,
+            native_launcher,
             #[cfg(test)]
             scratch_deletion_blocked: std::sync::atomic::AtomicBool::new(false),
         }))
@@ -201,6 +204,9 @@ impl ShellContext {
         resolved: &tinybox_core::ExecRequest,
         observer: Arc<super::output::OutputJournal>,
     ) -> tinybox_core::Result<tinybox_core::ExecOutput> {
+        if let (ShellHost::Jailed(host), Some(launcher)) = (&self.host, &self.native_launcher) {
+            return host.run_observed(launcher, observer).await;
+        }
         let mut command = tinybox_host::build_shell_command(&self.request.shell);
         apply_window_flags(&mut command, self.request.hide_window);
         command.env_clear().envs(&self.environment);
