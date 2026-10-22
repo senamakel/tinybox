@@ -471,6 +471,17 @@ pub struct OwnedChild {
     stderr: Option<File>,
 }
 
+impl std::fmt::Debug for OwnedChild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedChild")
+            .field("id", &self.id())
+            .field("has_stdin", &self.stdin.is_some())
+            .field("has_stdout", &self.stdout.is_some())
+            .field("has_stderr", &self.stderr.is_some())
+            .finish()
+    }
+}
+
 impl OwnedChild {
     /// Construct an owned child from a process adapter and its captured pipes.
     #[must_use]
