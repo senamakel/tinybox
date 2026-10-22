@@ -55,8 +55,9 @@ impl MemoryEventReport {
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
         let runtime_dir = std::path::PathBuf::from(runtime_dir);
         let metadata = std::fs::metadata(&runtime_dir).ok()?;
+        let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
         if !metadata.is_dir()
-            || metadata.uid() != nix::unistd::geteuid().as_raw()
+            || metadata.uid() != process_uid
             || metadata.mode() & 0o077 != 0
         {
             return None;
@@ -365,7 +366,7 @@ impl JailLocalHost {
             .await
             .map_err(|error| failure("collect native jail", error.to_string()));
         drop(cancel);
-        let output = result?;
+        let output = result??;
         #[cfg(target_os = "linux")]
         if memory_event_report
             .as_ref()
