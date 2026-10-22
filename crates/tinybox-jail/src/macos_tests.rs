@@ -289,6 +289,184 @@ int main(int argc, char **argv) {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn live_seatbelt_denies_configured_file_writes_without_stopping_the_process() -> std::io::Result<()>
+{
+    use std::process::Command;
+
+    const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
+    if !std::path::Path::new("/usr/bin/sandbox-exec").is_file() {
+        if std::env::var_os(REQUIRE_SEATBELT_TEST).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "required macOS Seatbelt test cannot run: /usr/bin/sandbox-exec is absent",
+            ));
+        }
+        eprintln!("[seatbelt-live] SKIP: /usr/bin/sandbox-exec is absent");
+        return Ok(());
+    }
+
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().canonicalize()?;
+    let allowed_file = root.join("allowed.txt");
+    let protected_file = root.join("protected.txt");
+    fs::write(&allowed_file, b"allowed-original")?;
+    fs::write(&protected_file, b"protected-original-bytes")?;
+
+    const WRITE_PROBE: &str = r#"
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
+#include <string.h>
+#include <unistd.h>
+
+static void emit(const char *message, size_t length) {
+    (void)write(STDOUT_FILENO, message, length);
+}
+
+static int replace_file(const char *path, const char *contents, size_t length) {
+    int file = open(path, O_WRONLY | O_TRUNC);
+    if (file < 0) return -1;
+    ssize_t written = write(file, contents, length);
+    int saved_errno = errno;
+    (void)close(file);
+    errno = saved_errno;
+    return written == (ssize_t)length ? 0 : -1;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 4) return 2;
+    if (replace_file(argv[1], "allowed-replaced", 16) != 0) return 3;
+    emit("allowed-write\n", 14);
+
+    if (strcmp(argv[3], "control") == 0) {
+        if (replace_file(argv[2], "control-replaced", 16) != 0) return 4;
+        emit("control-protected-write\n", 24);
+    } else {
+        int protected = open(argv[2], O_WRONLY | O_TRUNC);
+        if (protected < 0) {
+            if (errno != EACCES && errno != EPERM) return 5;
+            emit("protected-write-denied\n", 23);
+        } else {
+            const char *unexpected = "unexpected-write";
+            (void)write(protected, unexpected, strlen(unexpected));
+            (void)close(protected);
+            emit("protected-write-allowed\n", 24);
+        }
+    }
+
+    emit("continued\n", 10);
+    return 0;
+}
+"#;
+    let source = root.join("write_probe.c");
+    fs::write(&source, WRITE_PROBE)?;
+    let helper = root.join("write_probe");
+    let compilation = match Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&helper)
+        .arg(&source)
+        .output()
+    {
+        Ok(compilation) => compilation,
+        Err(error) if std::env::var_os(REQUIRE_SEATBELT_TEST).is_none() => {
+            eprintln!("[seatbelt-live] SKIP: C compiler unavailable: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    assert!(
+        compilation.status.success(),
+        "could not compile write probe: stdout: {:?}, stderr: {:?}",
+        String::from_utf8_lossy(&compilation.stdout),
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let run_probe = |jail: &Jail, mode: &str| -> std::io::Result<std::process::Output> {
+        let mut command = Command::new(&helper);
+        command.arg(&allowed_file).arg(&protected_file).arg(mode);
+        SeatbeltBackend::new()
+            .spawn_captured(jail, command)?
+            .wait_with_output()
+    };
+
+    let control = run_probe(&Jail::new(&root, "seatbelt-file-write-control"), "control")?;
+    let control_stdout = String::from_utf8_lossy(&control.stdout);
+    assert!(
+        control.status.success(),
+        "unrestricted file-write control failed: status {}, stdout: {control_stdout:?}, stderr: {:?}",
+        control.status,
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("allowed-write"),
+        "stdout: {control_stdout:?}"
+    );
+    assert!(
+        control_stdout.contains("control-protected-write"),
+        "unrestricted control could not write the protected target: stdout: {control_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("continued"),
+        "stdout: {control_stdout:?}"
+    );
+    assert_eq!(fs::read(&allowed_file)?, b"allowed-replaced");
+    assert_eq!(fs::read(&protected_file)?, b"control-replaced");
+
+    fs::write(&allowed_file, b"allowed-original")?;
+    fs::write(&protected_file, b"protected-original-bytes")?;
+    let mut jail = Jail::new(&root, "seatbelt-deny-file-write");
+    jail.deny_read.push(protected_file.clone());
+    jail.canonicalize()?;
+    let profile = render_profile(&jail);
+    let denied_path = format!(
+        "(deny file-read* file-write*\n  (subpath \"{}\")",
+        escape(&protected_file.to_string_lossy())
+    );
+    assert!(
+        profile.contains(&denied_path),
+        "profile does not deny reads and writes for the configured protected path: {profile}"
+    );
+
+    let denied = run_probe(&jail, "deny")?;
+    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    assert!(
+        denied.status.success(),
+        "denied file-write probe did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
+        denied.status,
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("allowed-write"),
+        "allowed writes under the jail root should still work: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("protected-write-denied"),
+        "O_TRUNC was not denied with EPERM/EACCES: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        !denied_stdout.contains("protected-write-allowed"),
+        "Seatbelt allowed O_TRUNC on the protected file: stdout: {denied_stdout:?}, stderr: {:?}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_stdout.contains("continued"),
+        "stdout: {denied_stdout:?}"
+    );
+    assert_eq!(fs::read(&allowed_file)?, b"allowed-replaced");
+    assert_eq!(
+        fs::read(&protected_file)?,
+        b"protected-original-bytes",
+        "protected file changed despite the denied O_TRUNC attempt"
+    );
+    eprintln!("[seatbelt-live] deny-file-write behavior passed");
+    Ok(())
+}
+
 #[test]
 fn profile_allow_subprocess_default_has_no_process_deny() {
     let jail = Jail::new("/tmp", "x");
