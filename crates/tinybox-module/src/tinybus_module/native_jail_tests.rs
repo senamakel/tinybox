@@ -686,6 +686,24 @@ async fn assert_memory_event_sequence(
 }
 
 #[cfg(target_os = "linux")]
+async fn assert_pids_event_sequence(
+    events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    process: &tinybox_bus::ProcessRef,
+) -> tinybus::Result<()> {
+    let started = next_memory_event(events).await?;
+    assert_eq!(started["process"], serde_json::json!(process));
+    assert_eq!(started["event"]["event"], "started");
+    let limit_hit = next_memory_event(events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
+    assert_eq!(limit_hit["event"]["event"], "limit_hit");
+    assert_eq!(limit_hit["event"]["limit"], "pids");
+    let exited = next_memory_event(events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
+    assert_eq!(exited["event"]["event"], "exited");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 async fn wait_for_memory_process_output(
     proxy: &tinybus::Proxy,
     process: &tinybox_bus::ProcessRef,
@@ -830,6 +848,132 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
     assert_memory_event_sequence(&mut events, &process).await?;
     proxy.call::<()>("Close", (resource,)).await?;
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use tinybox_bus::{
+        CreateRequest, NativeJailResourceRequest, ProcessRef, ReserveRequest, ResourceId, Workspace,
+    };
+    use tinybus::Connection;
+    use tinybus::broker::Broker;
+    use tinybus::transport::memory::MemoryBus;
+
+    if !native_resource_runtime_available() {
+        eprintln!(
+            "skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable"
+        );
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .status()?
+        .success()
+    {
+        eprintln!("skipped: python3 is unavailable for the pids pressure fixture");
+        return Ok(());
+    }
+
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    super::super::setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(
+        super::super::INTERFACE,
+        super::super::OBJECT_PATH,
+        super::super::INTERFACE,
+    )?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(state.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    let request = pids_limit_shell_request(
+        process_id,
+        resource.clone(),
+        state.path().to_string_lossy().into_owned(),
+    );
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>(
+                "StartNativeShellExecWithResources",
+                (
+                    request,
+                    NativeJailResourceRequest {
+                        cpu_millis: Some(1000),
+                        memory_bytes: None,
+                        pids_max: Some(16),
+                        disk_bytes: None,
+                    }
+                ),
+            )
+            .await?,
+        process
+    );
+
+    let output = wait_for_memory_process_output(&proxy, &process).await?;
+    assert!(matches!(
+        output.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 0 }
+    ));
+    assert_pids_event_sequence(&mut events, &process).await?;
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn pids_limit_shell_request(
+    process: tinybox_bus::ResourceId,
+    resource: tinybox_bus::ResourceId,
+    state_dir: String,
+) -> tinybox_bus::ShellExecRequest {
+    use tinybox_bus::{JailEnforcement, NativeJailConfig, SelectShellRequest, ShellExecRequest};
+
+    ShellExecRequest {
+        process,
+        resource,
+        shell: SelectShellRequest {
+            command: "python3 -c 'import errno,os,signal; assert \"TINYBOX_INTERNAL_PIDS_EVENT_FILE\" not in os.environ; assert not os.path.exists(\"/run/user\"); assert not os.path.exists(\"/sys/fs/cgroup\"); children=[]; blocked=False\ntry:\n for _ in range(64):\n  pid=os.fork()\n  if pid==0: os.pause()\n  children.append(pid)\nexcept OSError as e: blocked=e.errno==errno.EAGAIN\nfor pid in children: os.kill(pid,signal.SIGKILL)\nfor pid in children: os.waitpid(pid,0)\nassert blocked, \"fork unexpectedly succeeded past pids.max\"'".into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir,
+        timeout_ms: 30_000,
+        stdin: None,
+        jail: Some(NativeJailConfig {
+            read_only: Vec::new(),
+            read_write: Vec::new(),
+            allow_net: false,
+            allow_subprocess: true,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: Vec::new(),
+            resources: None,
+        }),
+        hide_window: false,
+    }
 }
 
 #[cfg(target_os = "linux")]

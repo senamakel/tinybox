@@ -16,6 +16,16 @@ fn memory_event_report_accepts_only_a_valid_oom_kill_counter() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn pids_event_report_accepts_only_a_single_max_counter() {
+    assert_eq!(super::parse_pids_max_counter("0\n"), Some(0));
+    assert_eq!(super::parse_pids_max_counter("3\n"), Some(3));
+    assert_eq!(super::parse_pids_max_counter("max 3\n"), None);
+    assert_eq!(super::parse_pids_max_counter(""), None);
+    assert_eq!(super::parse_pids_max_counter("3\n4\n"), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn memory_event_report_is_disabled_when_a_jail_mount_can_expose_it() {
     let jail = tinybox_jail::Jail::new("/workspace", "memory-report-test");
     assert!(!super::jail_exposes_path(
@@ -71,6 +81,61 @@ fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
         "--clearenv",
     ]);
     assert!(super::MemoryEventReport::prepare_in(&mut exposed_runtime, &jail, &runtime).is_none());
+    let path = report.0.clone();
+    drop(report);
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pids_event_report_hands_off_the_scope_counter_and_removes_its_file()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runtime_parent = tempfile::tempdir()?;
+    let runtime = runtime_parent.path().join("runtime");
+    std::fs::create_dir(&runtime)?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700))?;
+    let workspace = tempfile::tempdir()?;
+    let jail = tinybox_jail::Jail::new(workspace.path(), "pids-report-test");
+    let mut command = std::process::Command::new("/bin/bash");
+    command.args([
+        "--unit=tinybox-native-123-1.scope",
+        "--property=TasksMax=16",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    let report = super::PidsEventReport::prepare_in(&mut command, &jail, &runtime)
+        .ok_or("private runtime directory should support pids event reporting")?;
+    assert!(report.0.starts_with(&runtime));
+    assert_eq!(std::fs::read_to_string(&report.0)?, "0\n");
+    std::fs::write(&report.0, "1\n")?;
+    assert!(report.max_event_observed());
+    assert!(command.get_envs().any(|(name, value)| {
+        name == super::PIDS_EVENT_FILE_ENV
+            && value.is_some_and(|value| value == report.0.as_os_str())
+    }));
+    let mut no_pids_limit = std::process::Command::new("/bin/bash");
+    no_pids_limit.arg("--unit=tinybox-native-123-2.scope");
+    assert!(super::PidsEventReport::prepare_in(&mut no_pids_limit, &jail, &runtime).is_none());
+    let exposed_jail = jail.clone().add_read_write(&runtime);
+    let mut exposed_report = std::process::Command::new("/bin/bash");
+    exposed_report.args([
+        "--unit=tinybox-native-123-3.scope",
+        "--property=TasksMax=16",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    assert!(
+        super::PidsEventReport::prepare_in(&mut exposed_report, &exposed_jail, &runtime).is_none()
+    );
     let path = report.0.clone();
     drop(report);
     assert!(!path.exists());

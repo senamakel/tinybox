@@ -13,6 +13,8 @@ pub use tinybox_bus::OutputStream;
 pub enum TerminationCause {
     /// The Linux cgroup v2 memory controller recorded an OOM kill.
     MemoryLimit,
+    /// The Linux cgroup v2 pids controller rejected a process creation.
+    PidsLimit,
 }
 
 /// Receives bounded output batches inside the provider's execution runtime.
