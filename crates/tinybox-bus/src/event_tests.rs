@@ -1,5 +1,5 @@
 use super::*;
-use crate::NetworkPolicy;
+use crate::{CONTRACT_VERSION, NetworkPolicy, ResourceId, SIGNALS, names};
 
 #[test]
 fn events_keep_their_wire_labels() -> Result<(), serde_json::Error> {
