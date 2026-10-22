@@ -156,12 +156,13 @@ impl ShellContext {
                 .with_cwd(resolved.cwd.clone().unwrap_or_else(|| root.to_path_buf()));
             native_request.env = environment.clone();
             native_request.stdin = request.stdin.clone();
-            ShellHost::Jailed(super::native_jail::collector_with_resources(
+            let host = super::native_jail::collector_with_resources(
                 root,
                 &jail,
                 &mut native_request,
-            )?)
-            .tap(|_| native_launcher = Some(native_request))
+            )?;
+            native_launcher = Some(native_request);
+            ShellHost::Jailed(host)
         } else if let Some(config) = &request.jail {
             let mut jail = super::native_jail::prepare(root, config, resolved, backend.as_ref())?;
             jail.read_write.push(scratch.path().to_path_buf());
@@ -187,7 +188,6 @@ impl ShellContext {
             ShellHost::Local(tinybox_host::LimitedLocalHost::new(
                 tinybox_bus::MAX_OUTPUT_BYTES,
             ))
-        };
         Ok(Arc::new(Self {
             request,
             environment,
