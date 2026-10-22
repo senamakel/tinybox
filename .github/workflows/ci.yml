@@ -36,3 +36,4 @@ jobs:
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
           TINYBOX_REQUIRE_NATIVE_RESOURCE_TESTS=1 cargo test -j1 -p tinybox-module native_
           TINYBOX_REQUIRE_NATIVE_RESOURCE_TESTS=1 cargo test -j1 -p tinybox-module resource_aware_bus_exec_cancellation_reports_events_and_reaps_descendants
+          TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS=1 TINYBOX_LIVE_NAMESPACES=1 cargo test -j1 -p tinybox-linux --test live_namespaces live_memory_limit_kills_a_child_that_touches_past_its_budget -- --nocapture
