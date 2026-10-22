@@ -656,6 +656,127 @@ fn native_memory_limit_kills_a_workload_that_touches_past_its_budget()
 }
 
 #[cfg(target_os = "linux")]
+#[tokio::test]
+async fn native_memory_limit_emits_provenance_before_terminal_exit()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use tinybox_bus::{
+        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest,
+        ProcessRef, ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+    };
+    use tinybus::broker::Broker;
+    use tinybus::transport::memory::MemoryBus;
+    use tinybus::Connection;
+
+    if !native_resource_runtime_available() {
+        eprintln!("skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable");
+        return Ok(());
+    }
+    if !std::process::Command::new("python3")
+        .arg("--version")
+        .status()?
+        .success()
+    {
+        eprintln!("skipped: python3 is unavailable for the memory pressure fixture");
+        return Ok(());
+    }
+
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let service = Connection::connect(bus.connect().await?).await?;
+    super::super::setup(service).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(
+        super::super::INTERFACE,
+        super::super::OBJECT_PATH,
+        super::super::INTERFACE,
+    )?;
+    let mut events = proxy.receive_signal("ProcessEvent").await?;
+    let resource: ResourceId = proxy.call("Reserve", (ReserveRequest::Resource,)).await?;
+    proxy
+        .call::<tinybox_bus::ResourceInfo>(
+            "Create",
+            (CreateRequest {
+                resource: resource.clone(),
+                backend: "passthrough".into(),
+                workspace: Workspace::Directory(state.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },),
+        )
+        .await?;
+    let process_id: ResourceId = proxy
+        .call("Reserve", (ReserveRequest::Process(resource.clone()),))
+        .await?;
+    let process = ProcessRef {
+        resource: resource.clone(),
+        process: process_id.clone(),
+    };
+    let request = ShellExecRequest {
+        process: process_id,
+        resource: resource.clone(),
+        shell: SelectShellRequest {
+            command: "python3 -c 'data=bytearray(256*1024*1024); [data.__setitem__(i, 1) for i in range(0, len(data), 4096)]; print(\"allocation survived\")'".into(),
+            preserve_pipeline_status: false,
+            runtime_path: None,
+            python_utf8: false,
+        },
+        cwd: None,
+        extra_env: std::collections::BTreeMap::new(),
+        state_dir: state.path().to_string_lossy().into_owned(),
+        timeout_ms: 30_000,
+        stdin: None,
+        jail: Some(NativeJailConfig {
+            read_only: Vec::new(),
+            read_write: Vec::new(),
+            allow_net: false,
+            allow_subprocess: true,
+            enforcement: JailEnforcement::Enforced,
+            require_process_isolation: true,
+            deny_read: Vec::new(),
+            resources: None,
+        }),
+        hide_window: false,
+    };
+    assert_eq!(
+        proxy
+            .call::<ProcessRef>(
+                "StartNativeShellExecWithResources",
+                (request, NativeJailResourceRequest {
+                    cpu_millis: Some(1000),
+                    memory_bytes: Some(64 * 1024 * 1024),
+                    pids_max: Some(16),
+                    disk_bytes: None,
+                }),
+            )
+            .await?,
+        process
+    );
+
+    async fn next_event(
+        events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>,
+    ) -> tinybus::Result<serde_json::Value> {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+            .await
+            .map_err(|_| tinybus::Error::failed("timed out waiting for process event"))?
+            .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+        serde_json::from_value(message.body[0].clone()).map_err(Into::into)
+    }
+    let started = next_event(&mut events).await?;
+    assert_eq!(started["process"], serde_json::json!(process));
+    assert_eq!(started["event"]["event"], "started");
+    let limit_hit = next_event(&mut events).await?;
+    assert_eq!(limit_hit["process"], serde_json::json!(process));
+    assert_eq!(limit_hit["event"]["event"], "limit_hit");
+    assert_eq!(limit_hit["event"]["limit"], "memory");
+    let exited = next_event(&mut events).await?;
+    assert_eq!(exited["process"], serde_json::json!(process));
+    assert_eq!(exited["event"]["event"], "exited");
+    assert_eq!(exited["event"]["status"], 137);
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn active_scope_cgroup(
     argv: &[String],
     child: &mut std::process::Child,
