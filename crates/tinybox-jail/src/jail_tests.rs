@@ -113,6 +113,41 @@ fn canonicalize_keeps_missing_read_write_as_is() {
 
 #[cfg(unix)]
 #[test]
+fn owned_captured_spawn_preserves_both_pipes_and_exit_status() -> std::io::Result<()> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    let root = tempfile::tempdir()?;
+    let jail = Jail::new(root.path(), "owned-captured-spawn");
+    let backend = crate::NoopBackend;
+    let mut command = std::process::Command::new("/bin/sh");
+    command.args(["-c", "printf stdout-marker; printf stderr-marker >&2; exit 23"]);
+
+    let mut child = crate::spawn_owned_captured_with(&backend, &jail, command)?;
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child.stdout_mut().expect("captured stdout").read_to_string(&mut stdout)?;
+    child.stderr_mut().expect("captured stderr").read_to_string(&mut stderr)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "child did not exit"));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    assert_eq!(stdout, "stdout-marker");
+    assert_eq!(stderr, "stderr-marker");
+    assert_eq!(status.code(), Some(23));
+    assert!(!status.success());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn canonicalize_deduplicates_denials_that_resolve_through_symlink_aliases() -> std::io::Result<()> {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir()?;
