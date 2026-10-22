@@ -315,8 +315,10 @@ fn live_seatbelt_canonicalizes_private_tmp_deny_aliases() -> std::io::Result<()>
         alias_root, root,
         "the live test requires /tmp to resolve through its /private alias"
     );
+    let allowed_file = root.join("allowed.txt");
     let protected_via_alias = alias_root.join("protected.txt");
     let protected_canonical = root.join("protected.txt");
+    fs::write(&allowed_file, b"allowed")?;
     fs::write(&protected_via_alias, b"protected")?;
 
     const READ_PROBE: &str = r#"
@@ -367,7 +369,7 @@ int main(int argc, char **argv) {
 
     let run_probe = |jail: &Jail| -> std::io::Result<std::process::Output> {
         let mut command = Command::new(&helper);
-        command.arg(&protected_canonical).arg(&protected_canonical);
+        command.arg(&allowed_file).arg(&protected_canonical);
         SeatbeltBackend::new()
             .spawn_captured(jail, command)?
             .wait_with_output()
@@ -380,6 +382,10 @@ int main(int argc, char **argv) {
         "unrestricted file-read control failed: status {}, stdout: {control_stdout:?}, stderr: {:?}",
         control.status,
         String::from_utf8_lossy(&control.stderr)
+    );
+    assert!(
+        control_stdout.contains("control-readable"),
+        "stdout: {control_stdout:?}"
     );
     assert!(
         control_stdout.contains("alias-readable"),
