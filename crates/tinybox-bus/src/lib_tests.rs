@@ -261,6 +261,36 @@ fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_js
 }
 
 #[test]
+fn plan_check_wire_vocabulary_covers_each_constraint_and_enforcement() -> Result<(), serde_json::Error> {
+    let constraints = [
+        ResourceConstraint::Filesystem,
+        ResourceConstraint::Network,
+        ResourceConstraint::Cpu,
+        ResourceConstraint::Memory,
+        ResourceConstraint::Pids,
+        ResourceConstraint::Disk,
+        ResourceConstraint::Subprocess,
+    ];
+    for constraint in constraints {
+        let encoded = serde_json::to_value(constraint)?;
+        assert_eq!(serde_json::from_value::<ResourceConstraint>(encoded)?, constraint);
+    }
+    let enforcement = [
+        ConstraintEnforcement::Unsupported,
+        ConstraintEnforcement::BestEffort,
+        ConstraintEnforcement::Enforced,
+    ];
+    for enforcement in enforcement {
+        let encoded = serde_json::to_value(enforcement)?;
+        assert_eq!(
+            serde_json::from_value::<ConstraintEnforcement>(encoded)?,
+            enforcement
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn workspace_file_transfers_are_chunked_typed_and_bounded() -> Result<(), serde_json::Error> {
     assert_eq!(MAX_FILE_CHUNK_BYTES, 64 * 1024);
     assert_eq!(MAX_FILE_TRANSFERS_PER_RESOURCE, 8);
