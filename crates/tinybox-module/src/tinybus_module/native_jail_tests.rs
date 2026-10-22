@@ -660,15 +660,17 @@ fn native_memory_limit_kills_a_workload_that_touches_past_its_budget()
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest,
-        ProcessRef, ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
+        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
     };
+    use tinybus::Connection;
     use tinybus::broker::Broker;
     use tinybus::transport::memory::MemoryBus;
-    use tinybus::Connection;
 
     if !native_resource_runtime_available() {
-        eprintln!("skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable");
+        eprintln!(
+            "skipped: rootless systemd scope, delegated cgroup v2, or bubblewrap is unavailable"
+        );
         return Ok(());
     }
     if !std::process::Command::new("python3")
@@ -741,12 +743,15 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         proxy
             .call::<ProcessRef>(
                 "StartNativeShellExecWithResources",
-                (request, NativeJailResourceRequest {
-                    cpu_millis: Some(1000),
-                    memory_bytes: Some(64 * 1024 * 1024),
-                    pids_max: Some(16),
-                    disk_bytes: None,
-                }),
+                (
+                    request,
+                    NativeJailResourceRequest {
+                        cpu_millis: Some(1000),
+                        memory_bytes: Some(64 * 1024 * 1024),
+                        pids_max: Some(16),
+                        disk_bytes: None,
+                    }
+                ),
             )
             .await?,
         process

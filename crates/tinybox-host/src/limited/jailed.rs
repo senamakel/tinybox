@@ -40,11 +40,21 @@ struct MemoryEventReport(std::path::PathBuf);
 #[cfg(target_os = "linux")]
 impl MemoryEventReport {
     fn prepare(command: &mut std::process::Command, jail: &Jail) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, jail, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &mut std::process::Command,
+        jail: &Jail,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
-        let has_scope = command.get_args().filter_map(|arg| arg.to_str()).any(|arg| {
-            arg.starts_with("--unit=tinybox-native-") && arg.ends_with(".scope")
-        });
+        let has_scope = command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| arg.starts_with("--unit=tinybox-native-") && arg.ends_with(".scope"));
         let has_memory_limit = command
             .get_args()
             .filter_map(|arg| arg.to_str())
@@ -52,14 +62,9 @@ impl MemoryEventReport {
         if !has_scope || !has_memory_limit {
             return None;
         }
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
-        let runtime_dir = std::path::PathBuf::from(runtime_dir);
         let metadata = std::fs::metadata(&runtime_dir).ok()?;
         let process_uid = std::fs::metadata("/proc/self").ok()?.uid();
-        if !metadata.is_dir()
-            || metadata.uid() != process_uid
-            || metadata.mode() & 0o077 != 0
-        {
+        if !metadata.is_dir() || metadata.uid() != process_uid || metadata.mode() & 0o077 != 0 {
             return None;
         }
         let sequence = MEMORY_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -86,6 +91,9 @@ impl MemoryEventReport {
     }
 
     fn oom_kill_observed(&self) -> bool {
+        // This launcher names a fresh systemd scope for every run, so the
+        // cgroup-v2 counter begins at zero; a positive final value proves the
+        // scope's own OOM-kill event rather than an unrelated SIGKILL.
         std::fs::read_to_string(&self.0)
             .ok()
             .and_then(|contents| parse_oom_kill_counter(&contents))
@@ -285,7 +293,9 @@ impl JailLocalHost {
         observer: Option<Arc<dyn ExecutionObserver>>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let memory_event_report = MemoryEventReport::prepare(&mut command, &self.jail);
+        let memory_event_report = observer
+            .as_ref()
+            .and_then(|_| MemoryEventReport::prepare(&mut command, &self.jail));
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

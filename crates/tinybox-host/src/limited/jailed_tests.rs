@@ -29,6 +29,39 @@ fn memory_event_report_is_disabled_when_a_jail_mount_can_expose_it() {
     ));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_event_report_hands_off_the_scope_counter_and_removes_its_file()
+-> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tempfile::tempdir()?;
+    let workspace = tempfile::tempdir()?;
+    let jail = tinybox_jail::Jail::new(workspace.path(), "memory-report-test");
+    let mut command = std::process::Command::new("/bin/bash");
+    command.args([
+        "--unit=tinybox-native-123-1.scope",
+        "--property=MemoryMax=67108864",
+    ]);
+    let report = super::MemoryEventReport::prepare_in(&mut command, &jail, runtime.path())
+        .ok_or("private runtime directory should support memory event reporting")?;
+    assert!(report.0.starts_with(runtime.path()));
+    assert_eq!(std::fs::read_to_string(&report.0)?, "0\n");
+    std::fs::write(&report.0, "1\n")?;
+    assert!(report.oom_kill_observed());
+    assert!(command.get_envs().any(|(name, value)| {
+        name == super::MEMORY_EVENT_FILE_ENV
+            && value.is_some_and(|value| value == report.0.as_os_str())
+    }));
+    let mut no_memory_limit = std::process::Command::new("/bin/bash");
+    no_memory_limit.arg("--unit=tinybox-native-123-2.scope");
+    assert!(
+        super::MemoryEventReport::prepare_in(&mut no_memory_limit, &jail, runtime.path()).is_none()
+    );
+    let path = report.0.clone();
+    drop(report);
+    assert!(!path.exists());
+    Ok(())
+}
+
 struct FixtureBackend;
 impl tinybox_jail::JailBackend for FixtureBackend {
     fn name(&self) -> &'static str {
