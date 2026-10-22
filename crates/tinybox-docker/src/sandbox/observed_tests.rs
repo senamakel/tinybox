@@ -411,6 +411,7 @@ async fn cancelling_a_workload_does_not_leak_the_supervisors_wait_diagnostic() -
         uuid::Uuid::new_v4().simple()
     );
     let dir = reserve_fixture(&token).await?;
+    let payload_ready = std::path::Path::new(&dir).join("payload-ready");
     let child = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(SUPERVISOR)
@@ -419,7 +420,9 @@ async fn cancelling_a_workload_does_not_leak_the_supervisors_wait_diagnostic() -
         .arg(&token)
         .arg("sh")
         .arg("-c")
-        .arg("printf 'ready'; sleep 60")
+        .arg("printf 'ready'; : > \"$1\"; sleep 60")
+        .arg("tinybox-cancel-diagnostic-payload")
+        .arg(&payload_ready)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -437,6 +440,21 @@ async fn cancelling_a_workload_does_not_leak_the_supervisors_wait_diagnostic() -
         sandbox: NAME.to_owned(),
         operation: "start diagnostic cancellation fixture",
         message: "supervisor did not publish its process-group identity".to_owned(),
+    })?;
+
+    // The supervisor publishes the PID before execing the workload. Wait for
+    // the workload's post-write marker so cancellation cannot race ahead of
+    // its `ready` output.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !payload_ready.exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .map_err(|_| Error::Backend {
+        sandbox: NAME.to_owned(),
+        operation: "start diagnostic cancellation fixture",
+        message: "workload did not publish its readiness marker".to_owned(),
     })?;
 
     let acknowledgement = tokio::process::Command::new("sh")

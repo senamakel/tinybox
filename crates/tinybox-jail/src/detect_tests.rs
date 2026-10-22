@@ -2,6 +2,23 @@
 
 use super::*;
 
+fn marker_command(marker: &std::path::Path) -> Command {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/D", "/C"]);
+        command.arg(format!("echo launched > \"{}\"", marker.display()));
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf launched > \"$1\"", "tinybox-marker"]);
+        command.arg(marker);
+        command
+    }
+}
+
 #[test]
 fn unavailable_backend_rejects_spawning() {
     let backend = UnsupportedBackend;
@@ -70,6 +87,66 @@ fn unavailable_candidates_are_skipped_and_empty_candidates_fail_closed() {
         assert_eq!(picked.name(), UNSUPPORTED_BACKEND_NAME);
         assert!(!picked.is_available());
     }
+}
+
+#[test]
+fn required_spawn_with_no_available_jail_refuses_before_running_payload() -> std::io::Result<()> {
+    let backend = pick_from(Vec::new());
+    assert_eq!(backend.name(), UNSUPPORTED_BACKEND_NAME);
+    assert!(!backend.is_available());
+
+    let root = tempfile::tempdir()?;
+    let marker = root.path().join("payload-ran");
+    let error = crate::spawn_required_with(
+        backend.as_ref(),
+        &crate::Jail::new(root.path(), "no-jail"),
+        marker_command(&marker),
+    )
+    .expect_err("strict spawn must refuse when there are no jail backends");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(matches!(
+        error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<tinybox_core::Error>()),
+        Some(tinybox_core::Error::ConstraintNotEnforced {
+            sandbox,
+            constraint: tinybox_core::Constraint::Filesystem,
+            enforcement: tinybox_core::Enforcement::Unsupported,
+        }) if sandbox == UNSUPPORTED_BACKEND_NAME
+    ));
+    assert!(!marker.exists(), "unconfined payload must never run");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_default_required_spawn_fails_closed_without_appcontainer() -> std::io::Result<()> {
+    let backend = pick_backend();
+    assert_eq!(backend.name(), UNSUPPORTED_BACKEND_NAME);
+    assert!(!backend.is_available());
+
+    let root = tempfile::tempdir()?;
+    let marker = root.path().join("payload-ran");
+    let error = crate::spawn_required(
+        &crate::Jail::new(root.path(), "windows-no-appcontainer"),
+        marker_command(&marker),
+    )
+    .expect_err("Windows strict spawn must fail closed while AppContainer is unavailable");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(matches!(
+        error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<tinybox_core::Error>()),
+        Some(tinybox_core::Error::ConstraintNotEnforced {
+            sandbox,
+            constraint: tinybox_core::Constraint::Filesystem,
+            enforcement: tinybox_core::Enforcement::Unsupported,
+        }) if sandbox == UNSUPPORTED_BACKEND_NAME
+    ));
+    assert!(!marker.exists(), "unconfined payload must never run");
+    Ok(())
 }
 
 #[test]
