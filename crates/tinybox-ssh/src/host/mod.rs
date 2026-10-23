@@ -187,6 +187,10 @@ impl Host for SshHost {
         NAME
     }
 
+    fn execution_location(&self) -> tinybox_core::HostExecutionLocation {
+        tinybox_core::HostExecutionLocation::Remote
+    }
+
     /// Run a command on the far machine and collect its output.
     ///
     /// # Errors

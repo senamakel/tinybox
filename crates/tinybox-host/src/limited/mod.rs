@@ -297,6 +297,10 @@ impl Host for LimitedLocalHost {
         crate::LOCAL
     }
 
+    fn execution_location(&self) -> tinybox_core::HostExecutionLocation {
+        tinybox_core::HostExecutionLocation::Local
+    }
+
     async fn run(&self, request: &ExecRequest) -> Result<ExecOutput> {
         self.collect(request, None).await
     }

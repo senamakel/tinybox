@@ -87,7 +87,8 @@ pub use identity::{BoxId, HostRef, ProcessId, SandboxRef, SnapshotId, TemplateNa
 pub use passthrough::PassthroughSandbox;
 pub use runtime::{
     BoxInfo, BoxState, ExecOutput, ExecRequest, ExecutionObserver, Forward, ForwardGuard, Host,
-    OutputStream, Sandbox, TerminationCause, WorkspaceFileReader, WorkspaceFileWriter,
+    HostExecutionLocation, OutputStream, Sandbox, TerminationCause, WorkspaceFileReader,
+    WorkspaceFileWriter,
 };
 pub use spec::{
     BoxSpec, EgressAllowlist, Lifecycle, NetworkPolicy, Placement, PortMapping, Resources,
