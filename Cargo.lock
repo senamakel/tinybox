@@ -1353,7 +1353,7 @@ dependencies = [
  "tinystoragedrivers-testkit",
  "tinystoragedrivers-types",
  "tokio",
- "windows-sys 0.61.2",
+ "win-custody",
 ]
 
 [[package]]
@@ -1917,6 +1917,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "win-custody"
+version = "0.1.1"
+source = "git+https://github.com/115dkk/Win-Custody.rs?rev=ac123cdaab3591b406cf78993be06158a1f4a44a#ac123cdaab3591b406cf78993be06158a1f4a44a"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

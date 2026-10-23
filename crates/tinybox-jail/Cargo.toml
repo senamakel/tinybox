@@ -35,17 +35,9 @@ landlock = { version = "0.4", optional = true }
 tinybox-linux.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# AppContainer profile APIs, ACL editing, STARTUPINFOEXW process spawn, and the
-# GENERIC_* file access masks used by `windows.rs`.
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_Security_Isolation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Memory",
-    "Win32_System_Threading",
-] }
+# Safe Windows process ownership and AppContainer launch primitives. Pinned to
+# the reviewed commit so the jail can use its pre-resume Job assignment API.
+win-custody = { git = "https://github.com/115dkk/Win-Custody.rs", rev = "ac123cdaab3591b406cf78993be06158a1f4a44a" }
 
 [dev-dependencies]
 tempfile = "3"
