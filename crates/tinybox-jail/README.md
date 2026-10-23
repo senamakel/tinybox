@@ -3,8 +3,9 @@
 Directory-jail facade. Given a declarative description of a workspace
 (`Jail`), it spawns a child through an available sandbox backend. Linux
 (Landlock) and macOS (Seatbelt) backends are compiled and selected by
-`pick_backend()`. The Windows AppContainer backend is still not compiled (see
-below). When no backend is usable the default backend is `unsupported`
+`pick_backend()`. Windows AppContainer is selected for captured owned-process
+launches through `default_owned_backend()`; the legacy `std::process::Child`
+API remains unsupported there. When no backend is usable the default backend is `unsupported`
 (`is_available() == false`, `spawn` fails with `Unsupported`); callers can
 explicitly select `NoopBackend` when unrestricted execution is intended.
 It is a per-process complement to the box-level isolation in `tinybox-linux`:
@@ -23,7 +24,8 @@ spawns, never the core process itself.
 - Cache the default backend: bubblewrap on Linux when `bwrap` is installed and
   unprivileged user namespaces work (real process isolation, suitable for
   untrusted code), else Landlock on kernels that support it,
-  Seatbelt on macOS, otherwise the `unsupported` backend.
+  Seatbelt on macOS, and AppContainer for owned launches on Windows; otherwise
+  the `unsupported` backend.
 - Spawn a `std::process::Command` inside the jail, canonicalizing `root`
   (and the read-only and read/write paths) first so backends never see `..` or symlink
   trickery.
@@ -37,14 +39,14 @@ spawns, never the core process itself.
 
 | File | Role |
 | --- | --- |
-| `crates/tinybox-jail/src/lib.rs` | Module docstring plus the thin facade: `spawn` / `spawn_with` / `default_backend` (cached via `OnceLock`). Re-exports the public surface. |
+| `crates/tinybox-jail/src/lib.rs` | Module docstring plus the thin facade: `spawn` / `spawn_with` / `default_backend` / `default_owned_backend` (cached via `OnceLock`). Re-exports the public surface. |
 | `crates/tinybox-jail/src/jail.rs` | Core types: the `Jail` description struct (builder plus `canonicalize`/`canonicalize_or_log`) and the `JailBackend` trait (`name`/`is_available`/`spawn`). |
 | `crates/tinybox-jail/src/detect.rs` | `pick_backend()`: first available OS backend, else an unsupported backend that fails closed. |
 | `crates/tinybox-jail/src/noop.rs` | `NoopBackend`: no enforcement, plain `Command::spawn`. Always available. |
 | `crates/tinybox-jail/src/bwrap/` | Bubblewrap backend (Linux only): user/pid/ipc/uts (+net) namespaces, grants as bind mounts, `deny_read` masked, `--die-with-parent`. `isolation()` is the minimum over configurations (`Process` with `--disable-userns`, else `None`); `Kernel` only per jail without `allow_net` (`isolation_for` / `is_suitable_for_untrusted_jail`; hosts must use the per-jail form). Never looks `bwrap` up on `PATH`; the probe is a sanity check, not authentication, and `with_program` skips the ownership check. The caller's environment and credentials travel in a private `--args` file, not in argv or any host process environment (`launcher.rs`), and inherited descriptors above 2 are closed by that launcher. No seccomp filter and no resource limits yet. Landlock is the fallback. Landlock is not layered inside because the kernel denies `mount` to a Landlock-restricted thread. |
 | `crates/tinybox-jail/src/linux.rs` | Landlock backend (Linux only, `landlock` feature, on by default). Applies the ruleset to a dedicated spawn thread so no `unsafe` `pre_exec` is needed. |
 | `crates/tinybox-jail/src/macos.rs` | Seatbelt backend via `sandbox-exec`. Compiled on every host so the profile renderer is unit-tested everywhere; selected only on macOS. |
-| `crates/tinybox-jail/src/windows.rs` | AppContainer implementation; **not compiled**: it needs `unsafe` FFI the workspace forbids and cannot return a waitable `std::process::Child` yet. |
+| `crates/tinybox-jail/src/windows.rs` | AppContainer implementation via `win-custody`; returns an `OwnedChild` supervised by a kill-on-close Job Object. |
 | `crates/tinybox-jail/src/registry.rs` | `JailRegistry` and `JailRecord`: multi-jail manager persisted to `index.json`, with atomic-rename writes and containment checks. |
 | `crates/tinybox-jail/src/{lib,jail,noop,macos,windows,registry}_tests.rs` | Sibling test suites, each `#[path]`-included from its source file. |
 
@@ -100,8 +102,9 @@ This crate depends only on std and:
   (registry).
 - `landlock` crate: Linux backend, gated on the `landlock` cargo
   feature.
-- `windows-sys`: Windows AppContainer FFI (Security/Isolation, Threading,
-  Memory APIs).
+- `win-custody`: Windows AppContainer profile, explicit handle inheritance,
+  Job Object assignment, and owned process handles. The TinyBox adapter uses
+  this safe API and keeps Win32 FFI out of `tinybox-jail`.
 - macOS backend shells out to the system binary `/usr/bin/sandbox-exec`.
 
 The Linux backend's docstring references `crate::security::landlock` as
@@ -120,13 +123,15 @@ not import that module.
   as a real read grant and maps `allow_net` to the strictly outbound-only
   `internetClient` capability (LAN and inbound capabilities are deliberately
   excluded).
-- Windows `spawn` currently returns an error after a successful launch.
-  `spawn_in_container` creates the process successfully but cannot bridge
-  the raw `HANDLE` into a `std::process::Child` (the needed
-  `FromRawHandle for Child` is unstable), so it closes the handle and
-  returns `io::ErrorKind::Unsupported`. See the TODO in `windows.rs`. The
-  Windows path is compile-checked but flagged as needing real-hardware
-  testing.
+- Windows `spawn` and `spawn_with` return `Unsupported` because stable Rust
+  cannot construct a `std::process::Child` from the native handle. Captured
+  invocation launches use `default_owned_backend()`, which retains the
+  process handle and Job Object in `OwnedChild`. AppContainer profile names
+  are unique per launch so persistent ACL entries from earlier runs cannot
+  widen a later run's grants; profile and ACL cleanup remains outstanding.
+  Memory and process-count limits use Job Objects. CPU and disk limits remain
+  `Unsupported`; Windows CPU enforcement is explicitly deferred. The live
+  Windows isolation tests must still pass on hosted Windows runners.
 - macOS forwards only variables explicitly supplied with `Command::env` or
   `Command::envs`. The launcher clears the inherited environment because Rust
   exposes no getter for `Command::env_clear`; this prevents restoring parent
