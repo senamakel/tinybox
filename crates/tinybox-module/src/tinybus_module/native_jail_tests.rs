@@ -81,12 +81,37 @@ fn config() -> NativeJailConfig {
         read_only: vec![],
         read_write: vec![],
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: false,
         enforcement: JailEnforcement::Enforced,
         require_process_isolation: false,
         deny_read: Vec::new(),
         resources: None,
     }
+}
+
+#[test]
+fn native_jail_refuses_allowlists_before_backend_admission() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let mut command = tinybox_core::ExecRequest::new(["irrelevant"]);
+    command.cwd = Some(root.path().into());
+    let mut request = config();
+    request.allow_net = true;
+    request.network_allowlist = Some(tinybox_bus::EgressAllowlist {
+        hosts: vec!["api.example.test".into()],
+        ports: vec![443],
+    });
+    let backend = Backend {
+        available: true,
+        suitable: true,
+        name: "fixture",
+        full: true,
+    };
+
+    let error = prepare(root.path(), &request, &command, &backend)
+        .expect_err("native jail must not collapse an allowlist to allow_net=true");
+    assert_eq!(error.wire_name(), tinybox_bus::CONSTRAINT_NOT_ENFORCED);
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -847,6 +872,7 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: true,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
@@ -1090,6 +1116,7 @@ fn cpu_limit_shell_request(
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: true,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
@@ -1126,6 +1153,7 @@ fn pids_limit_shell_request(
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: true,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
