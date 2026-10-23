@@ -71,12 +71,13 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
 pub use invocation::{JailInvocation, ResourceLimitPlan};
+pub use jail::nested_denial;
 pub use jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess, reject_symlinked_grants};
 #[cfg(target_os = "linux")]
 pub use linux::LandlockBackend;
 pub use macos::SeatbeltBackend;
 pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
-pub use registry::{FileIndexStore, IndexStore, JailRecord, JailRegistry};
+pub use registry::{IndexStore, JailRecord, JailRegistry};
 
 use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
@@ -236,7 +237,6 @@ fn require_resource_plan(
         .require(backend.name(), &requested)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::Unsupported, error))
 }
-
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {
     backend.require_resources(jail).map_err(|error| {
         let kind = match error {

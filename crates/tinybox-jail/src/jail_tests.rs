@@ -354,6 +354,21 @@ fn owned_captured_spawn_preserves_both_pipes_and_exit_status() -> std::io::Resul
     Ok(())
 }
 
+#[cfg(windows)]
+#[test]
+fn owned_captured_spawn_does_not_claim_the_child_pid_as_a_process_group() -> std::io::Result<()> {
+    let root = tempfile::tempdir()?;
+    let jail = Jail::new(root.path(), "owned-captured-spawn");
+    let backend = crate::NoopBackend;
+    let mut command = std::process::Command::new("cmd");
+    command.args(["/C", "exit 0"]);
+
+    let child = crate::spawn_owned_captured_with(&backend, &jail, command)?;
+
+    assert_eq!(child.local_process_group_id(), None);
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn canonicalize_deduplicates_denials_that_resolve_through_symlink_aliases() -> std::io::Result<()> {
@@ -429,4 +444,16 @@ fn the_check_sees_a_planted_link_however_the_root_is_spelled() -> std::io::Resul
         assert_eq!(err, Some(std::io::ErrorKind::InvalidInput), "{grant:?}");
     }
     Ok(())
+}
+
+#[test]
+fn nested_denial_refuses_only_paths_deeper_than_a_direct_child() {
+    let writable = Path::new("/work");
+    assert!(nested_denial(Path::new("/work/secret"), writable).is_none());
+    assert!(nested_denial(Path::new("/elsewhere/a/secret"), writable).is_none());
+    assert!(nested_denial(Path::new("/workshop/a/secret"), writable).is_none());
+    for nested in ["/work/a/secret", "/work/a/b/secret", "/work"] {
+        let error = nested_denial(Path::new(nested), writable).expect(nested);
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{nested}");
+    }
 }

@@ -226,6 +226,8 @@ impl OneShot {
         }
 
         let mut push = |s: &str| argv.push(OsString::from(s));
+        // End docker's options so an image like `--privileged` stays a positional.
+        push("--");
         push(&self.image);
         push("sh");
         push(if self.login_shell { "-lc" } else { "-c" });
@@ -299,9 +301,9 @@ impl DockerCli {
     ///
     /// A command that exits non-zero is a success here, reported in
     /// [`OneShotOutcome::exit_code`]. Hitting the deadline is also an outcome
-    /// ([`OneShotOutcome::timed_out`]): the wait is abandoned, which cancels the
-    /// local client; the container carries `--rm` and, when labelled, can be
-    /// reaped by [`DockerCli::kill_labelled`].
+    /// ([`OneShotOutcome::timed_out`]): the local client is killed, and so is the
+    /// container, found by a label unique to this run (killing an attached
+    /// `docker run` does not stop its container).
     ///
     /// # Errors
     ///
@@ -311,10 +313,18 @@ impl DockerCli {
         spec: &OneShot,
         timeout: Duration,
     ) -> io::Result<OneShotOutcome> {
+        // Per run, not `spec.label`: callers share one label across concurrent runs.
+        let run_label = format!("ai.tinyhumans.tinybox.oneshot={}", uuid::Uuid::new_v4());
+        let mut argv = spec.argv();
+        argv.splice(
+            2..2,
+            [OsString::from("--label"), OsString::from(&run_label)],
+        );
         let mut cmd = Command::new(&self.program);
-        cmd.args(spec.argv());
+        cmd.args(argv);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         match tokio::time::timeout(timeout, cmd.output()).await {
             Ok(Ok(output)) => {
@@ -330,15 +340,22 @@ impl DockerCli {
                 })
             }
             Ok(Err(e)) => Err(e),
-            Err(_) => Ok(OneShotOutcome {
-                exit_code: -1,
-                stdout: String::new(),
-                stderr: format!(
-                    "Command timed out after {}s and was killed",
-                    timeout.as_secs()
-                ),
-                timed_out: true,
-            }),
+            Err(_) => {
+                // ponytail: `ps -q` misses a container created but not yet
+                // started; `ps -aq` + `rm -f` if that window matters.
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(10), self.kill_labelled(&run_label))
+                        .await;
+                Ok(OneShotOutcome {
+                    exit_code: -1,
+                    stdout: String::new(),
+                    stderr: format!(
+                        "Command timed out after {}s and was killed",
+                        timeout.as_secs()
+                    ),
+                    timed_out: true,
+                })
+            }
         }
     }
 

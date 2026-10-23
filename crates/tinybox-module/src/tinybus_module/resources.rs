@@ -172,6 +172,34 @@ impl Default for Resources {
 }
 
 impl Resources {
+    /// Resource unit-test fixture with an explicit testkit-backed document port.
+    #[cfg(test)]
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixed scope is valid and the in-memory test backend accepts valid scopes"
+    )]
+    pub(super) fn test_resources() -> Self {
+        use tinystoragedrivers_api::StorageBackend;
+        use tinystoragedrivers_testkit::MemoryBackend;
+        use tinystoragedrivers_types::Scope;
+
+        let backend = MemoryBackend::new();
+        let scope = Scope::new("tinybox/resources-tests").expect("valid test scope");
+        let storage = backend
+            .for_scope(&scope)
+            .expect("testkit memory backend accepts the test scope");
+        Self::with_test_storage(storage)
+    }
+
+    /// Resource unit-test fixture with an explicit testkit-backed document port.
+    #[cfg(test)]
+    pub(super) fn with_test_storage(storage: tinystoragedrivers_api::Storage) -> Self {
+        Self {
+            storage: super::storage::ModuleStorage::with_test_storage(storage),
+            ..Self::default()
+        }
+    }
+
     /// Resources whose box records live on the host storage reached through
     /// `connection`.
     pub(super) fn with_connection(connection: tinybus::Connection) -> Self {

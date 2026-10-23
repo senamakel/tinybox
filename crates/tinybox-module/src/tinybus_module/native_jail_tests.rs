@@ -26,6 +26,13 @@ impl JailBackend for Backend {
     fn carves_denials(&self) -> bool {
         self.name == "seatbelt"
     }
+    fn validate_carved_denials(&self, jail: &Jail) -> std::io::Result<()> {
+        if self.carves_denials() {
+            tinybox_jail::SeatbeltBackend::new().validate_carved_denials(jail)
+        } else {
+            Ok(())
+        }
+    }
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
         use tinybox_core::{Constraint, ConstraintSupport, Enforcement};
         if self.full {
@@ -1694,6 +1701,16 @@ fn denials_preserve_prospective_roots_and_refuse_unenforceable_overlaps()
     config.deny_read = vec![path(&secrets)];
     assert!(prepare(&root, &config, &command, &backend("seatbelt")).is_ok());
     config.deny_read = vec![path(home.path())];
+    assert!(prepare(&root, &config, &command, &backend("seatbelt")).is_err());
+    config.read_write.clear();
+
+    // Deeper than a direct child, a rename of the directory in between moves
+    // the denied path out from under a path-based rule: refuse it.
+    let nested = root.join("a").join("secret");
+    config.deny_read = vec![path(&nested)];
+    assert!(prepare(&root, &config, &command, &backend("seatbelt")).is_err());
+    config.read_write = vec![path(home.path())];
+    config.deny_read = vec![path(&home.path().join("a").join("secret"))];
     assert!(prepare(&root, &config, &command, &backend("seatbelt")).is_err());
     config.read_write.clear();
 

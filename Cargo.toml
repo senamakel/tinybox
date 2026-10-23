@@ -67,14 +67,13 @@ tinybox-microvm = { path = "crates/tinybox-microvm", version = "0.2.0" }
 tinybox-docker = { path = "crates/tinybox-docker", version = "0.2.0" }
 tinybox-ssh = { path = "crates/tinybox-ssh", version = "0.2.0" }
 tinybox-sync = { path = "crates/tinybox-sync", version = "0.2.0" }
-# The storage ports only (no database client), by git tag so a host that vendors
-# tinystoragedrivers once can `[patch]` it. Used by `tinybox-drivers`.
-tinystoragedrivers-core = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
-# The module reaches the host's storage over the storage bus: the proxy yields
-# the same port traits a linked library gets. The client crate serves them in
-# tests.
-tinystoragedrivers-busproxy = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
-tinystoragedrivers-client = { version = "1.0.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
+# Pin the storage contract crates to the canonical TSD v2.1 release commit.
+tinystoragedrivers-types = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
+tinystoragedrivers-api = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
+tinystoragedrivers-busproxy = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
+tinystoragedrivers = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456", default-features = false }
+tinystoragedrivers-testkit = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
+tinystoragedrivers-document = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
 tinybox-drivers = { path = "crates/tinybox-drivers", version = "0.2.0" }
 
 # Lints apply to every crate in the workspace via `[lints] workspace = true`.

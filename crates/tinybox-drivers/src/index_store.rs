@@ -5,10 +5,12 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tinybox_jail::IndexStore;
-use tinystoragedrivers_core::{
-    Blocking, DocumentStore, ErrorKind, Key, Repo, StorageError, WriteOptions,
-};
+use tinystoragedrivers_api::{DocumentStore, Storage};
+use tinystoragedrivers_types::{ErrorKind, Key, StorageError, WriteOptions};
 
+use crate::blocking::Blocking;
+use crate::migrations;
+use crate::repo::Repo;
 use tinybox_bus::storage::jail_index as index_body;
 use tinybox_bus::storage::{BODY_VERSION, JAIL_INDEX_COLLECTION};
 
@@ -19,7 +21,7 @@ use tinybox_bus::storage::{BODY_VERSION, JAIL_INDEX_COLLECTION};
 /// millisecond times and no version field (see the `index_body` module). A
 /// document that is not valid JSON reads as [`io::ErrorKind::InvalidData`].
 ///
-/// The collection is declared by the host, from [`storage_schema`](crate::storage_schema).
+/// The collection is declared and migrated by the owner when this store opens.
 #[derive(Clone)]
 pub struct DocumentIndexStore {
     index: Repo<Value>,
@@ -37,20 +39,20 @@ impl std::fmt::Debug for DocumentIndexStore {
 }
 
 impl DocumentIndexStore {
-    /// An index store for the registry named `registry`.
+    /// Open an index store after `TinyBox`'s owner migrations have completed.
     ///
     /// # Errors
     ///
-    /// Returns an error when the bridge cannot start or `registry` cannot be a
-    /// document id.
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "the handle is taken by value, as it always was"
-    )]
-    pub fn new(documents: Arc<dyn DocumentStore>, registry: impl Into<String>) -> io::Result<Self> {
+    /// Returns an error when the declaration or migration fails, the bridge
+    /// cannot start, or `registry` cannot be a document id.
+    pub async fn open(storage: Storage, registry: impl Into<String>) -> io::Result<Self> {
+        migrations::prepare(&storage)
+            .await
+            .map_err(|error| to_io(&error))?;
+        let documents: Arc<dyn DocumentStore> = Arc::clone(storage.documents());
         let registry = registry.into();
         let bridge = Blocking::new().map_err(|e| to_io(&e))?;
-        let key = Key::of([registry.as_str()])
+        let key = Key::new(registry.as_str())
             .map_err(|e| to_io(&e))?
             .as_str()
             .to_owned();

@@ -4,10 +4,15 @@ use super::{
     BoxService, INTERFACE, OBJECT_PATH, Platform, capabilities_for, describe, registered_sandboxes,
     setup,
 };
+use std::sync::Arc;
 use tinybox_core::{IsolationLevel, SandboxCapabilities, SnapshotSupport};
 use tinybus::broker::Broker;
 use tinybus::transport::memory::MemoryBus;
 use tinybus::{Connection, Interface};
+use tinystoragedrivers_api::StorageBackend;
+use tinystoragedrivers_busproxy::{PerCallerEndpoint, ServedStorage, StorageServer, serve};
+use tinystoragedrivers_testkit::MemoryBackend;
+use tinystoragedrivers_types::Scope;
 
 /// A container-class backend, standing in for one a later milestone registers.
 const CONTAINER: SandboxCapabilities =
@@ -18,6 +23,29 @@ const CONTAINER: SandboxCapabilities =
 
 /// A backend too weak to be trusted with untrusted code.
 const BARE: SandboxCapabilities = SandboxCapabilities::PASSTHROUGH;
+
+struct ServedTestStorage {
+    _host: Connection,
+    _served: ServedStorage,
+}
+
+async fn serve_test_storage(bus: &MemoryBus) -> tinybus::Result<ServedTestStorage> {
+    let backend = Arc::new(MemoryBackend::new());
+    let host = Connection::connect(bus.connect().await?).await?;
+    let bound = Arc::clone(&backend);
+    let endpoint = PerCallerEndpoint::new(move |_sender| {
+        let scope = Scope::new("tinybox/module-test").ok()?;
+        let storage = bound.for_scope(&scope).ok()?;
+        Some(StorageServer::new(storage))
+    });
+    let served = serve(&host, Arc::new(endpoint))
+        .await
+        .map_err(|error| tinybus::Error::failed(error.to_string()))?;
+    Ok(ServedTestStorage {
+        _host: host,
+        _served: served,
+    })
+}
 
 #[tokio::test]
 async fn jail_status_reports_the_detected_backend_without_starting_a_process() -> tinybus::Result<()>
@@ -420,7 +448,7 @@ async fn module_describes_itself_over_a_real_bus() -> tinybus::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[expect(
     clippy::too_many_lines,
     reason = "one broker fixture verifies the complete serialized file-transfer path"
@@ -436,6 +464,7 @@ async fn workspace_file_transfers_roundtrip_through_the_bus_codec() -> tinybus::
         .map_err(|error| tinybus::Error::failed(format!("create workspace fixture: {error}")))?;
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service.clone()).await?;
     let client = Connection::connect(bus.connect().await?).await?;
@@ -661,13 +690,14 @@ async fn unknown_resources_and_unsupported_backends_are_refused() -> tinybus::Re
 }
 
 #[cfg(unix)]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn commands_and_detached_process_lifetimes_work_over_the_bus() -> tinybus::Result<()> {
     use tinybox_bus::{
         CreateRequest, ExecOutput, ExecRequest, ProcessRef, ResourceInfo, Workspace,
     };
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service.clone()).await?;
     let client = Connection::connect(bus.connect().await?).await?;
@@ -766,12 +796,16 @@ async fn commands_and_detached_process_lifetimes_work_over_the_bus() -> tinybus:
 }
 
 #[cfg(unix)]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cleanup_retires_known_reservations_even_before_startup() -> tinybus::Result<()> {
     use tinybox_bus::{
         CreateRequest, ExecRequest, ProcessRef, ResourceId, SpawnRequest, Workspace,
     };
-    let service = BoxService::default();
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
+    let service_connection = Connection::connect(bus.connect().await?).await?;
+    let service = BoxService::connected(service_connection);
     let resource = service
         .reserve(tinybox_bus::ReserveRequest::Resource)
         .await?;
@@ -860,7 +894,7 @@ async fn cleanup_retires_known_reservations_even_before_startup() -> tinybus::Re
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Result<()> {
     use tinybox_bus::{
         CreateRequest, ExecRequest, ExecutionState, OutputBatch, ProcessRef, ReserveRequest,
@@ -868,6 +902,7 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
     };
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service.clone()).await?;
     let client = Connection::connect(bus.connect().await?).await?;
@@ -1292,12 +1327,13 @@ async fn unsupported_git_include_expansions_refuse_the_whole_discovery()
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_shell_selection_and_execution_roundtrip_through_the_bus_codec()
 -> Result<(), Box<dyn std::error::Error>> {
     let state = tempfile::tempdir()?;
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service.clone()).await?;
     let client = Connection::connect(bus.connect().await?).await?;
@@ -1378,11 +1414,12 @@ async fn native_shell_selection_and_execution_roundtrip_through_the_bus_codec()
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn existing_shell_method_keeps_its_two_argument_bus_codec()
 -> Result<(), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service.clone()).await?;
     let client = Connection::connect(bus.connect().await?).await?;

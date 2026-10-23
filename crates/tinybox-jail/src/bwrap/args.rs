@@ -304,17 +304,10 @@ fn deny_masks(denied: &[PathBuf], mounts: &[Mount]) -> io::Result<Vec<OsString>>
         else {
             continue;
         };
-        if holder.writable() && deny.parent() != Some(holder.path.as_path()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "deny_read {} is nested inside writable grant {}; the child could rename \
-                     a parent directory and bypass the mask (deny a direct child of the grant, \
-                     or make the grant read-only)",
-                    deny.display(),
-                    holder.path.display()
-                ),
-            ));
+        if holder.writable()
+            && let Some(error) = crate::jail::nested_denial(deny, &holder.path)
+        {
+            return Err(error);
         }
         match std::fs::metadata(deny) {
             Ok(meta) if meta.is_dir() => {

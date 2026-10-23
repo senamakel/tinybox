@@ -13,7 +13,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct V1Box {
+    id: String,
     state: V1State,
     spec: V1Spec,
     #[serde(default)]
@@ -32,6 +34,7 @@ enum V1State {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct V1Spec {
     runner: Value,
     workspace: Value,
@@ -53,12 +56,14 @@ enum V1Source {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct V1Duration {
     secs: u64,
     nanos: u32,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct V1Time {
     secs_since_epoch: u64,
     nanos_since_epoch: u32,
@@ -153,10 +158,16 @@ fn network_body(network: V1Network) -> Value {
 /// A message when the row is not a v1 box this version understands.
 pub fn to_body(source: Value) -> Result<Value, String> {
     let old: V1Box = serde_json::from_value(source).map_err(|error| error.to_string())?;
-    let spec = old.spec;
+    drop(old.id);
+    let V1Box {
+        state,
+        created_at,
+        spec,
+        ..
+    } = old;
     Ok(json!({
-        "state": state_name(&old.state),
-        "created_ms": old.created_at.as_ref().map(time_ms),
+        "state": state_name(&state),
+        "created_ms": created_at.as_ref().map(time_ms),
         "spec": {
             "runner": spec.runner,
             "workspace": spec.workspace,

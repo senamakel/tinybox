@@ -100,6 +100,7 @@ fn defaults_produce_the_pinned_command_line() {
     expected.extend(s(&[
         "-w",
         "/workspace",
+        "--",
         "alpine:3.20",
         "sh",
         "-c",
@@ -187,6 +188,7 @@ fn overrides_mounts_and_env_are_ordered() {
         "A=1",
         "-e",
         "REQ_KEY=req value=1",
+        "--",
         "debian:12",
         "sh",
         "-c",
@@ -220,13 +222,18 @@ async fn run_reports_exit_code_and_streams() {
             timed_out: false
         }
     );
-    assert_eq!(recorded(&out), strings(&spec.argv()));
+    // The run carries its own label right after `run --rm`.
+    let mut got = recorded(&out);
+    let run_label: Vec<String> = got.drain(2..4).collect();
+    assert_eq!(run_label[0], "--label");
+    assert!(run_label[1].starts_with("ai.tinyhumans.tinybox.oneshot="));
+    assert_eq!(got, strings(&spec.argv()));
 }
 
 #[tokio::test]
 async fn run_times_out_with_the_pinned_message() {
     let tmp = tempfile::tempdir().unwrap();
-    let (cli, _) = fake(tmp.path(), "exec sleep 5");
+    let (cli, _) = fake(tmp.path(), "[ \"$1\" = run ] && exec sleep 5");
     let got = cli
         .run_one_shot(&OneShot::new(tmp.path(), "x"), Duration::from_millis(300))
         .await
@@ -332,4 +339,82 @@ async fn legacy_label_cleanup_keeps_its_best_effort_result() {
         "if [ \"$1\" = ps ]; then echo container-id; exit 0; fi; exit 1",
     );
     assert_eq!(cli.kill_labelled("l=1").await.unwrap(), 1);
+}
+
+#[test]
+fn an_image_that_looks_like_a_flag_stays_a_positional() {
+    let tmp = tempfile::tempdir().unwrap();
+    let argv = strings(
+        &OneShot::new(tmp.path(), "true")
+            .with_image("--privileged")
+            .argv(),
+    );
+    let image = argv.iter().position(|arg| arg == "--privileged").unwrap();
+    assert_eq!(argv[image - 1], "--", "{argv:?}");
+}
+
+#[tokio::test]
+async fn audit_h6_a_timed_out_run_kills_its_client_and_its_container() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (pid, label, calls) = (
+        tmp.path().join("pid"),
+        tmp.path().join("label"),
+        tmp.path().join("calls"),
+    );
+    let (cli, _) = fake(
+        tmp.path(),
+        &format!(
+            "case \"$1\" in\n\
+             run) echo $$ > '{pid}'; echo \"$4\" > '{label}'; exec sleep 30;;\n\
+             ps) echo \"$*\" >> '{calls}'; echo cid1;;\n\
+             kill) echo \"$*\" >> '{calls}';;\n\
+             esac",
+            pid = pid.display(),
+            label = label.display(),
+            calls = calls.display(),
+        ),
+    );
+    let got = cli
+        .run_one_shot(&OneShot::new(tmp.path(), "x"), Duration::from_millis(300))
+        .await
+        .unwrap();
+    assert!(got.timed_out);
+
+    let label = std::fs::read_to_string(&label).unwrap();
+    assert!(
+        label.starts_with("ai.tinyhumans.tinybox.oneshot="),
+        "{label}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap_or_default(),
+        format!("ps -q --filter label={label}kill cid1\n"),
+        "the container must be killed by this run's own label"
+    );
+
+    let pid = std::fs::read_to_string(&pid).unwrap().trim().to_owned();
+    // Alive = listed and not a zombie (an unreaped killed child still answers `kill -0`).
+    let alive = || {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        !stat.is_empty() && !stat.starts_with('Z')
+    };
+    for _ in 0..20 {
+        if !alive() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let still_alive = alive();
+    if still_alive {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid])
+            .status();
+    }
+    assert!(
+        !still_alive,
+        "docker client pid {pid} still alive 1s after the timeout reported it killed"
+    );
 }

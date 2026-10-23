@@ -80,6 +80,10 @@ pub(super) fn prepare(
     }) {
         return Err(invalid());
     }
+    // A carving backend may still be unable to hold a deeply nested denial.
+    backend
+        .validate_carved_denials(&jail)
+        .map_err(|_| invalid())?;
     if !backend.carves_denials() {
         let mut implicit_grants = Vec::new();
         for grant in backend.implicit_grants() {

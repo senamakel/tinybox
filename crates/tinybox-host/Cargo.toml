@@ -23,7 +23,7 @@ async-trait.workspace = true
 cap-std = "4"
 # `LocalHost` spawns a child and reads both output streams concurrently.
 # `limited::jailed` also adapts backend-owned file pipes for async collection.
-tokio = { workspace = true, features = ["process", "io-util", "sync", "fs"] }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "fs", "net"] }
 
 [target.'cfg(unix)'.dependencies]
 # Safe process-group signalling supervises descendants; access checks select executable shells.
