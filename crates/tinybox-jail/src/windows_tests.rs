@@ -243,15 +243,9 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
 
 #[test]
 fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
-
     let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE") else {
         return Ok(());
     };
-    let executable = std::env::current_exe()?;
     let root = std::env::current_dir()?;
     let child_stdout = std::fs::File::create(root.join("descendant.stdout")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stdout: {error}"))
@@ -259,50 +253,25 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
     })?;
-    let mut descendant = Command::new(executable)
-        .args([
-            "--exact",
-            "windows::tests::appcontainer_owned_descendant_child_probe",
-            "--nocapture",
-        ])
-        .env("TINYBOX_APPCONTAINER_DESCENDANT_CHILD_PID_FILE", &pid_file)
+    // AppContainer processes can launch the same system utility used by the
+    // process-limit probe, but Windows denies launching the test executable
+    // from inside the container. Keep the descendant fixture to an admitted
+    // system binary and record its PID before returning from this parent.
+    let command = std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+        .join("System32")
+        .join("cmd.exe");
+    let descendant = Command::new(command)
+        .args(["/D", "/C", "ping -n 300 127.0.0.1 > NUL"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
         .spawn()
         .map_err(|error| {
-            io::Error::new(error.kind(), format!("spawn descendant probe: {error}"))
+            io::Error::new(error.kind(), format!("spawn cmd descendant probe: {error}"))
         })?;
-    let pid_file = PathBuf::from(pid_file);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !pid_file.exists() {
-        if let Some(status) = descendant.try_wait()? {
-            return Err(io::Error::other(format!(
-                "descendant probe exited before readiness: {status:?}"
-            )));
-        }
-        if Instant::now() >= deadline {
-            let _ = descendant.kill();
-            let _ = descendant.wait();
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "AppContainer descendant did not report readiness",
-            ));
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
+    std::fs::write(pid_file, descendant.id().to_string())?;
     Ok(())
-}
-
-#[test]
-fn appcontainer_owned_descendant_child_probe() -> io::Result<()> {
-    let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_CHILD_PID_FILE") else {
-        return Ok(());
-    };
-    std::fs::write(pid_file, std::process::id().to_string())?;
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
 }
 
 #[test]
