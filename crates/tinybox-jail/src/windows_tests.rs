@@ -287,6 +287,9 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
     })?;
+    let local_app_data = root.join("LocalAppData");
+    let temp_directory = local_app_data.join("Temp");
+    std::fs::create_dir_all(&temp_directory)?;
     // Windows denies launching the test executable from inside the
     // AppContainer. Use a system utility that remains alive without reading
     // the inherited stdin pipe, then record its PID before this parent exits.
@@ -304,11 +307,11 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             "-Command",
             "Start-Sleep -Seconds 300",
         ])
-        .env("LOCALAPPDATA", &root)
+        .env("LOCALAPPDATA", &local_app_data)
         .env("APPDATA", &root)
         .env("USERPROFILE", &root)
-        .env("TEMP", &root)
-        .env("TMP", &root)
+        .env("TEMP", &temp_directory)
+        .env("TMP", &temp_directory)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
