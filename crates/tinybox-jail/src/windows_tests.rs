@@ -272,6 +272,11 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
 
 #[test]
 fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
     let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE") else {
         return Ok(());
     };
@@ -286,24 +291,36 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     // process-limit probe, but Windows denies launching the test executable
     // from inside the container. Keep the descendant fixture to an admitted
     // system binary and record its PID before returning from this parent.
-    let command = std::env::var_os("SystemRoot")
-        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
-        .join("System32")
-        .join("cmd.exe");
     let timeout = std::env::var_os("SystemRoot")
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
         .join("timeout.exe");
-    let command_line = format!("\"{}\" /T 300 /NOBREAK", timeout.display());
-    let descendant = Command::new(command)
-        .args(["/D", "/C", command_line.as_str()])
+    let mut descendant = Command::new(timeout)
+        .args(["/T", "300", "/NOBREAK"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
         .spawn()
         .map_err(|error| {
-            io::Error::new(error.kind(), format!("spawn cmd descendant probe: {error}"))
+            io::Error::new(
+                error.kind(),
+                format!("spawn timeout descendant probe: {error}"),
+            )
         })?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = descendant.try_wait()? {
+            let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
+            let stderr = std::fs::read_to_string(root.join("descendant.stderr"))?;
+            return Err(io::Error::other(format!(
+                "timeout descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
+            )));
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
     std::fs::write(pid_file, descendant.id().to_string())?;
     Ok(())
 }
