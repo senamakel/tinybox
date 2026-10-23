@@ -81,11 +81,11 @@ impl JailBackend for AppContainerBackend {
         &self,
         jail: &Jail,
         invocation: &JailInvocation,
-        _command: Command,
+        command: Command,
     ) -> io::Result<OwnedChild> {
         self.require_resources(jail).map_err(unsupported)?;
         require_plan(self, invocation.resources)?;
-        spawn_invocation(jail, invocation)
+        spawn_invocation(jail, invocation, command)
     }
 }
 
@@ -127,21 +127,29 @@ fn require_plan(backend: &AppContainerBackend, plan: Option<ResourceLimitPlan>) 
         .map_err(unsupported)
 }
 
-fn spawn_invocation(jail: &Jail, invocation: &JailInvocation) -> io::Result<OwnedChild> {
+fn spawn_invocation(
+    jail: &Jail,
+    invocation: &JailInvocation,
+    command: Command,
+) -> io::Result<OwnedChild> {
     let request = &invocation.request;
-    let program = request
-        .program()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invocation has no program"))?;
-    let args = request.argv.iter().skip(1).map(OsStr::new);
-    let cwd = request.cwd.as_deref().unwrap_or(&jail.root);
+    let program = command.get_program();
+    let args = command.get_args().map(OsStr::to_os_string).collect::<Vec<_>>();
+    let environment = command
+        .get_envs()
+        .map(|(name, value)| (name.to_os_string(), value.map(OsStr::to_os_string)))
+        .collect::<Vec<_>>();
+    let cwd = command
+        .get_current_dir()
+        .or(request.cwd.as_deref())
+        .unwrap_or(&jail.root);
     spawn_captured(
         jail,
         Path::new(program),
-        args,
-        request
-            .env
+        args.iter().map(OsString::as_os_str),
+        environment
             .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str())),
+            .map(|(name, value)| (name.as_os_str(), value.as_deref())),
         invocation.clear_env,
         cwd,
         invocation.resources,
@@ -153,7 +161,7 @@ fn spawn_captured<'a>(
     jail: &Jail,
     program: &Path,
     args: impl IntoIterator<Item = &'a OsStr>,
-    env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    env: impl IntoIterator<Item = (&'a OsStr, Option<&'a OsStr>)>,
     clear_env: bool,
     cwd: &Path,
     resources: Option<ResourceLimitPlan>,
@@ -200,7 +208,11 @@ fn spawn_captured<'a>(
         launch.env_clear();
     }
     for (name, value) in env {
-        launch.env(name, value);
+        if let Some(value) = value {
+            launch.env(name, value);
+        } else {
+            launch.env_remove(name);
+        }
     }
     let process = launch.spawn_in_job(&job)?;
     drop(stdin_read);
