@@ -287,16 +287,23 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
     })?;
-    // AppContainer processes can launch the same system utility used by the
-    // process-limit probe, but Windows denies launching the test executable
-    // from inside the container. Keep the descendant fixture to an admitted
-    // system binary and record its PID before returning from this parent.
-    let timeout = std::env::var_os("SystemRoot")
+    // Windows denies launching the test executable from inside the
+    // AppContainer. Use a system utility that remains alive without reading
+    // the inherited stdin pipe, then record its PID before this parent exits.
+    let powershell = std::env::var_os("SystemRoot")
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
-        .join("timeout.exe");
-    let mut descendant = Command::new(timeout)
-        .args(["/T", "300", "/NOBREAK"])
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    let mut descendant = Command::new(powershell)
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 300",
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
@@ -304,7 +311,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("spawn timeout descendant probe: {error}"),
+                format!("spawn PowerShell descendant probe: {error}"),
             )
         })?;
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -313,7 +320,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
             let stderr = std::fs::read_to_string(root.join("descendant.stderr"))?;
             return Err(io::Error::other(format!(
-                "timeout descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
+                "PowerShell descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
             )));
         }
         if Instant::now() >= deadline {
