@@ -16,6 +16,12 @@ pub(super) fn prepare(
     command: &tinybox_core::ExecRequest,
     backend: &dyn JailBackend,
 ) -> Result<Jail> {
+    if config.network_allowlist.is_some() {
+        return Err(super::resources::failure(
+            tinybox_bus::CONSTRAINT_NOT_ENFORCED,
+            "native jail does not enforce host and port network allowlists",
+        ));
+    }
     if !cfg!(unix) || !backend.is_available() || backend.name() == tinybox_jail::NOOP_BACKEND_NAME {
         return Err(unavailable());
     }
