@@ -1,125 +1,38 @@
-//! Windows backend: AppContainer.
+//! Windows directory jail using the safe `win-custody` AppContainer launcher.
 //!
-//! AppContainer is Microsoft's strict process-isolation model — the same one
-//! UWP apps and Edge's renderer use. Each container gets a unique SID; the
-//! process can only touch filesystem objects whose DACL explicitly grants
-//! that SID access. To jail an agent in `jail.root`:
-//!
-//! 1. `CreateAppContainerProfile` → derive a per-jail SID.
-//! 2. Grant the SID `GENERIC_READ | GENERIC_WRITE | DELETE` on `jail.root`
-//!    and every `jail.read_write` path via `SetNamedSecurityInfoW` (additive
-//!    ACE on the existing DACL).
-//! 3. Build `STARTUPINFOEXW` with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`.
-//! 4. `CreateProcessW` with `EXTENDED_STARTUPINFO_PRESENT`.
-//!
-//! Things this backend deliberately does not do:
-//!
-//! - Network capability requests. By default an AppContainer has *no*
-//!   network capabilities — we honor `jail.allow_net` by adding the
-//!   `internetClient` capability (outbound client only, matching the
-//!   `jail.allow_net` docstring of "Allow outbound network"). LAN /
-//!   inbound capabilities are intentionally not granted; see
-//!   `NET_CAPABILITY_NAMES` for the rationale.
-//! - Persistent profile cleanup. We use a deterministic profile name
-//!   derived from `jail.label` so reruns reuse the same SID. The host
-//!   should call `DeleteAppContainerProfile` on uninstall — out of scope.
-//!
-//! Validated paths: this implementation has been compile-checked on
-//! Windows targets but **must be tested on real Windows hardware** before
-//! shipping. Win32 has many subtle wrong-trees you can bark up.
+//! This backend returns TinyBox's owned-process abstraction because stable
+//! `std::process::Child` cannot be constructed from a Win32 process handle.
+//! Every child is assigned to a kill-on-close Job Object while suspended,
+//! before its first instruction runs. CPU quota enforcement is deliberately
+//! unsupported; Windows Job Objects do not provide the CPU quota contract used
+//! by TinyBox's resource plan.
 
 #![cfg(target_os = "windows")]
-// Written for edition 2021, where the body of an `unsafe fn` is an unsafe
-// context. Each fn documents its own safety contract; re-scoping them into
-// per-call blocks is a separate, hardware-tested change.
-#![allow(unsafe_op_in_unsafe_fn)]
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::fs::File;
 use std::io;
-use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use std::os::windows::io::OwnedHandle;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::ptr;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
-use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
-    SetNamedSecurityInfoW, TRUSTEE_IS_GROUP, TRUSTEE_IS_SID, TRUSTEE_W,
-};
-use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
-};
-use windows_sys::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, DeriveCapabilitySidsFromName, FreeSid, PSID,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
-};
-use windows_sys::core::PWSTR;
-
-// Well-known Win32 access masks. `windows-sys` has moved these constants
-// between modules across releases (0.59 had GENERIC_READ in
-// `Win32::Storage::FileSystem`, 0.60+ shuffled them around). Inlining the
-// canonical values is both stable and avoids guessing which module the
-// installed minor version exposes them through. Source: WinNT.h.
-const GENERIC_READ: u32 = 0x8000_0000;
-const GENERIC_WRITE: u32 = 0x4000_0000;
-const DELETE: u32 = 0x0001_0000;
-const OBJECT_INHERIT_ACE: u32 = 0x01;
-const CONTAINER_INHERIT_ACE: u32 = 0x02;
-/// SE_GROUP_ENABLED — marks a SID in a `SID_AND_ATTRIBUTES` entry as active.
-/// Required for capability SIDs passed to AppContainer SECURITY_CAPABILITIES.
-/// Source: WinNT.h.
-const SE_GROUP_ENABLED: u32 = 0x0000_0004;
-
-/// AppContainer capability names granted when `jail.allow_net == true`.
-///
-/// Per `jail.rs`, `allow_net` is documented as **"Allow outbound network"**
-/// — so the capability set here is strictly outbound-client only:
-///
-/// - `internetClient` — outbound TCP/UDP to the public internet (client only).
-///
-/// Intentionally NOT granted (each would over-grant relative to the
-/// documented `allow_net` contract):
-///
-/// - `internetClientServer` — would let the child `bind()` and accept
-///   inbound public-internet connections.
-/// - `privateNetworkClientServer` — would let the child `bind()` on the
-///   LAN, granting inbound LAN reachability beyond the documented
-///   outbound-only semantics. Excluding it keeps this backend faithful to
-///   the `Jail.allow_net` doc-string contract ("Allow outbound network"),
-///   which is the invariant being enforced here — not the actual network
-///   posture of the other backends (macOS Seatbelt grants `allow default`,
-///   i.e. full network, on `allow_net == true`, and the Linux Landlock
-///   backend does not gate network at all).
-///
-/// If a future caller needs LAN inbound or public server roles, add a
-/// dedicated `Jail` flag (e.g. `allow_private_lan_server`) and extend
-/// this list conditionally — do NOT silently expand `allow_net`.
-const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
-use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
-use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute,
+use tinybox_core::{Constraint, ConstraintSupport, Enforcement, IsolationLevel};
+use win_custody::{
+    AppContainerAccess, AppContainerProfile, Job, JobLimits, Launch, Process, anonymous_pipe,
 };
 
-use super::jail::{Jail, JailBackend};
+use super::invocation::{JailInvocation, ResourceLimitPlan};
+use super::jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess};
 
 /// Windows AppContainer backend.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AppContainerBackend;
 
 impl AppContainerBackend {
-    /// Creates the backend.
-    pub fn new() -> Self {
+    /// Construct the AppContainer backend.
+    #[must_use]
+    pub const fn new() -> Self {
         Self
-    }
-}
-
-impl Default for AppContainerBackend {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -129,453 +42,290 @@ impl JailBackend for AppContainerBackend {
     }
 
     fn is_available(&self) -> bool {
-        // AppContainer is *reachable* on every supported Windows (8+ / Server
-        // 2012+), but the spawn path in `spawn_in_container` can't yet return
-        // a `std::process::Child` — after `CreateProcessW` succeeds it must
-        // reply `Err(io::ErrorKind::Unsupported)` (see the TODO / `Unsupported`
-        // return at the end of `spawn_in_container`). Reporting the backend as
-        // available anyway strands the successfully-spawned process on the
-        // caller side: `execute_local_jail` bubbles the `Err` up as a spawn
-        // failure and never `wait`s on the running `cmd.exe`, so it
-        // orphan-runs against the redirected stdout/stderr files. Report
-        // unavailable until `Child` bridging lands so `pick_backend()` /
-        // `execute_local_jail` route through `NoopBackend`, which returns a
-        // real waitable `Child`. (PR #4723 review — #4705.)
+        true
+    }
+
+    fn constraint_support(&self) -> ConstraintSupport {
+        ConstraintSupport::NONE
+            .with(Constraint::Filesystem, Enforcement::Enforced)
+            .with(Constraint::Network, Enforcement::Enforced)
+            .with(Constraint::Subprocess, Enforcement::Enforced)
+            .with(Constraint::Memory, Enforcement::Enforced)
+            .with(Constraint::Pids, Enforcement::Enforced)
+            .with(Constraint::Cpu, Enforcement::Unsupported)
+            .with(Constraint::Disk, Enforcement::Unsupported)
+    }
+
+    fn isolation(&self) -> IsolationLevel {
+        IsolationLevel::Kernel
+    }
+
+    fn carves_denials(&self) -> bool {
         false
     }
 
-    fn spawn(&self, jail: &Jail, cmd: Command) -> io::Result<Child> {
-        if !self.is_available() {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "AppContainer cannot return a waitable process handle",
-            ));
-        }
-        unsafe { spawn_in_container(jail, cmd) }
+    fn spawn(&self, _jail: &Jail, _cmd: Command) -> io::Result<Child> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "AppContainer returns an owned process; use the captured owned-process API",
+        ))
+    }
+
+    fn spawn_owned_captured(&self, _jail: &Jail, _cmd: Command) -> io::Result<OwnedChild> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows AppContainer requires a typed invocation to preserve its environment",
+        ))
+    }
+
+    fn spawn_owned_invocation_captured(
+        &self,
+        jail: &Jail,
+        invocation: &JailInvocation,
+        _command: Command,
+    ) -> io::Result<OwnedChild> {
+        self.require_resources(jail).map_err(unsupported)?;
+        require_plan(self, invocation.resources)?;
+        spawn_invocation(jail, invocation)
     }
 }
 
-unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {
-    // 1. Create or open the AppContainer profile and obtain its SID.
-    let profile_name = sanitize_profile_name(&jail.label);
-    let wide_name = to_wide(&profile_name);
-    let display = to_wide(&format!("openhuman {}", jail.label));
-    let desc = to_wide("openhuman spawnd agent process");
-
-    let mut sid: PSID = ptr::null_mut();
-    let hr = CreateAppContainerProfile(
-        wide_name.as_ptr(),
-        display.as_ptr(),
-        desc.as_ptr(),
-        ptr::null_mut(),
-        0,
-        &mut sid,
-    );
-    if hr != 0 {
-        // 0x800700B7 = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS).
-        // In that case derive the SID from the existing profile.
-        if hr as u32 == 0x800700B7 {
-            let mut existing: PSID = ptr::null_mut();
-            let drv = DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &mut existing);
-            if drv != 0 {
-                return Err(io::Error::from_raw_os_error(drv));
-            }
-            sid = existing;
-        } else {
-            return Err(io::Error::from_raw_os_error(hr));
-        }
-    }
-    let _sid_guard = SidGuard(sid);
-
-    // 2. Grant the container SID access to the root, the extra read/write
-    //    paths, and the read-only paths.
-    for (path, access) in path_grants(jail) {
-        grant_sid_access(path, sid, access)?;
-    }
-
-    // 3. Build SECURITY_CAPABILITIES. AppContainers start with no network
-    //    access by default; honour `jail.allow_net` by deriving the
-    //    capability SIDs in `NET_CAPABILITY_NAMES` via
-    //    `DeriveCapabilitySidsFromName` and attaching them as
-    //    SE_GROUP_ENABLED entries. `_cap_derivations` owns the
-    //    OS-allocated SID buffers and frees them via Drop after
-    //    CreateProcessW has captured the values into the child process.
-    //    `cap_attrs` must outlive CreateProcessW (the attribute list
-    //    references it by pointer) — it stays in scope until the end of
-    //    `spawn_in_container`.
-    let mut cap_attrs: Vec<SID_AND_ATTRIBUTES> = Vec::new();
-    let mut _cap_derivations: Vec<CapabilityDerivation> = Vec::new();
-    if jail.allow_net {
-        let mut any_derived = false;
-        for &name in NET_CAPABILITY_NAMES {
-            match derive_capability(name) {
-                Ok(deriv) => {
-                    for &cap_sid in &deriv.capability_sids {
-                        cap_attrs.push(SID_AND_ATTRIBUTES {
-                            Sid: cap_sid,
-                            Attributes: SE_GROUP_ENABLED,
-                        });
-                        any_derived = true;
-                    }
-                    _cap_derivations.push(deriv);
-                }
-                Err(e) => log::warn!(
-                    "[cwd_jail] DeriveCapabilitySidsFromName({name}) failed: \
-                     {e}; this capability will not be granted"
-                ),
-            }
-        }
-        if !any_derived {
-            log::error!(
-                "[cwd_jail] jail.allow_net=true but NO network capability \
-                 could be derived; the AppContainer child will have no \
-                 network access. Check Userenv.dll availability."
-            );
-        }
-    }
-    let mut caps = SECURITY_CAPABILITIES {
-        AppContainerSid: sid,
-        Capabilities: if cap_attrs.is_empty() {
-            ptr::null_mut()
-        } else {
-            cap_attrs.as_mut_ptr()
-        },
-        CapabilityCount: cap_attrs.len() as u32,
-        Reserved: 0,
+fn unsupported(error: tinybox_core::Error) -> io::Error {
+    let kind = if matches!(error, tinybox_core::Error::ZeroResourceLimit { .. }) {
+        io::ErrorKind::InvalidInput
+    } else {
+        io::ErrorKind::Unsupported
     };
-
-    // 4. Build STARTUPINFOEXW with the security-capabilities attribute.
-    let mut size: usize = 0;
-    InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut size);
-    let attr_buf = LocalAlloc(LPTR, size) as LPPROC_THREAD_ATTRIBUTE_LIST;
-    if attr_buf.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-    let _attr_guard = AttrListGuard(attr_buf);
-    if InitializeProcThreadAttributeList(attr_buf, 1, 0, &mut size) == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if UpdateProcThreadAttribute(
-        attr_buf,
-        0,
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        &mut caps as *mut _ as *mut _,
-        std::mem::size_of::<SECURITY_CAPABILITIES>(),
-        ptr::null_mut(),
-        ptr::null_mut(),
-    ) == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-
-    let mut si: STARTUPINFOEXW = std::mem::zeroed();
-    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-    si.lpAttributeList = attr_buf;
-
-    // 5. Build the command line and current directory.
-    let cmdline = build_command_line(&cmd);
-    let mut cmdline_w = to_wide(&cmdline);
-    let cwd_w = cmd.get_current_dir().map(|p| to_wide(&p.to_string_lossy()));
-
-    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-    let ok = CreateProcessW(
-        ptr::null(),
-        cmdline_w.as_mut_ptr() as PWSTR,
-        ptr::null_mut(),
-        ptr::null_mut(),
-        0, // bInheritHandles
-        EXTENDED_STARTUPINFO_PRESENT,
-        ptr::null_mut(),
-        cwd_w.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null()),
-        &mut si as *mut _ as *mut STARTUPINFOW,
-        &mut pi,
-    );
-    if ok == 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    // 6. Wrap the raw process handle in a std `Child`.
-    //
-    // std::process::Child has no public constructor from a raw HANDLE on
-    // Windows. We close the thread handle (we don't need it) and leak the
-    // process handle into an OwnedHandle so the caller can at least wait
-    // via the OS. Returning a `Child` requires nightly's `FromRawHandle for
-    // Child`, which is unstable. For now we close the process handle too
-    // and return an error explaining the limitation — see TODO below.
-    CloseHandle(pi.hThread);
-
-    let _process_handle = OwnedHandle::from_raw_handle(pi.hProcess as _);
-
-    // TODO: bridge OwnedHandle -> std::process::Child once
-    // `std::os::windows::process::ChildExt::from_raw_handle` lands, OR
-    // expose a custom `OpenhumanChild` from the cwd_jail module that
-    // mirrors the bits of `Child` callers actually need (id, wait, kill).
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "AppContainer spawn succeeded but cannot yet be returned as std::process::Child; \
-         see TODO in crates/tinybox-jail/src/windows.rs",
-    ))
+    io::Error::new(kind, error)
 }
 
-/// The DACL grants a jail needs: the root and every `read_write` path get
-/// read, write and delete; every `read_only` path gets read.
-fn path_grants(jail: &Jail) -> Vec<(&Path, u32)> {
-    let read_write = GENERIC_READ | GENERIC_WRITE | DELETE;
-    std::iter::once(jail.root.as_path())
-        .chain(jail.read_write.iter().map(PathBuf::as_path))
-        .map(|path| (path, read_write))
+fn require_plan(backend: &AppContainerBackend, plan: Option<ResourceLimitPlan>) -> io::Result<()> {
+    let Some(plan) = plan else {
+        return Ok(());
+    };
+    if plan.is_empty() || plan.has_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid resource limit plan",
+        ));
+    }
+    let mut requested = Vec::new();
+    if plan.cpu_millis.is_some() {
+        requested.push(Constraint::Cpu);
+    }
+    if plan.memory_bytes.is_some() {
+        requested.push(Constraint::Memory);
+    }
+    if plan.pids_max.is_some() {
+        requested.push(Constraint::Pids);
+    }
+    if plan.disk_bytes.is_some() {
+        requested.push(Constraint::Disk);
+    }
+    backend
+        .constraint_support()
+        .require(backend.name(), &requested)
+        .map_err(unsupported)
+}
+
+fn spawn_invocation(jail: &Jail, invocation: &JailInvocation) -> io::Result<OwnedChild> {
+    let request = &invocation.request;
+    let program = request
+        .program()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invocation has no program"))?;
+    let args = request.argv.iter().skip(1).map(OsStr::new);
+    let cwd = request.cwd.as_deref().unwrap_or(&jail.root);
+    spawn_captured(
+        jail,
+        Path::new(program),
+        args,
+        request.env.iter().map(|(name, value)| (name.as_str(), value.as_str())),
+        invocation.clear_env,
+        cwd,
+        invocation.resources,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_captured<'a>(
+    jail: &Jail,
+    program: &Path,
+    args: impl IntoIterator<Item = &'a OsStr>,
+    env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    clear_env: bool,
+    cwd: &Path,
+    resources: Option<ResourceLimitPlan>,
+) -> io::Result<OwnedChild> {
+    let profile_name = sanitize_profile_name(&jail.label);
+    let profile = AppContainerProfile::create_or_open_with_capabilities(
+        &profile_name,
+        &format!("TinyBox {profile_name}"),
+        "TinyBox confined process",
+        if jail.allow_net {
+            &["internetClient"]
+        } else {
+            &[]
+        },
+    )?;
+    for path in std::iter::once((&jail.root, AppContainerAccess::ReadWrite))
+        .chain(
+            jail.read_write
+                .iter()
+                .map(|path| (path, AppContainerAccess::ReadWrite)),
+        )
         .chain(
             jail.read_only
                 .iter()
-                .filter(|path| {
-                    path.as_path() != jail.root.as_path()
-                        && !jail.read_write.iter().any(|rw| rw == *path)
-                })
-                .map(|path| (path.as_path(), GENERIC_READ)),
+                .map(|path| (path, AppContainerAccess::Read)),
         )
-        .collect()
+    {
+        profile.grant_path(path.0, path.1)?;
+    }
+
+    let job = Job::create(&job_limits(jail, resources)?)?;
+    let (stdin_read, stdin_write) = anonymous_pipe()?;
+    let (stdout_read, stdout_write) = anonymous_pipe()?;
+    let (stderr_read, stderr_write) = anonymous_pipe()?;
+    let mut launch = Launch::new(resolve_program(program, cwd)?);
+    launch
+        .args(args)
+        .current_dir(cwd)
+        .app_container(&profile)
+        .stdin(&stdin_read)
+        .stdout(&stdout_write)
+        .stderr(&stderr_write);
+    if clear_env {
+        launch.env_clear();
+    }
+    for (name, value) in env {
+        launch.env(name, value);
+    }
+    let process = launch.spawn_in_job(&job)?;
+    drop(stdin_read);
+    drop(stdout_write);
+    drop(stderr_write);
+
+    Ok(OwnedChild::new(
+        AppContainerProcess { process, _job: job },
+        Some(File::from(stdin_write)),
+        Some(File::from(stdout_read)),
+        Some(File::from(stderr_read)),
+    ))
 }
 
-unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()> {
-    let path_w = to_wide(&path.to_string_lossy());
-
-    // First, fetch the *existing* DACL from the path. Passing
-    // `ptr::null_mut()` as the old-ACL argument to `SetEntriesInAclW`
-    // would build a fresh DACL containing only the AppContainer ACE,
-    // and `SetNamedSecurityInfoW` would then replace the entire DACL —
-    // locking out the owner / SYSTEM / Administrators. Merge instead.
-    let mut sd_ptr: *mut std::ffi::c_void = ptr::null_mut();
-    let mut existing_dacl: *mut ACL = ptr::null_mut();
-    let dacl_present: i32 = 0;
-    let rc = GetNamedSecurityInfoW(
-        path_w.as_ptr(),
-        SE_FILE_OBJECT,
-        DACL_SECURITY_INFORMATION,
-        ptr::null_mut(),
-        ptr::null_mut(),
-        &mut existing_dacl,
-        ptr::null_mut(),
-        &mut sd_ptr,
-    );
-    if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
-    }
-    let _sd_guard = LocalGuard(sd_ptr as HLOCAL);
-    let _ = dacl_present;
-
-    let mut ea: EXPLICIT_ACCESS_W = std::mem::zeroed();
-    ea.grfAccessPermissions = access;
-    ea.grfAccessMode = SET_ACCESS;
-    ea.grfInheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
-    ea.Trustee = TRUSTEE_W {
-        pMultipleTrustee: ptr::null_mut(),
-        MultipleTrusteeOperation: 0,
-        TrusteeForm: TRUSTEE_IS_SID,
-        TrusteeType: TRUSTEE_IS_GROUP,
-        ptstrName: sid as *mut _,
+fn job_limits(jail: &Jail, plan: Option<ResourceLimitPlan>) -> io::Result<JobLimits> {
+    let mut limits = JobLimits::new().kill_on_close(true);
+    let (memory, pids) = if let Some(resources) = plan {
+        (
+            resources.memory_bytes,
+            resources.pids_max.map(u32::try_from).transpose().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "process limit exceeds Windows range")
+            })?,
+        )
+    } else if let Some(resources) = jail.resources {
+        (Some(resources.memory_bytes), Some(resources.pids_max))
+    } else {
+        (None, None)
     };
-
-    let mut new_acl: *mut ACL = ptr::null_mut();
-    let rc = SetEntriesInAclW(1, &ea, existing_dacl, &mut new_acl);
-    if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
+    if let Some(memory) = memory {
+        limits = limits.job_memory(usize::try_from(memory).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "memory limit exceeds Windows range")
+        })?);
     }
-    let _acl_guard = LocalGuard(new_acl as HLOCAL);
-
-    let rc = SetNamedSecurityInfoW(
-        path_w.as_ptr() as PWSTR,
-        SE_FILE_OBJECT,
-        DACL_SECURITY_INFORMATION,
-        ptr::null_mut(),
-        ptr::null_mut(),
-        new_acl,
-        ptr::null_mut(),
-    );
-    if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
+    let active_processes = pids.map(|limit| if jail.allow_subprocess { limit } else { limit.min(1) });
+    let active_processes = if jail.allow_subprocess {
+        active_processes
+    } else {
+        Some(active_processes.unwrap_or(1))
+    };
+    if let Some(active_processes) = active_processes {
+        limits = limits.active_processes(active_processes);
     }
-    Ok(())
+    Ok(limits)
 }
 
-fn build_command_line(cmd: &Command) -> String {
-    // Minimal CommandLineToArgvW-compatible quoting. std's internal
-    // `make_command_line` is private; this mirrors the same rules.
-    let mut out = String::new();
-    let prog = cmd.get_program().to_string_lossy().into_owned();
-    push_arg(&mut out, &prog);
-    for a in cmd.get_args() {
-        out.push(' ');
-        push_arg(&mut out, &a.to_string_lossy());
+fn resolve_program(program: &Path, cwd: &Path) -> io::Result<PathBuf> {
+    if program.is_absolute() || program.components().count() > 1 {
+        return Ok(program.to_path_buf());
     }
-    out
-}
-
-fn push_arg(out: &mut String, a: &str) {
-    let needs_quotes = a.is_empty() || a.contains([' ', '\t', '"']);
-    if !needs_quotes {
-        out.push_str(a);
-        return;
-    }
-    out.push('"');
-    let mut backslashes = 0;
-    for c in a.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                for _ in 0..(backslashes * 2 + 1) {
-                    out.push('\\');
-                }
-                out.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                for _ in 0..backslashes {
-                    out.push('\\');
-                }
-                backslashes = 0;
-                out.push(c);
+    let extensions = std::env::var_os("PATHEXT")
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into())
+        .to_string_lossy()
+        .split(';')
+        .map(OsString::from)
+        .collect::<Vec<_>>();
+    let has_extension = program.extension().is_some();
+    let candidates = if has_extension {
+        vec![program.to_path_buf()]
+    } else {
+        extensions
+            .iter()
+            .map(|extension| program.with_extension(extension))
+            .collect()
+    };
+    let search_path = std::env::var_os("PATH").unwrap_or_default();
+    for directory in std::iter::once(cwd.to_path_buf()).chain(std::env::split_paths(&search_path)) {
+        for candidate in &candidates {
+            let full = directory.join(candidate);
+            if full.is_file() {
+                return full.canonicalize();
             }
         }
     }
-    for _ in 0..(backslashes * 2) {
-        out.push('\\');
-    }
-    out.push('"');
-}
-
-fn to_wide(s: &str) -> Vec<u16> {
-    OsStr::new(s)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("could not resolve Windows executable {}", program.display()),
+    ))
 }
 
 fn sanitize_profile_name(label: &str) -> String {
-    // AppContainer profile names must be ≤ 64 chars and use a restricted
-    // charset. Keep ASCII alnum + dot; map everything else to `_`.
-    let mut s: String = label
+    let clean: String = label
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' {
-                c
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '.' {
+                character
             } else {
                 '_'
             }
         })
+        .take(50)
         .collect();
-    s.truncate(60);
-    format!("openhuman.{s}")
+    format!("tinybox.{clean}")
 }
 
-struct SidGuard(PSID);
-impl Drop for SidGuard {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // MSDN: SIDs returned by both `CreateAppContainerProfile`
-            // and `DeriveAppContainerSidFromAppContainerName` must be
-            // freed with `FreeSid`. The older comment that said
-            // `LocalFree` is "safer" was wrong — the buffers are not
-            // necessarily LocalAlloc-backed, and using the wrong free
-            // function corrupts the heap on some Windows builds.
-            unsafe {
-                FreeSid(self.0);
-            }
+struct AppContainerProcess {
+    process: Process,
+    _job: Job,
+}
+
+impl OwnedProcess for AppContainerProcess {
+    fn id(&self) -> Option<u32> {
+        self.process.pid().ok()
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ChildStatus>> {
+        self.process
+            .exit_code()
+            .map(|code| code.map(|code| ChildStatus::from_code(Some(code as i32))))
+    }
+
+    fn terminate(&mut self) -> io::Result<()> {
+        if self.process.exit_code()?.is_some() {
+            return Ok(());
         }
-    }
-}
-
-struct AttrListGuard(LPPROC_THREAD_ATTRIBUTE_LIST);
-impl Drop for AttrListGuard {
-    fn drop(&mut self) {
-        unsafe {
-            DeleteProcThreadAttributeList(self.0);
-            LocalFree(self.0 as HLOCAL);
-        }
-    }
-}
-
-struct LocalGuard(HLOCAL);
-impl Drop for LocalGuard {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
-}
-
-/// Owned wrapper around the SID arrays returned by
-/// `DeriveCapabilitySidsFromName`. MSDN: each inner SID AND each array
-/// itself is `LocalAlloc`-backed; `Drop` releases all of them in the
-/// reverse order they were allocated.
-///
-/// The `capability_sids` are the ones we actually want for an
-/// AppContainer's `SECURITY_CAPABILITIES.Capabilities`; the
-/// `group_sids` come along because the Win32 API returns both, and we
-/// hold them here purely so we can free them.
-struct CapabilityDerivation {
-    capability_sids: Vec<PSID>,
-    capability_sids_ptr: *mut PSID,
-    group_sids: Vec<PSID>,
-    group_sids_ptr: *mut PSID,
-}
-
-impl Drop for CapabilityDerivation {
-    fn drop(&mut self) {
-        unsafe {
-            for &sid in &self.capability_sids {
-                if !sid.is_null() {
-                    LocalFree(sid as HLOCAL);
-                }
+        self._job.terminate(1).or_else(|error| {
+            if self.process.exit_code()?.is_some() {
+                Ok(())
+            } else {
+                Err(error)
             }
-            if !self.capability_sids_ptr.is_null() {
-                LocalFree(self.capability_sids_ptr as HLOCAL);
-            }
-            for &sid in &self.group_sids {
-                if !sid.is_null() {
-                    LocalFree(sid as HLOCAL);
-                }
-            }
-            if !self.group_sids_ptr.is_null() {
-                LocalFree(self.group_sids_ptr as HLOCAL);
-            }
-        }
+        })
     }
 }
 
-/// Resolves a capability name (e.g. `"internetClient"`) to its SIDs via
-/// `DeriveCapabilitySidsFromName`. The returned [`CapabilityDerivation`]
-/// owns the OS allocations; drop it to free them. Use the
-/// `capability_sids` slice as the SID values for
-/// `SECURITY_CAPABILITIES.Capabilities` entries.
-///
-/// # Safety
-/// FFI into `userenv.dll`. Safe to call from any thread on Windows.
-unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
-    let name_w = to_wide(name);
-    let mut group_sids: *mut PSID = ptr::null_mut();
-    let mut group_count: u32 = 0;
-    let mut cap_sids: *mut PSID = ptr::null_mut();
-    let mut cap_count: u32 = 0;
-    let ok = DeriveCapabilitySidsFromName(
-        name_w.as_ptr(),
-        &mut group_sids,
-        &mut group_count,
-        &mut cap_sids,
-        &mut cap_count,
-    );
-    if ok == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let capability_sids: Vec<PSID> = (0..cap_count as usize).map(|i| *cap_sids.add(i)).collect();
-    let group_sids_vec: Vec<PSID> = (0..group_count as usize)
-        .map(|i| *group_sids.add(i))
-        .collect();
-    Ok(CapabilityDerivation {
-        capability_sids,
-        capability_sids_ptr: cap_sids,
-        group_sids: group_sids_vec,
-        group_sids_ptr: group_sids,
-    })
+#[allow(dead_code)]
+fn _owned_handle_to_file(handle: OwnedHandle) -> File {
+    File::from(handle)
 }
 
 #[cfg(test)]
