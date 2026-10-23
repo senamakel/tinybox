@@ -1601,10 +1601,8 @@ async fn wait_for_resource_descendant(
         let streams_ready = !check_streams
             || (stream_has(tinybox_bus::OutputStream::Stdout, b"stdout-ready")
                 && stream_has(tinybox_bus::OutputStream::Stderr, b"stderr-ready"));
-        if streams_ready {
-            if let Some(identity) = read_resource_descendant_identity(pid_file)? {
-                return Ok(identity);
-            }
+        if streams_ready && let Some(identity) = read_resource_descendant_identity(pid_file)? {
+            return Ok(identity);
         }
         if batch.state != ExecutionState::Running || tokio::time::Instant::now() >= deadline {
             return Err(
