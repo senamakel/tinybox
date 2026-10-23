@@ -14,6 +14,8 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tinybox_core::{Constraint, ConstraintSupport, Enforcement, IsolationLevel};
 use win_custody::{
@@ -22,6 +24,8 @@ use win_custody::{
 
 use super::invocation::{JailInvocation, ResourceLimitPlan};
 use super::jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess};
+
+static PROFILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Windows AppContainer backend.
 #[derive(Debug, Default)]
@@ -134,7 +138,10 @@ fn spawn_invocation(
 ) -> io::Result<OwnedChild> {
     let request = &invocation.request;
     let program = command.get_program();
-    let args = command.get_args().map(OsStr::to_os_string).collect::<Vec<_>>();
+    let args = command
+        .get_args()
+        .map(OsStr::to_os_string)
+        .collect::<Vec<_>>();
     let environment = command
         .get_envs()
         .map(|(name, value)| (name.to_os_string(), value.map(OsStr::to_os_string)))
@@ -166,7 +173,7 @@ fn spawn_captured<'a>(
     cwd: &Path,
     resources: Option<ResourceLimitPlan>,
 ) -> io::Result<OwnedChild> {
-    let profile_name = sanitize_profile_name(&jail.label);
+    let profile_name = unique_profile_name();
     let profile = AppContainerProfile::create_or_open_with_capabilities(
         &profile_name,
         &format!("TinyBox {profile_name}"),
@@ -177,19 +184,18 @@ fn spawn_captured<'a>(
             &[]
         },
     )?;
-    for path in std::iter::once((&jail.root, AppContainerAccess::ReadWrite))
-        .chain(
-            jail.read_write
-                .iter()
-                .map(|path| (path, AppContainerAccess::ReadWrite)),
-        )
-        .chain(
-            jail.read_only
-                .iter()
-                .map(|path| (path, AppContainerAccess::Read)),
-        )
+    let writable = std::iter::once(&jail.root)
+        .chain(jail.read_write.iter())
+        .collect::<Vec<_>>();
+    for path in &writable {
+        profile.grant_path(path, AppContainerAccess::ReadWrite)?;
+    }
+    for path in jail
+        .read_only
+        .iter()
+        .filter(|path| !writable.iter().any(|writable| *writable == path))
     {
-        profile.grant_path(path.0, path.1)?;
+        profile.grant_path(path, AppContainerAccess::Read)?;
     }
 
     let job = Job::create(&job_limits(jail, resources)?)?;
@@ -308,19 +314,13 @@ fn resolve_program(program: &Path, cwd: &Path) -> io::Result<PathBuf> {
     ))
 }
 
-fn sanitize_profile_name(label: &str) -> String {
-    let clean: String = label
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '.' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .take(50)
-        .collect();
-    format!("tinybox.{clean}")
+fn unique_profile_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = PROFILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("tinybox.{}.{timestamp:x}.{sequence:x}", std::process::id())
 }
 
 struct AppContainerProcess {

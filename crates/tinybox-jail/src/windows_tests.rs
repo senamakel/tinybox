@@ -29,6 +29,15 @@ fn appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits() {
 }
 
 #[test]
+fn appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants() {
+    let first = unique_profile_name();
+    let second = unique_profile_name();
+    assert_ne!(first, second);
+    assert!(first.len() <= 64, "profile name exceeds Windows' limit");
+    assert!(second.len() <= 64, "profile name exceeds Windows' limit");
+}
+
+#[test]
 fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Result<()> {
     use std::io::Read;
     use tinybox_core::ExecRequest;
