@@ -107,7 +107,23 @@ jobs:
             throw "Expected Windows Server 2025 x64, got '$($os.Caption)' / '$env:RUNNER_ARCH'"
           }
       - name: Run focused AppContainer jail tests
-        run: cargo test --locked -p tinybox-jail appcontainer_ -- --nocapture --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            windows::tests::appcontainer_backend_is_available_through_owned_process_supervision
+            windows::tests::appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits
+            windows::tests::appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants
+            windows::tests::appcontainer_drive_environment_uses_a_dos_path_for_verbatim_cwds
+            windows::tests::appcontainer_local_app_data_must_be_present_and_absolute
+            windows::tests::appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims
+            windows::tests::appcontainer_owned_launch_captures_output_from_a_confined_child
+            windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
+            windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
+          )
+          for test in "${tests[@]}"; do
+            cargo test --locked -p tinybox-jail --lib "$test" -- --exact --nocapture --test-threads=1
+          done
   native-resource-live:
     runs-on: ubuntu-latest
     steps:
