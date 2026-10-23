@@ -129,7 +129,7 @@ fn host_gateway_and_docker_facts_are_additive_and_default_safely() -> Result<(),
 #[test]
 fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
 -> Result<(), serde_json::Error> {
-    assert_eq!(CONTRACT_VERSION, (2, 4));
+    assert_eq!(CONTRACT_VERSION, (2, 5));
     assert!(is_compatible(CONTRACT_VERSION));
     assert!(!is_compatible((1, 21)));
     assert!(!is_compatible((1, 8)));
@@ -150,6 +150,8 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
     assert!(!supports_native_jail_resources((2, 0)));
     assert!(supports_native_jail_resources((2, 1)));
     assert!(supports_native_jail_resources((2, 2)));
+    assert!(!supports_native_jail_network_allowlist((2, 4)));
+    assert!(supports_native_jail_network_allowlist((2, 5)));
     assert!(!supports_native_shell_resources((2, 1)));
     assert!(supports_native_shell_resources((2, 2)));
     assert!(supports_native_shell_resources((2, 3)));
@@ -162,7 +164,7 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
         exec_backends: Vec::new(),
         spawn_backends: Vec::new(),
     };
-    let snapshot = serde_json::json!({"contract_version":[2,4],"create_backends":["passthrough"],"exec_backends":[],"spawn_backends":[]});
+    let snapshot = serde_json::json!({"contract_version":[2,5],"create_backends":["passthrough"],"exec_backends":[],"spawn_backends":[]});
     assert_eq!(serde_json::to_value(&capabilities)?, snapshot);
     assert_eq!(
         serde_json::from_value::<ModuleCapabilities>(snapshot)?,
@@ -181,7 +183,7 @@ fn no_workspace_docker_operation_is_present_in_the_contract() {
             .count(),
         1
     );
-    assert_eq!(CONTRACT_VERSION, (2, 4));
+    assert_eq!(CONTRACT_VERSION, (2, 5));
 }
 
 #[test]
@@ -194,14 +196,14 @@ fn shell_analysis_wire_shape_contains_only_structural_facts() -> Result<(), serd
 
 #[test]
 fn contract_two_drops_command_classification_but_keeps_structural_shell_analysis() {
-    assert_eq!(CONTRACT_VERSION, (2, 4));
+    assert_eq!(CONTRACT_VERSION, (2, 5));
     assert!(!METHODS.contains(&"AnalyzeCommand"));
     assert!(METHODS.contains(&"AnalyzeShell"));
 }
 
 #[test]
 fn plan_check_contract_is_typed_ordered_and_round_trips() -> Result<(), serde_json::Error> {
-    assert_eq!(CONTRACT_VERSION, (2, 4));
+    assert_eq!(CONTRACT_VERSION, (2, 5));
     assert_eq!(names::PLAN_CHECK, "PlanCheck");
     assert!(METHODS.contains(&names::PLAN_CHECK));
     let request = PlanCheckRequest {
