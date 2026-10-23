@@ -81,6 +81,21 @@ pub trait WorkspaceFileWriter: std::fmt::Debug + Send + Sync {
     async fn abort(&mut self) -> Result<()>;
 }
 
+/// The machine where a host executes commands.
+///
+/// Security-sensitive controllers use this explicit capability instead of
+/// inferring locality from a host's registration name. Custom hosts default to
+/// [`Unknown`](Self::Unknown) until they can attest to their location.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostExecutionLocation {
+    /// Commands run in this process's operating-system environment.
+    Local,
+    /// Commands run on another machine.
+    Remote,
+    /// The host cannot make a trustworthy location claim.
+    Unknown,
+}
+
 /// A machine tinybox can reach and run commands on.
 ///
 /// A host provides no confinement of its own. `local` runs a child process;
@@ -91,6 +106,14 @@ pub trait Host: std::fmt::Debug + Send + Sync + 'static {
     /// The name this host is registered under, matching
     /// [`HostRef`](crate::identity::HostRef).
     fn name(&self) -> &str;
+
+    /// The machine where commands execute.
+    ///
+    /// A controller that requires local machine access must refuse hosts that
+    /// do not explicitly attest to it.
+    fn execution_location(&self) -> HostExecutionLocation {
+        HostExecutionLocation::Unknown
+    }
 
     /// Run a command to completion and collect its output.
     ///

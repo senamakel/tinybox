@@ -71,6 +71,10 @@ impl Host for LocalHost {
         NAME
     }
 
+    fn execution_location(&self) -> tinybox_core::HostExecutionLocation {
+        tinybox_core::HostExecutionLocation::Local
+    }
+
     /// Run a command to completion and collect its output.
     ///
     /// Uses `tokio`'s `output()`, which reads both pipes concurrently. Reading

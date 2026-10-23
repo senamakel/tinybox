@@ -11,6 +11,8 @@ use tinybox_core::{
     WorkspaceSource,
 };
 
+use crate::PreparedEgressNetwork;
+
 use super::NAME;
 
 /// The label every tinybox container carries, so a stray container can be
@@ -102,6 +104,7 @@ pub(super) fn run(
     id: &BoxId,
     attempt: &str,
     spec: &BoxSpec,
+    allowlist_network: Option<&PreparedEgressNetwork>,
 ) -> Result<Vec<String>> {
     let mut argv = vec![
         "docker".to_owned(),
@@ -119,7 +122,22 @@ pub(super) fn run(
     ];
 
     argv.extend(resource_flags(&spec.resources));
-    argv.extend(network_flags(&spec.network));
+    if let Some(network) = allowlist_network {
+        argv.extend(["--network".to_owned(), network.network().to_owned()]);
+        // Docker's embedded resolver can forward arbitrary names outside the
+        // per-box filter. Static host mappings resolve approved names; loopback
+        // prevents any DNS fallback from reaching an upstream resolver.
+        argv.extend(["--dns".to_owned(), "127.0.0.1".to_owned()]);
+        for (hostname, address) in network.host_mappings() {
+            let address = match address {
+                std::net::IpAddr::V4(address) => address.to_string(),
+                std::net::IpAddr::V6(address) => format!("[{address}]"),
+            };
+            argv.extend(["--add-host".to_owned(), format!("{hostname}:{address}")]);
+        }
+    } else {
+        argv.extend(network_flags(&spec.network));
+    }
     argv.extend(port_flags(spec));
 
     if let WorkspaceSource::LocalDir(path) = &spec.source {

@@ -149,3 +149,28 @@ jobs:
           TINYBOX_REQUIRE_NATIVE_RESOURCE_TESTS=1 cargo test -j1 -p tinybox-module resource_aware_bus_exec_cancellation_reports_events_and_reaps_descendants
           TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS=1 TINYBOX_LIVE_NAMESPACES=1 cargo test -j1 -p tinybox-linux --test live_namespaces live_memory_limit_kills_a_child_that_touches_past_its_budget -- --nocapture
           TINYBOX_REQUIRE_NAMESPACE_RESOURCE_TESTS=1 TINYBOX_LIVE_NAMESPACES=1 cargo test -j1 -p tinybox-linux --test live_namespaces live_pids_limit_rejects_additional_child_processes -- --nocapture
+  docker-network-live:
+    name: Docker Egress and denied network connectivity
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+      - name: Require Docker daemon and default bridge gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info --format 'Docker daemon ready: {{.ServerVersion}}'
+          gateway="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+          test -n "$gateway"
+          echo "Docker bridge gateway: $gateway"
+      - name: Prove egress, allowlist, and default-Denied connectivity
+        env:
+          TINYBOX_LIVE_DOCKER: "1"
+          TINYBOX_REQUIRE_LIVE_DOCKER: "1"
+        run: >-
+          cargo test --locked -p tinybox-docker --test live_docker
+          live_network_policy_controls_host_listener_connectivity --
+          --nocapture --test-threads=1
