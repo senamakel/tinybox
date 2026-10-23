@@ -146,8 +146,9 @@ fn spawn_invocation(
 fn spawn_command(jail: &Jail, command: &Command) -> io::Result<OwnedChild> {
     // `Command` does not expose whether env_clear() was called, so the safe
     // untyped API always starts from an empty environment and forwards only
-    // explicit env edits. Callers that need inherited values must pass them
-    // deliberately or use the typed invocation API.
+    // explicit env edits (plus the required SystemRoot platform variable).
+    // Callers that need inherited values must pass them deliberately or use
+    // the typed invocation API.
     spawn_command_with_environment(jail, command, true, None, None)
 }
 
@@ -233,6 +234,12 @@ fn spawn_captured<'a>(
         .stderr(&stderr_write);
     if clear_env {
         launch.env_clear();
+        // CreateProcess requires SystemRoot even when the caller clears the
+        // inherited environment. Keep that OS location as the minimal
+        // platform baseline; every other variable remains explicit-only.
+        if let Some(system_root) = std::env::var_os("SystemRoot") {
+            launch.env("SystemRoot", system_root);
+        }
     }
     for (name, value) in env {
         if let Some(value) = value {

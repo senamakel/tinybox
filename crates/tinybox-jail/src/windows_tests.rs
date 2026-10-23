@@ -129,7 +129,7 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
         .args([
             "/D",
             "/C",
-            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & if defined PATH (echo inherited) else (echo cleared)",
+            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & echo %SystemRoot% & if defined PATH (echo inherited) else (echo cleared)",
         ])
         .current_dir(root.path())
         .env(ALLOWED_ENV, "explicit-value");
@@ -151,7 +151,13 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
     assert!(status.success(), "unexpected child status: {status:?}");
     let lines = output.lines().map(str::trim).collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"explicit-value"));
-    assert_eq!(lines.get(1), Some(&"cleared"));
+    assert_eq!(
+        lines.get(1).map(|value| value.to_ascii_lowercase()),
+        std::env::var("SystemRoot")
+            .ok()
+            .map(|value| value.to_ascii_lowercase())
+    );
+    assert_eq!(lines.get(2), Some(&"cleared"));
     Ok(())
 }
 
