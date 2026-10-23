@@ -16,12 +16,7 @@ pub(super) fn prepare(
     command: &tinybox_core::ExecRequest,
     backend: &dyn JailBackend,
 ) -> Result<Jail> {
-    if config.network_allowlist.is_some() {
-        return Err(super::resources::failure(
-            tinybox_bus::CONSTRAINT_NOT_ENFORCED,
-            "native jail does not enforce host and port network allowlists",
-        ));
-    }
+    ensure_network_allowlist_supported(config)?;
     if !cfg!(unix) || !backend.is_available() || backend.name() == tinybox_jail::NOOP_BACKEND_NAME {
         return Err(unavailable());
     }
@@ -129,6 +124,16 @@ pub(super) fn prepare(
         }
     }
     Ok(jail)
+}
+
+fn ensure_network_allowlist_supported(config: &NativeJailConfig) -> Result<()> {
+    if config.network_allowlist.is_some() {
+        return Err(super::resources::failure(
+            tinybox_bus::CONSTRAINT_NOT_ENFORCED,
+            "native jail does not enforce host and port network allowlists",
+        ));
+    }
+    Ok(())
 }
 /// Validate and canonicalize each existing absolute grant path.
 fn grants(paths: &[String]) -> Result<Vec<std::path::PathBuf>> {

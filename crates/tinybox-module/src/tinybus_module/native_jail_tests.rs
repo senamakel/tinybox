@@ -109,8 +109,10 @@ fn native_jail_refuses_allowlists_before_backend_admission()
         full: true,
     };
 
-    let error = prepare(root.path(), &request, &command, &backend)
-        .expect_err("native jail must not collapse an allowlist to allow_net=true");
+    let error = match prepare(root.path(), &request, &command, &backend) {
+        Err(error) => error,
+        Ok(_) => return Err("native jail collapsed an allowlist to allow_net=true".into()),
+    };
     assert_eq!(error.wire_name(), tinybox_bus::CONSTRAINT_NOT_ENFORCED);
     Ok(())
 }
@@ -802,8 +804,8 @@ fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
-        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+        CreateRequest, NativeJailConfig, NativeJailResourceRequest, ProcessRef, ReserveRequest,
+        ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
     };
     use tinybus::Connection;
     use tinybus::broker::Broker;
@@ -870,15 +872,10 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         timeout_ms: 30_000,
         stdin: None,
         jail: Some(NativeJailConfig {
-            read_only: Vec::new(),
-            read_write: Vec::new(),
             allow_net: false,
-            network_allowlist: None,
             allow_subprocess: true,
-            enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
-            deny_read: Vec::new(),
-            resources: None,
+            ..config()
         }),
         hide_window: false,
     };
