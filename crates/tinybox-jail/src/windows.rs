@@ -12,6 +12,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -241,9 +242,9 @@ fn spawn_captured<'a>(
         .stdin(&stdin_read)
         .stdout(&stdout_write)
         .stderr(&stderr_write);
-    let drive = drive_letter(cwd)?;
+    let (drive, environment_cwd) = drive_current_directory(cwd)?;
     launch
-        .env_drive_current_dir(drive, cwd)
+        .env_drive_current_dir(drive, environment_cwd)
         .map_err(|error| contextual_error("set AppContainer drive current directory", &error))?;
     if clear_env {
         launch.env_clear();
@@ -285,20 +286,46 @@ fn contextual_error(context: &str, error: &io::Error) -> io::Error {
     io::Error::new(error.kind(), format!("{context}: {error}"))
 }
 
-fn drive_letter(path: &Path) -> io::Result<char> {
-    let drive = match path.components().next() {
+fn drive_current_directory(path: &Path) -> io::Result<(char, OsString)> {
+    let (drive, environment_path) = match path.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
-            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => Some(drive),
-            _ => None,
+            Prefix::Disk(drive) => (drive, path.as_os_str().to_os_string()),
+            Prefix::VerbatimDisk(drive) => {
+                // Per-drive current-directory environment entries use normal
+                // DOS paths. Passing Rust's canonical `\\?\C:\...` form as
+                // the `=C:` value makes CreateProcess reject the environment
+                // block with ERROR_ENVVAR_NOT_FOUND, even though it accepts
+                // that same path as lpCurrentDirectory.
+                let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+                let verbatim_prefix = [
+                    u16::from(b'\\'),
+                    u16::from(b'\\'),
+                    u16::from(b'?'),
+                    u16::from(b'\\'),
+                ];
+                if !wide.starts_with(&verbatim_prefix) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "AppContainer verbatim working directory has an invalid prefix",
+                    ));
+                }
+                (drive, OsString::from_wide(&wide[verbatim_prefix.len()..]))
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "AppContainer working directory must be on a drive-letter volume",
+                ));
+            }
         },
-        _ => None,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "AppContainer working directory must be on a drive-letter volume",
+            ));
+        }
     };
-    drive.map(char::from).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "AppContainer working directory must be on a drive-letter volume",
-        )
-    })
+    Ok((char::from(drive), environment_path))
 }
 
 fn job_limits(jail: &Jail, plan: Option<ResourceLimitPlan>) -> io::Result<JobLimits> {
