@@ -291,7 +291,7 @@ int main(int argc, char **argv) {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn live_seatbelt_canonicalizes_private_tmp_deny_aliases() -> std::io::Result<()> {
+fn live_seatbelt_refuses_deny_alias_inside_implicit_private_tmp_grant() -> std::io::Result<()> {
     use std::process::Command;
 
     const REQUIRE_SEATBELT_TEST: &str = "TINYBOX_REQUIRE_SEATBELT_TESTS";
@@ -400,31 +400,17 @@ int main(int argc, char **argv) {
     jail.deny_read.push(protected_via_alias);
     jail.canonicalize()?;
     assert_eq!(jail.deny_read, [protected_canonical.clone()]);
-    let denied = run_probe(&jail)?;
-    let denied_stdout = String::from_utf8_lossy(&denied.stdout);
+    let error = run_probe(&jail)
+        .expect_err("Seatbelt must reject a denial nested under its writable /private/tmp grant");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    let message = error.to_string();
     assert!(
-        denied.status.success(),
-        "denied file-read probe did not continue: status {}, stdout: {denied_stdout:?}, stderr: {:?}",
-        denied.status,
-        String::from_utf8_lossy(&denied.stderr)
+        message.contains("/private/tmp") && message.contains("writable grant"),
+        "the alias should be canonicalized before the denial is refused: {message}"
     );
-    assert!(
-        denied_stdout.contains("control-readable"),
-        "stdout: {denied_stdout:?}"
+    eprintln!(
+        "[seatbelt-live] /tmp denial alias was canonicalized and refused under writable /private/tmp"
     );
-    assert!(
-        denied_stdout.contains("alias-denied"),
-        "stdout: {denied_stdout:?}"
-    );
-    assert!(
-        !denied_stdout.contains("alias-readable"),
-        "stdout: {denied_stdout:?}"
-    );
-    assert!(
-        denied_stdout.contains("continued"),
-        "stdout: {denied_stdout:?}"
-    );
-    eprintln!("[seatbelt-live] /private tmp deny alias behavior passed");
     Ok(())
 }
 
