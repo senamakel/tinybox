@@ -16,9 +16,10 @@ use std::sync::{
 
 use async_trait::async_trait;
 use tinybox_core::{
-    BoxId, BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, Host, HostRef,
-    IsolationLevel, MemoryStore, NetworkPolicy, Placement, PortMapping, Resources, Result, Sandbox,
-    SandboxRef, SnapshotId, SnapshotSupport, Store, WorkspaceSource,
+    BoxId, BoxSpec, BoxState, Capability, Error, ExecOutput, ExecRequest, Host,
+    HostExecutionLocation, HostRef, IsolationLevel, MemoryStore, NetworkPolicy, Placement,
+    PortMapping, Resources, Result, Sandbox, SandboxRef, SnapshotId, SnapshotSupport, Store,
+    WorkspaceSource,
 };
 
 use super::{DockerSandbox, NAME, args, cleanup_timeout_error, state};
@@ -81,6 +82,48 @@ async fn allowlist_controller_prepares_before_start_and_cleans_after_destroy() -
     let commands = host.commands();
     assert_eq!(commands[2][0], "docker");
     assert_eq!(commands[3], ["controller", "cleanup"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn controller_host_forwards_host_capabilities_and_docker_commands() -> Result<()> {
+    let inner = ScriptedHost::silent();
+    let host = super::ControllerHost {
+        inner: inner.clone(),
+        controller: Arc::new(RecordingEgressController),
+    };
+
+    assert_eq!(host.name(), "scripted");
+    assert_eq!(host.execution_location(), HostExecutionLocation::Unknown);
+    assert!(!host.has_pending_observed_cleanup());
+    host.retry_observed_cleanup().await?;
+    assert!(matches!(
+        host.open_workspace_file(
+            std::path::Path::new("/workspace"),
+            std::path::Path::new("file")
+        )
+        .await,
+        Err(Error::UnsupportedHostFileTransfer { .. })
+    ));
+    assert!(matches!(
+        host.begin_workspace_file_write(
+            std::path::Path::new("/workspace"),
+            std::path::Path::new("file"),
+            "transfer",
+        )
+        .await,
+        Err(Error::UnsupportedHostFileTransfer { .. })
+    ));
+    assert!(matches!(
+        host.forward(std::net::SocketAddr::from(([127, 0, 0, 1], 1234)))
+            .await,
+        Err(Error::Unsupported { .. })
+    ));
+
+    let observer: Arc<dyn tinybox_core::ExecutionObserver> = Arc::new(CapturingObserver::default());
+    host.run_observed(&ExecRequest::new(["docker", "version"]), observer)
+        .await?;
+    assert_eq!(inner.commands()[0], ["docker", "version"]);
     Ok(())
 }
 

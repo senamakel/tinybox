@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use tinybox_core::{Error, ExecRequest, Host, Result};
+use tinybox_core::{Error, ExecRequest, Host, HostExecutionLocation, Result};
 
 use super::{LocalHost, NAME};
 
@@ -14,6 +14,14 @@ use super::{LocalHost, NAME};
 fn it_reports_its_name() {
     assert_eq!(LocalHost::new().name(), "local");
     assert_eq!(LocalHost.name(), NAME);
+}
+
+#[test]
+fn it_attests_that_it_runs_locally() {
+    assert_eq!(
+        LocalHost::new().execution_location(),
+        HostExecutionLocation::Local
+    );
 }
 
 #[tokio::test]
