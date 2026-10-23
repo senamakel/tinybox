@@ -48,6 +48,25 @@ fn appcontainer_drive_environment_uses_a_dos_path_for_verbatim_cwds() {
 }
 
 #[test]
+fn appcontainer_local_app_data_must_be_present_and_absolute() {
+    assert_eq!(
+        validate_local_app_data(None).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+    assert_eq!(
+        validate_local_app_data(Some(OsString::from(r"relative\profile")))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        validate_local_app_data(Some(OsString::from(r"C:\Users\agent\AppData\Local")))
+            .unwrap(),
+        OsString::from(r"C:\Users\agent\AppData\Local")
+    );
+}
+
+#[test]
 fn appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims() {
     use tinybox_core::{Constraint, Enforcement};
 
@@ -139,7 +158,7 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
         .args([
             "/D",
             "/C",
-            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & echo %SystemRoot% & if defined PATH (echo inherited) else (echo cleared)",
+            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & echo %SystemRoot% & echo %LOCALAPPDATA% & if defined PATH (echo inherited) else (echo cleared)",
         ])
         .current_dir(root.path())
         .env(ALLOWED_ENV, "explicit-value");
@@ -167,7 +186,13 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
             .ok()
             .map(|value| value.to_ascii_lowercase())
     );
-    assert_eq!(lines.get(2), Some(&"cleared"));
+    assert_eq!(
+        lines.get(2).map(|value| value.to_ascii_lowercase()),
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|value| value.to_ascii_lowercase())
+    );
+    assert_eq!(lines.get(3), Some(&"cleared"));
     Ok(())
 }
 
