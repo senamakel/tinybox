@@ -521,6 +521,7 @@ fn appcontainer_loopback_child_probe() {
 
 #[test]
 fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<()> {
+    use std::io::Read;
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
@@ -569,18 +570,26 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             &jail,
             &invocation,
         )?;
-        // The probe emits only marker files. Drop the captured pipes before waiting so
-        // the timeout below cannot be defeated by a child that leaves a pipe open.
-        drop(
-            child
-                .take_stdout()
-                .ok_or_else(|| io::Error::other("captured stdout missing"))?,
-        );
-        drop(
-            child
-                .take_stderr()
-                .ok_or_else(|| io::Error::other("captured stderr missing"))?,
-        );
+        let stdout = child
+            .take_stdout()
+            .ok_or_else(|| io::Error::other("captured stdout missing"))?;
+        let stderr = child
+            .take_stderr()
+            .ok_or_else(|| io::Error::other("captured stderr missing"))?;
+        let stdout_reader = std::thread::spawn(move || {
+            let mut output = String::new();
+            stdout
+                .take(64 * 1024)
+                .read_to_string(&mut output)
+                .map(|_| output)
+        });
+        let stderr_reader = std::thread::spawn(move || {
+            let mut output = String::new();
+            stderr
+                .take(64 * 1024)
+                .read_to_string(&mut output)
+                .map(|_| output)
+        });
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -589,6 +598,8 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             }
             if Instant::now() >= deadline {
                 child.terminate()?;
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "AppContainer memory probe exceeded 15 seconds",
@@ -596,15 +607,21 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             }
             std::thread::sleep(Duration::from_millis(25));
         };
+        let output = stdout_reader
+            .join()
+            .map_err(|_| io::Error::other("stdout reader thread panicked"))??;
+        let error_output = stderr_reader
+            .join()
+            .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
         if !started.exists() {
             return Err(io::Error::other(format!(
-                "AppContainer memory probe did not reach its allocation body: status={status:?}"
+                "AppContainer memory probe did not reach its allocation body: status={status:?}, stdout={output:?}, stderr={error_output:?}"
             )));
         }
         if memory_limit.is_none() {
             assert!(
                 status.success(),
-                "unlimited memory control failed: status={status:?}"
+                "unlimited memory control failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
             );
             assert!(
                 completed.exists(),
@@ -615,7 +632,7 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             assert!(!completed.exists(), "limited child touched all pages");
             assert!(
                 refused.exists() || !status.success(),
-                "memory limit did not block the over-budget allocation: status={status:?}"
+                "memory limit did not block the over-budget allocation: status={status:?}, stdout={output:?}, stderr={error_output:?}"
             );
         }
         Ok(())
