@@ -52,22 +52,66 @@ fn sanitize_profile_name_truncates_long_labels() {
     assert!(s.starts_with("openhuman."));
 }
 
-/// PR #4723 review — `AppContainerBackend::is_available()` must
-/// stay `false` until the spawn path can return a
-/// `std::process::Child`. Reporting available strands a
-/// successfully-spawned `cmd.exe` process because `spawn_in_container`
-/// currently answers `Err(Unsupported)` after `CreateProcessW`, and
-/// callers (e.g. `execute_local_jail`) drop the child on the floor.
-/// Flip back to `true` in the same commit that lands the
-/// `OwnedHandle -> Child` bridge.
 #[test]
-fn appcontainer_backend_reports_unavailable_until_child_bridge_lands() {
+fn appcontainer_backend_is_available_through_owned_process_supervision() {
     assert!(
-        !AppContainerBackend::new().is_available(),
-        "AppContainer must report unavailable while its spawn path \
-         cannot yield a waitable std::process::Child — see #4705 / \
-         PR #4723 for the orphan-spawn hazard"
+        AppContainerBackend::new().is_available(),
+        "AppContainer is available through TinyBox's owned-process API"
     );
+}
+
+#[test]
+fn appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let support = AppContainerBackend::new().constraint_support();
+    assert_eq!(
+        support.enforcement(Constraint::Cpu),
+        Enforcement::Unsupported,
+        "Windows CPU quota enforcement remains deferred"
+    );
+    assert_eq!(
+        support.enforcement(Constraint::Memory),
+        Enforcement::Enforced
+    );
+    assert_eq!(
+        support.enforcement(Constraint::Pids),
+        Enforcement::Enforced
+    );
+}
+
+#[test]
+fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> std::io::Result<()> {
+    use std::io::Read;
+    use tinybox_core::ExecRequest;
+
+    let backend = AppContainerBackend::new();
+    let root = tempfile::tempdir()?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+    let invocation = JailInvocation::new(
+        ExecRequest::new([command, "/D".into(), "/C".into(), "echo appcontainer-owned".into()])
+            .with_cwd(root.path()),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &backend,
+        &Jail::new(root.path(), "owned-child-live-test"),
+        &invocation,
+    )?;
+    let mut output = String::new();
+    child
+        .stdout_mut()
+        .ok_or_else(|| std::io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| std::io::Error::other("AppContainer child still running after stdout closed"))?;
+
+    assert!(status.success(), "unexpected child status: {status:?}");
+    assert_eq!(output.trim(), "appcontainer-owned");
+    Ok(())
 }
 
 #[test]
