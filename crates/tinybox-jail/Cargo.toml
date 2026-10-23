@@ -37,7 +37,7 @@ tinybox-linux.workspace = true
 [target.'cfg(windows)'.dependencies]
 # Safe Windows process ownership and AppContainer launch primitives. Pinned to
 # the reviewed commit so the jail can use its pre-resume Job assignment API.
-win-custody = { git = "https://github.com/115dkk/Win-Custody.rs", rev = "ac123cdaab3591b406cf78993be06158a1f4a44a" }
+win-custody = { version = "0.1.1", git = "https://github.com/115dkk/Win-Custody.rs", rev = "ac123cdaab3591b406cf78993be06158a1f4a44a" }
 
 [dev-dependencies]
 tempfile = "3"
