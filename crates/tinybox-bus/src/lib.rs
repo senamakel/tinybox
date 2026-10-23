@@ -110,7 +110,9 @@ pub fn supports_native_jail_resources(module: (u32, u32)) -> bool {
     module.0 == NATIVE_JAIL_RESOURCES_VERSION.0 && module.1 >= NATIVE_JAIL_RESOURCES_VERSION.1
 }
 
-/// Whether a module can receive native-jail network allowlist intent.
+/// Whether a module can receive native-jail network allowlist intent. Hosts
+/// must check this before sending `NativeJailConfig::network_allowlist`; older
+/// serde consumers may otherwise ignore the additive field.
 #[must_use]
 pub fn supports_native_jail_network_allowlist(module: (u32, u32)) -> bool {
     module.0 == NATIVE_JAIL_NETWORK_ALLOWLIST_VERSION.0
