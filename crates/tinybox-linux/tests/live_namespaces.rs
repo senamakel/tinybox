@@ -446,6 +446,15 @@ async fn live_a_denied_network_really_is_denied() -> Result<()> {
 #[tokio::test]
 async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()> {
     if !enabled() {
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "enable required live network test",
+                message:
+                    "TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS=1 requires TINYBOX_LIVE_NAMESPACES=1"
+                        .to_owned(),
+            });
+        }
         eprintln!(
             "SKIP live_network_policy_controls_host_loopback_connectivity: set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests"
         );
