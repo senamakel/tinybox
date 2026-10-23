@@ -222,6 +222,7 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
 
     const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
     let root = tempfile::tempdir()?;
+    let probe_marker = root.path().join("process-limit-probe-ran.txt");
     let test_executable = std::env::current_exe()?;
     let executable_directory = test_executable.parent().ok_or_else(|| {
         io::Error::new(
@@ -270,6 +271,11 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
     };
 
     assert!(status.success(), "process-limit probe failed: {status:?}");
+    assert_eq!(
+        std::fs::read(probe_marker)?,
+        b"started",
+        "the nested test harness must execute the process-limit probe"
+    );
     assert!(
         !root.path().join("child.txt").exists(),
         "the one-process Job Object limit must prevent descendant creation"
@@ -284,6 +290,8 @@ fn appcontainer_process_limit_child_probe() {
     }
 
     let root = std::env::current_dir().expect("AppContainer probe cwd should be available");
+    std::fs::write(root.join("process-limit-probe-ran.txt"), b"started")
+        .expect("AppContainer probe should mark that its test body ran");
     let command = std::env::var_os("SystemRoot")
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
