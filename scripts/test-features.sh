@@ -19,17 +19,6 @@ case "${RUNNER_OS:-$(uname -s)}" in
     pwsh -NoProfile -File scripts/test-windows-fixtures.ps1
     pwsh -NoProfile -File scripts/prepare-windows-fixtures.ps1 -PosixBin "$(cygpath -w /usr/bin)"
     export PATH="/usr/bin:$PATH"
-    if [ "${GITHUB_HEAD_REF:-}" = "tinybox-27-windows-owned-child" ]; then
-      # Temporary CI diagnostic: run each failing AppContainer test alone so
-      # its assertion is reported before the process-limit test can block.
-      test_status=0
-      for test_name in \
-        windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots \
-        windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment; do
-        cargo test --locked -p tinybox-jail "$test_name" -- --exact --nocapture --test-threads=1 || test_status=1
-      done
-      exit "$test_status"
-    fi
     ;;
 esac
 case "${RUNNER_OS:-$(uname -s)}" in
