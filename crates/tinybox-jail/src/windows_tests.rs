@@ -216,7 +216,8 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
 
 #[test]
 fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()> {
-    use std::io::Read;
+    use std::thread;
+    use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
     let root = tempfile::tempdir()?;
@@ -243,18 +244,29 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
         &Jail::new(root.path(), "owned-child-pids-test"),
         &invocation,
     )?;
-    let mut output = String::new();
-    child
-        .take_stdout()
-        .ok_or_else(|| io::Error::other("captured stdout missing"))?
-        .read_to_string(&mut output)?;
-    let status = child
-        .try_wait()?
-        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
+    // A child that escapes the process limit may inherit the captured stdout
+    // handle. Reading until EOF would then wait for that descendant forever,
+    // hiding the process-limit failure as a hung test. Observe the owned
+    // process directly and bound the wait; the Job Object is terminated on a
+    // timeout and again when `child` is dropped.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.terminate()?;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer process-limit parent did not exit within 10 seconds",
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
 
     assert!(
         status.success(),
-        "unexpected parent status: {status:?}; {output}"
+        "unexpected parent status: {status:?}"
     );
     assert!(
         !root.path().join("child.txt").exists(),
