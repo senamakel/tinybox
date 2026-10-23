@@ -202,6 +202,7 @@ impl Resources {
 
     /// Resources whose box records live on the host storage reached through
     /// `connection`.
+    #[cfg(not(test))]
     pub(super) fn with_connection(connection: tinybus::Connection) -> Self {
         Self {
             storage: super::storage::ModuleStorage::connected(connection),
