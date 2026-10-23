@@ -1601,13 +1601,8 @@ async fn wait_for_resource_descendant(
         let streams_ready = !check_streams
             || (stream_has(tinybox_bus::OutputStream::Stdout, b"stdout-ready")
                 && stream_has(tinybox_bus::OutputStream::Stderr, b"stderr-ready"));
-        if streams_ready && std::fs::metadata(pid_file).is_ok() {
-            let identity = std::fs::read_to_string(pid_file)?;
-            let mut parts = identity.split_whitespace();
-            return Ok((
-                parts.next().ok_or("missing detached PID")?.parse()?,
-                parts.next().ok_or("missing PID namespace")?.parse()?,
-            ));
+        if streams_ready && let Some(identity) = read_resource_descendant_identity(pid_file)? {
+            return Ok(identity);
         }
         if batch.state != ExecutionState::Running || tokio::time::Instant::now() >= deadline {
             return Err(
@@ -1616,6 +1611,48 @@ async fn wait_for_resource_descendant(
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resource_descendant_identity_requires_both_fields_before_it_is_ready()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let pid_file = root.path().join("descendant.identity");
+    std::fs::write(&pid_file, "")?;
+    assert_eq!(read_resource_descendant_identity(&pid_file)?, None);
+    std::fs::write(&pid_file, "1234 ")?;
+    assert_eq!(read_resource_descendant_identity(&pid_file)?, None);
+    std::fs::write(&pid_file, "1234 invalid")?;
+    assert_eq!(read_resource_descendant_identity(&pid_file)?, None);
+    std::fs::write(&pid_file, "1234 5678")?;
+    assert_eq!(
+        read_resource_descendant_identity(&pid_file)?,
+        Some((1234, 5678))
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn read_resource_descendant_identity(
+    path: &std::path::Path,
+) -> std::io::Result<Option<(i32, u64)>> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut fields = contents.split_whitespace();
+    let Some(pid) = fields.next().and_then(|field| field.parse::<i32>().ok()) else {
+        return Ok(None);
+    };
+    let Some(namespace) = fields.next().and_then(|field| field.parse::<u64>().ok()) else {
+        return Ok(None);
+    };
+    if fields.next().is_some() {
+        return Ok(None);
+    }
+    Ok(Some((pid, namespace)))
 }
 
 #[cfg(target_os = "linux")]

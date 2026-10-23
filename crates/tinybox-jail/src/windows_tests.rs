@@ -518,3 +518,170 @@ fn appcontainer_loopback_child_probe() {
     };
     std::fs::write(marker, result).expect("AppContainer probe should write its result");
 }
+
+#[test]
+fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<()> {
+    const MEMORY_LIMIT: u64 = 128 * 1024 * 1024;
+
+    if std::env::var_os("TINYBOX_REQUIRE_APPCONTAINER_RESOURCE_TESTS").as_deref()
+        != Some(std::ffi::OsStr::new("1"))
+    {
+        eprintln!("skipped: set TINYBOX_REQUIRE_APPCONTAINER_RESOURCE_TESTS=1 on Windows");
+        return Ok(());
+    }
+
+    let executable = std::env::current_exe()?;
+    let executable_arg = executable.to_string_lossy().into_owned();
+    let executable_directory = executable.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test executable has no parent directory",
+        )
+    })?;
+
+    let control_root = tempfile::tempdir()?;
+    run_appcontainer_memory_probe(
+        control_root.path(),
+        &executable_arg,
+        executable_directory,
+        None,
+    )?;
+
+    let limited_root = tempfile::tempdir()?;
+    run_appcontainer_memory_probe(
+        limited_root.path(),
+        &executable_arg,
+        executable_directory,
+        Some(MEMORY_LIMIT),
+    )?;
+    Ok(())
+}
+
+fn run_appcontainer_memory_probe(
+    root: &Path,
+    executable_arg: &str,
+    executable_directory: &Path,
+    memory_limit: Option<u64>,
+) -> io::Result<()> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    let started = root.join("memory-probe-started.txt");
+    let completed = root.join("memory-probe-completed.txt");
+    let refused = root.join("memory-probe-refused.txt");
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable_arg,
+            "--exact",
+            "windows::tests::appcontainer_memory_limit_child_probe",
+            "--nocapture",
+        ])
+        .with_cwd(root)
+        .with_env("TINYBOX_APPCONTAINER_MEMORY_PROBE", "1"),
+        true,
+        memory_limit.map(|memory_bytes| ResourceLimitPlan {
+            memory_bytes: Some(memory_bytes),
+            ..ResourceLimitPlan::default()
+        }),
+    );
+    let jail = Jail::new(root, "appcontainer-memory-live-test")
+        .add_read_only(executable_directory)
+        .deny_net();
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let stdout = child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?;
+    let stderr = child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stdout
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stderr
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.terminate()?;
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer memory probe exceeded 15 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = stdout_reader
+        .join()
+        .map_err(|_| io::Error::other("stdout reader thread panicked"))??;
+    let error_output = stderr_reader
+        .join()
+        .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
+    if !started.exists() {
+        return Err(io::Error::other(format!(
+            "AppContainer memory probe did not reach its allocation body: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+        )));
+    }
+    if memory_limit.is_none() {
+        assert!(
+            status.success(),
+            "unlimited memory control failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+        );
+        assert!(
+            completed.exists(),
+            "unlimited control did not touch all pages"
+        );
+        assert!(!refused.exists(), "unlimited control refused allocation");
+    } else {
+        assert!(!completed.exists(), "limited child touched all pages");
+        assert!(
+            refused.exists() || !status.success(),
+            "memory limit did not block the over-budget allocation: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn appcontainer_memory_limit_child_probe() -> io::Result<()> {
+    const CHUNK_BYTES: usize = 16 * 1024 * 1024;
+    const CHUNKS: usize = 16;
+
+    if std::env::var_os("TINYBOX_APPCONTAINER_MEMORY_PROBE").is_none() {
+        return Ok(());
+    }
+
+    let root = std::env::current_dir()?;
+    std::fs::write(root.join("memory-probe-started.txt"), b"started")?;
+    let mut allocations = Vec::new();
+    for _ in 0..CHUNKS {
+        let mut chunk = Vec::new();
+        if chunk.try_reserve_exact(CHUNK_BYTES).is_err() {
+            std::fs::write(root.join("memory-probe-refused.txt"), b"refused")?;
+            return Ok(());
+        }
+        chunk.resize(CHUNK_BYTES, 0xA5);
+        allocations.push(chunk);
+    }
+    std::fs::write(root.join("memory-probe-completed.txt"), b"allocated")?;
+    Ok(())
+}
