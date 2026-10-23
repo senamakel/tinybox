@@ -472,9 +472,19 @@ fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
         .take_stderr()
         .ok_or_else(|| io::Error::other("captured stderr missing"))?
         .read_to_string(&mut error_output)?;
-    let status = child
-        .try_wait()?
-        .ok_or_else(|| io::Error::other("AppContainer network probe still running"))?;
+    let child_deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= child_deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer network probe did not exit within 10 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
     assert!(
         status.success(),
         "AppContainer probe failed: status {status:?}, stdout {output:?}, stderr {error_output:?}"
