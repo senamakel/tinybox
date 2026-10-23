@@ -227,9 +227,13 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
                 format!("invalid child PID: {error}"),
             )
         })?;
-    let descendant = Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize).map_err(|error| {
-        io::Error::new(error.kind(), format!("open descendant process {pid}: {error}"))
-    })?;
+    let descendant =
+        Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("open descendant process {pid}: {error}"),
+            )
+        })?;
     assert_eq!(
         descendant
             .exit_code()
@@ -245,14 +249,22 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
     assert_eq!(
         descendant
             .wait(Some(Duration::from_secs(5)))
-            .map_err(|error| io::Error::new(error.kind(), format!("wait for descendant: {error}")))?,
+            .map_err(|error| io::Error::new(
+                error.kind(),
+                format!("wait for descendant: {error}")
+            ))?,
         WaitOutcome::Signaled,
         "terminating an owned child must also stop its surviving Job descendants"
     );
-    assert!(descendant
-        .exit_code()
-        .map_err(|error| io::Error::new(error.kind(), format!("query terminated descendant: {error}")))?
-        .is_some());
+    assert!(
+        descendant
+            .exit_code()
+            .map_err(|error| io::Error::new(
+                error.kind(),
+                format!("query terminated descendant: {error}")
+            ))?
+            .is_some()
+    );
     Ok(())
 }
 
