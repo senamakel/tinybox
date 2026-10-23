@@ -7,6 +7,7 @@ fn jail() -> NativeJailConfig {
         read_only: Vec::new(),
         read_write: Vec::new(),
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: false,
         enforcement: crate::JailEnforcement::Enforced,
         require_process_isolation: true,

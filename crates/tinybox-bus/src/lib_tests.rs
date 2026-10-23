@@ -443,6 +443,7 @@ fn resource_aware_native_shell_contract_preserves_module_owned_shell_fields()
             read_only: vec!["/usr".into()],
             read_write: vec!["/workspace/project".into()],
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: false,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,

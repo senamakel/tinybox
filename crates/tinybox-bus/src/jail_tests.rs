@@ -88,6 +88,7 @@ fn native_jail_21_resource_subset_is_additive_and_keeps_disk_explicit()
         read_only: vec![],
         read_write: vec![],
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: true,
         enforcement: JailEnforcement::Enforced,
         require_process_isolation: true,
