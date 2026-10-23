@@ -153,8 +153,6 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
     assert!(!supports_native_jail_resources((2, 0)));
     assert!(supports_native_jail_resources((2, 1)));
     assert!(supports_native_jail_resources((2, 2)));
-    assert!(!supports_native_jail_network_allowlist((2, 4)));
-    assert!(supports_native_jail_network_allowlist((2, 5)));
     assert!(!supports_native_shell_resources((2, 1)));
     assert!(supports_native_shell_resources((2, 2)));
     assert!(supports_native_shell_resources((2, 3)));

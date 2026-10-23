@@ -58,7 +58,7 @@ The interface is `ai.tinyhumans.tinybox.Box` at
 | KillStdio | ProcessRef | () |
 | StdioStatus | ProcessRef | StdioStatus |
 
-Capabilities advertises contract version 2.4. Hosts require equal majors and a
+Capabilities advertises contract version 2.5. Hosts require equal majors and a
 module minor at least as new as their vocabulary, using
 `tinybox_bus::is_compatible`. Contract 1.0 was the original discovery-only
 surface; 1.1 added reserved resource/process ownership and terminal shutdown;
