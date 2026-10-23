@@ -287,31 +287,17 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
     })?;
-    let local_app_data = root.join("LocalAppData");
-    let temp_directory = local_app_data.join("Temp");
-    std::fs::create_dir_all(&temp_directory)?;
+    let script = root.join("descendant-wait.vbs");
+    std::fs::write(&script, "WScript.Sleep 300000\r\n")?;
     // Windows denies launching the test executable from inside the
-    // AppContainer. Use a system utility that remains alive without reading
-    // the inherited stdin pipe, then record its PID before this parent exits.
-    let powershell = std::env::var_os("SystemRoot")
+    // AppContainer. Use the script host with a bounded wait script stored
+    // under the granted cwd; this does not read stdin or use host temp paths.
+    let cscript = std::env::var_os("SystemRoot")
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe");
-    let mut descendant = Command::new(powershell)
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Start-Sleep -Seconds 300",
-        ])
-        .env("LOCALAPPDATA", &local_app_data)
-        .env("APPDATA", &root)
-        .env("USERPROFILE", &root)
-        .env("TEMP", &temp_directory)
-        .env("TMP", &temp_directory)
+        .join("cscript.exe");
+    let mut descendant = Command::new(cscript)
+        .args(["//nologo", script.to_string_lossy().as_ref()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
@@ -319,7 +305,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("spawn PowerShell descendant probe: {error}"),
+                format!("spawn cscript descendant probe: {error}"),
             )
         })?;
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -328,7 +314,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
             let stderr = std::fs::read_to_string(root.join("descendant.stderr"))?;
             return Err(io::Error::other(format!(
-                "PowerShell descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
+                "cscript descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
             )));
         }
         if Instant::now() >= deadline {
