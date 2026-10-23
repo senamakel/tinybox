@@ -120,6 +120,7 @@ jobs:
             windows::tests::appcontainer_owned_launch_captures_output_from_a_confined_child
             windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
             windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
+            windows::tests::appcontainer_child_cannot_connect_to_host_loopback
           )
           for test in "${tests[@]}"; do
             cargo test --locked -p tinybox-jail --lib "$test" -- --exact --nocapture --test-threads=1
