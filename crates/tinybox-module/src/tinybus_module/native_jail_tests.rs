@@ -109,9 +109,8 @@ fn native_jail_refuses_allowlists_before_backend_admission()
         full: true,
     };
 
-    let error = match prepare(root.path(), &request, &command, &backend) {
-        Err(error) => error,
-        Ok(_) => return Err("native jail collapsed an allowlist to allow_net=true".into()),
+    let Err(error) = prepare(root.path(), &request, &command, &backend) else {
+        return Err("native jail collapsed an allowlist to allow_net=true".into());
     };
     assert_eq!(error.wire_name(), tinybox_bus::CONSTRAINT_NOT_ENFORCED);
     Ok(())
