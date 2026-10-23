@@ -25,10 +25,7 @@ fn appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits() {
         support.enforcement(Constraint::Memory),
         Enforcement::Enforced
     );
-    assert_eq!(
-        support.enforcement(Constraint::Pids),
-        Enforcement::Enforced
-    );
+    assert_eq!(support.enforcement(Constraint::Pids), Enforcement::Enforced);
 }
 
 #[test]
@@ -121,7 +118,10 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
         .try_wait()?
         .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
 
-    assert!(status.success(), "unexpected parent status: {status:?}; {output}");
+    assert!(
+        status.success(),
+        "unexpected parent status: {status:?}; {output}"
+    );
     assert!(
         !root.path().join("child.txt").exists(),
         "the one-process Job Object limit must prevent descendant creation"

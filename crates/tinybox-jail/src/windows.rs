@@ -139,7 +139,10 @@ fn spawn_invocation(jail: &Jail, invocation: &JailInvocation) -> io::Result<Owne
         jail,
         Path::new(program),
         args,
-        request.env.iter().map(|(name, value)| (name.as_str(), value.as_str())),
+        request
+            .env
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
         invocation.clear_env,
         cwd,
         invocation.resources,
@@ -218,9 +221,16 @@ fn job_limits(jail: &Jail, plan: Option<ResourceLimitPlan>) -> io::Result<JobLim
     let (memory, pids) = if let Some(resources) = plan {
         (
             resources.memory_bytes,
-            resources.pids_max.map(u32::try_from).transpose().map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "process limit exceeds Windows range")
-            })?,
+            resources
+                .pids_max
+                .map(u32::try_from)
+                .transpose()
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "process limit exceeds Windows range",
+                    )
+                })?,
         )
     } else if let Some(resources) = jail.resources {
         (Some(resources.memory_bytes), Some(resources.pids_max))
@@ -229,10 +239,19 @@ fn job_limits(jail: &Jail, plan: Option<ResourceLimitPlan>) -> io::Result<JobLim
     };
     if let Some(memory) = memory {
         limits = limits.job_memory(usize::try_from(memory).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "memory limit exceeds Windows range")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "memory limit exceeds Windows range",
+            )
         })?);
     }
-    let active_processes = pids.map(|limit| if jail.allow_subprocess { limit } else { limit.min(1) });
+    let active_processes = pids.map(|limit| {
+        if jail.allow_subprocess {
+            limit
+        } else {
+            limit.min(1)
+        }
+    });
     let active_processes = if jail.allow_subprocess {
         active_processes
     } else {
