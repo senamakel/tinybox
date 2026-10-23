@@ -264,10 +264,7 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
         thread::sleep(Duration::from_millis(25));
     };
 
-    assert!(
-        status.success(),
-        "unexpected parent status: {status:?}"
-    );
+    assert!(status.success(), "unexpected parent status: {status:?}");
     assert!(
         !root.path().join("child.txt").exists(),
         "the one-process Job Object limit must prevent descendant creation"
