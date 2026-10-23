@@ -129,6 +129,7 @@ async fn native_shell_jail_adds_owned_scratch_and_refuses_unsupported_constraint
         read_only: vec![],
         read_write: vec![],
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: false,
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: false,

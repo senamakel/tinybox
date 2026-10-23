@@ -226,6 +226,7 @@ async fn new_module_operations_dispatch_and_preserve_validation_errors() -> tiny
                 read_only: Vec::new(),
                 read_write: Vec::new(),
                 allow_net: false,
+                network_allowlist: None,
                 allow_subprocess: false,
                 enforcement: tinybox_bus::JailEnforcement::Declared,
                 require_process_isolation: false,
@@ -299,16 +300,16 @@ fn plan_check_member_is_bound_to_the_registered_methods_and_current_contract() {
             .any(|member| member.to_string() == tinybox_bus::names::PLAN_CHECK)
     );
     assert!(tinybox_bus::METHODS.contains(&tinybox_bus::names::PLAN_CHECK));
-    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 4));
+    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 5));
     let capabilities = capabilities_for(Platform::Linux);
-    assert_eq!(capabilities.contract_version, (2, 4));
+    assert_eq!(capabilities.contract_version, (2, 5));
 }
 
 #[test]
 fn process_event_signal_is_declared_in_the_current_contract() {
     assert_eq!(tinybox_bus::SIGNALS, &[tinybox_bus::names::PROCESS_EVENT]);
     assert_eq!(tinybox_bus::names::PROCESS_EVENT, "ProcessEvent");
-    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 4));
+    assert_eq!(tinybox_bus::CONTRACT_VERSION, (2, 5));
 }
 
 #[test]
@@ -1613,6 +1614,7 @@ async fn stdio_members_refuse_unknown_handles_without_starting_anything() -> tin
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: false,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,

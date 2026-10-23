@@ -87,10 +87,15 @@ pub use files::{
 /// shell member that retains module-owned shell selection, environment and
 /// scratch setup. 2.3 adds `PlanCheck`, a typed per-backend constraint
 /// enforcement preflight. 2.4 adds process-scoped sandbox lifecycle events.
-pub const CONTRACT_VERSION: (u32, u32) = (2, 4);
+/// 2.5 adds optional network allowlist intent to native jail requests; native
+/// backends that do not enforce host and port filtering refuse it.
+pub const CONTRACT_VERSION: (u32, u32) = (2, 5);
 
 /// Minimum contract version required for resource-aware native jail members.
 pub const NATIVE_JAIL_RESOURCES_VERSION: (u32, u32) = (2, 1);
+
+/// Minimum contract version required for native-jail allowlist intent.
+pub const NATIVE_JAIL_NETWORK_ALLOWLIST_VERSION: (u32, u32) = (2, 5);
 
 /// Minimum contract version required for resource-aware native shell execution.
 pub const NATIVE_SHELL_RESOURCES_VERSION: (u32, u32) = (2, 2);
@@ -103,6 +108,15 @@ pub const PLAN_CHECK_VERSION: (u32, u32) = (2, 3);
 #[must_use]
 pub fn supports_native_jail_resources(module: (u32, u32)) -> bool {
     module.0 == NATIVE_JAIL_RESOURCES_VERSION.0 && module.1 >= NATIVE_JAIL_RESOURCES_VERSION.1
+}
+
+/// Whether a module can receive native-jail network allowlist intent. Hosts
+/// must check this before sending `NativeJailConfig::network_allowlist`; older
+/// serde consumers may otherwise ignore the additive field.
+#[must_use]
+pub fn supports_native_jail_network_allowlist(module: (u32, u32)) -> bool {
+    module.0 == NATIVE_JAIL_NETWORK_ALLOWLIST_VERSION.0
+        && module.1 >= NATIVE_JAIL_NETWORK_ALLOWLIST_VERSION.1
 }
 
 /// Whether a module advertises the resource-aware native shell member.
@@ -398,6 +412,8 @@ pub const UNKNOWN_PROCESS: &str = "ai.tinyhumans.tinybox.Error.UnknownProcess";
 pub const UNSUPPORTED_BACKEND: &str = "ai.tinyhumans.tinybox.Error.UnsupportedBackend";
 /// Stable error name for an operation without acknowledged native ownership.
 pub const UNSUPPORTED_OPERATION: &str = "ai.tinyhumans.tinybox.Error.UnsupportedOperation";
+/// Stable error name when a requested sandbox constraint is not enforced.
+pub const CONSTRAINT_NOT_ENFORCED: &str = "ai.tinyhumans.tinybox.Error.ConstraintNotEnforced";
 /// Stable error name for an identifier already reserved by this module instance.
 pub const DUPLICATE_ID: &str = "ai.tinyhumans.tinybox.Error.DuplicateId";
 /// Stable error name for an empty reservation identifier.

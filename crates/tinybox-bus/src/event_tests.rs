@@ -46,7 +46,7 @@ fn process_event_signal_has_correlated_process_and_event_fields() -> Result<(), 
     );
     assert_eq!(names::PROCESS_EVENT, "ProcessEvent");
     assert_eq!(SIGNALS, &[names::PROCESS_EVENT]);
-    assert_eq!(CONTRACT_VERSION, (2, 4));
+    assert_eq!(CONTRACT_VERSION, (2, 5));
     Ok(())
 }
 

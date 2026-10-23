@@ -68,12 +68,27 @@ fn native_resource_limits_are_optional_typed_and_round_trip() -> Result<(), serd
 }
 
 #[test]
+fn native_jail_preserves_network_allowlist_intent() -> Result<(), serde_json::Error> {
+    let request = serde_json::json!({
+        "read_only": [], "read_write": [], "allow_net": true,
+        "allow_subprocess": true, "enforcement": "enforced",
+        "require_process_isolation": true,
+        "network_allowlist": {"hosts": ["api.example.test"], "ports": [443]},
+    });
+
+    let config: NativeJailConfig = serde_json::from_value(request.clone())?;
+    assert_eq!(serde_json::to_value(config)?, request);
+    Ok(())
+}
+
+#[test]
 fn native_jail_21_resource_subset_is_additive_and_keeps_disk_explicit()
 -> Result<(), serde_json::Error> {
     let jail = NativeJailConfig {
         read_only: vec![],
         read_write: vec![],
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: true,
         enforcement: JailEnforcement::Enforced,
         require_process_isolation: true,

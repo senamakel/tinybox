@@ -81,12 +81,39 @@ fn config() -> NativeJailConfig {
         read_only: vec![],
         read_write: vec![],
         allow_net: false,
+        network_allowlist: None,
         allow_subprocess: false,
         enforcement: JailEnforcement::Enforced,
         require_process_isolation: false,
         deny_read: Vec::new(),
         resources: None,
     }
+}
+
+#[test]
+fn native_jail_refuses_allowlists_before_backend_admission()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let mut command = tinybox_core::ExecRequest::new(["irrelevant"]);
+    command.cwd = Some(root.path().into());
+    let mut request = config();
+    request.allow_net = true;
+    request.network_allowlist = Some(tinybox_bus::EgressAllowlist {
+        hosts: vec!["api.example.test".into()],
+        ports: vec![443],
+    });
+    let backend = Backend {
+        available: true,
+        suitable: true,
+        name: "fixture",
+        full: true,
+    };
+
+    let Err(error) = prepare(root.path(), &request, &command, &backend) else {
+        return Err("native jail collapsed an allowlist to allow_net=true".into());
+    };
+    assert_eq!(error.wire_name(), tinybox_bus::CONSTRAINT_NOT_ENFORCED);
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -776,8 +803,8 @@ fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
-        CreateRequest, JailEnforcement, NativeJailConfig, NativeJailResourceRequest, ProcessRef,
-        ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
+        CreateRequest, NativeJailConfig, NativeJailResourceRequest, ProcessRef, ReserveRequest,
+        ResourceId, SelectShellRequest, ShellExecRequest, Workspace,
     };
     use tinybus::Connection;
     use tinybus::broker::Broker;
@@ -844,14 +871,10 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
         timeout_ms: 30_000,
         stdin: None,
         jail: Some(NativeJailConfig {
-            read_only: Vec::new(),
-            read_write: Vec::new(),
             allow_net: false,
             allow_subprocess: true,
-            enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
-            deny_read: Vec::new(),
-            resources: None,
+            ..config()
         }),
         hide_window: false,
     };
@@ -1090,6 +1113,7 @@ fn cpu_limit_shell_request(
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: true,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,
@@ -1126,6 +1150,7 @@ fn pids_limit_shell_request(
             read_only: Vec::new(),
             read_write: Vec::new(),
             allow_net: false,
+            network_allowlist: None,
             allow_subprocess: true,
             enforcement: JailEnforcement::Enforced,
             require_process_isolation: true,

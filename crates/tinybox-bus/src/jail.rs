@@ -21,6 +21,11 @@ pub struct NativeJailConfig {
     pub read_write: Vec<String>,
     /// Whether outgoing network access is permitted.
     pub allow_net: bool,
+    /// Optional hostname and port allowlist intent. Native jail backends
+    /// currently refuse this field because they only enforce all-or-nothing
+    /// networking. Added in contract 2.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_allowlist: Option<crate::EgressAllowlist>,
     /// Whether child processes are permitted.
     pub allow_subprocess: bool,
     /// Required constraint enforcement, with no implicit weaker fallback.

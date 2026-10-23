@@ -66,6 +66,7 @@ fn jail_config() -> tinybox_bus::NativeJailConfig {
         read_only: Vec::new(),
         read_write: Vec::new(),
         allow_net: true,
+        network_allowlist: None,
         allow_subprocess: true,
         enforcement: tinybox_bus::JailEnforcement::Enforced,
         require_process_isolation: true,
