@@ -1721,7 +1721,7 @@ fn preflight_reports_each_enforced_boundary_without_claiming_disk() {
 
 #[tokio::test]
 async fn an_unenforceable_network_allowlist_is_refused_at_creation() -> Result<()> {
-    let (sandbox, _host, _store) = sandbox();
+    let (sandbox, host, _store) = sandbox();
     let policy = tinybox_core::NetworkPolicy::Allowlist(tinybox_core::EgressAllowlist::new(
         ["example.com"],
         [443],
@@ -1735,5 +1735,9 @@ async fn an_unenforceable_network_allowlist_is_refused_at_creation() -> Result<(
             ..
         })
     ));
+    assert!(
+        host.commands().is_empty(),
+        "unsupported allowlists must be refused before invoking Docker"
+    );
     Ok(())
 }
