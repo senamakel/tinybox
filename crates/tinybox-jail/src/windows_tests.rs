@@ -59,9 +59,19 @@ fn appcontainer_local_app_data_must_be_present_and_absolute() {
             .kind(),
         io::ErrorKind::InvalidInput
     );
+    let nul_path = OsString::from_wide(&[
+        u16::from(b'C'),
+        u16::from(b':'),
+        u16::from(b'\\'),
+        u16::from(b'x'),
+        0,
+    ]);
     assert_eq!(
-        validate_local_app_data(Some(OsString::from(r"C:\Users\agent\AppData\Local")))
-            .unwrap(),
+        validate_local_app_data(Some(nul_path)).unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        validate_local_app_data(Some(OsString::from(r"C:\Users\agent\AppData\Local"))).unwrap(),
         OsString::from(r"C:\Users\agent\AppData\Local")
     );
 }

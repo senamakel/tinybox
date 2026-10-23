@@ -196,6 +196,7 @@ fn spawn_captured<'a>(
     cwd: &Path,
     resources: Option<ResourceLimitPlan>,
 ) -> io::Result<OwnedChild> {
+    let local_app_data = validate_local_app_data(std::env::var_os("LOCALAPPDATA"))?;
     let profile_name = unique_profile_name();
     let profile = AppContainerProfile::create_or_open_with_capabilities(
         &profile_name,
@@ -262,6 +263,10 @@ fn spawn_captured<'a>(
             launch.env_remove(name);
         }
     }
+    // CreateProcess needs this host-profile location when starting an
+    // AppContainer child. It is a launcher invariant and must not be
+    // replaced by an explicit command environment edit.
+    launch.env("LOCALAPPDATA", local_app_data);
     let suspended = launch
         .spawn_suspended()
         .map_err(|error| {
@@ -293,6 +298,23 @@ fn spawn_captured<'a>(
 
 fn contextual_error(context: &str, error: &io::Error) -> io::Error {
     io::Error::new(error.kind(), format!("{context}: {error}"))
+}
+
+fn validate_local_app_data(value: Option<OsString>) -> io::Result<OsString> {
+    let value = value.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "AppContainer launch requires LOCALAPPDATA from the host environment",
+        )
+    })?;
+    let path = Path::new(&value);
+    if !path.is_absolute() || value.encode_wide().any(|unit| unit == 0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "AppContainer LOCALAPPDATA must be an absolute path without NUL",
+        ));
+    }
+    Ok(value)
 }
 
 fn drive_current_directory(path: &Path) -> io::Result<(char, OsString)> {
