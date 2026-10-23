@@ -38,6 +38,31 @@ fn appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants() {
 }
 
 #[test]
+fn appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let root = tempfile::tempdir().unwrap();
+    let limits = job_limits(
+        &Jail::new(root.path(), "job-limit-map"),
+        Some(ResourceLimitPlan {
+            memory_bytes: Some(128 * 1024 * 1024),
+            pids_max: Some(3),
+            ..ResourceLimitPlan::default()
+        }),
+    )
+    .unwrap();
+    assert!(limits.kills_on_close());
+    assert_eq!(limits.job_memory_limit(), Some(128 * 1024 * 1024));
+    assert_eq!(limits.active_process_limit(), Some(3));
+    assert_eq!(
+        AppContainerBackend::new()
+            .constraint_support()
+            .enforcement(Constraint::Cpu),
+        Enforcement::Unsupported
+    );
+}
+
+#[test]
 fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Result<()> {
     use std::io::Read;
     use tinybox_core::ExecRequest;
@@ -135,5 +160,58 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
         !root.path().join("child.txt").exists(),
         "the one-process Job Object limit must prevent descendant creation"
     );
+    Ok(())
+}
+
+#[test]
+fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()> {
+    use std::io::Read;
+    use tinybox_core::ExecRequest;
+
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let secret = outside.path().join("secret.txt");
+    let escaped = outside.path().join("escaped.txt");
+    let copied = root.path().join("copied.txt");
+    std::fs::write(&secret, b"outside-secret")?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+        .to_string_lossy()
+        .into_owned();
+    let script = format!(
+        "type \"{}\" > \"{}\" 2>NUL & echo escaped > \"{}\"",
+        secret.display(),
+        copied.display(),
+        escaped.display()
+    );
+    let invocation = JailInvocation::new(
+        ExecRequest::new([command.as_str(), "/D", "/C", script.as_str()]).with_cwd(root.path()),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &Jail::new(root.path(), "owned-child-denial-test").deny_net(),
+        &invocation,
+    )?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let _ = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
+
+    assert!(
+        !escaped.exists(),
+        "write outside the grant should be denied"
+    );
+    assert_eq!(
+        std::fs::read(&copied)?,
+        [],
+        "reading an outside file should be denied"
+    );
+    assert!(!output.contains("outside-secret"));
     Ok(())
 }
