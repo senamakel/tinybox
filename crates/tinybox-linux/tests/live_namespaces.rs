@@ -458,9 +458,7 @@ async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()>
         SandboxAvailability::Unavailable { reason }
             if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS").is_none() =>
         {
-            eprintln!(
-                "SKIP live_network_policy_controls_host_loopback_connectivity: {reason}"
-            );
+            eprintln!("SKIP live_network_policy_controls_host_loopback_connectivity: {reason}");
             return Ok(());
         }
         SandboxAvailability::Unavailable { reason } => {
