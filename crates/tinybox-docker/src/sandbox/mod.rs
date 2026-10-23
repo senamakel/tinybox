@@ -2,6 +2,8 @@
 
 use std::{
     collections::HashMap,
+    net::SocketAddr,
+    path::Path,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -12,9 +14,12 @@ use std::{
 use async_trait::async_trait;
 use tinybox_core::{
     BoxId, BoxInfo, BoxSpec, BoxState, Capability, Clock, Error, ExecOutput, ExecRequest,
-    ExecutionObserver, Host, IsolationLevel, OutputStream, PortMapping, ProcessId, Result, Sandbox,
-    SandboxCapabilities, SnapshotId, SnapshotSupport, Store, SystemClock, detach,
+    ExecutionObserver, Forward, Host, HostExecutionLocation, IsolationLevel, NetworkPolicy,
+    OutputStream, PortMapping, ProcessId, Result, Sandbox, SandboxCapabilities, SnapshotId,
+    SnapshotSupport, Store, SystemClock, WorkspaceFileReader, WorkspaceFileWriter, detach,
 };
+
+use crate::{DockerEgressController, PreparedEgressNetwork};
 
 mod args;
 mod observed;
@@ -46,11 +51,88 @@ pub const NAME: &str = "docker";
 pub struct DockerSandbox {
     host: Arc<dyn Host>,
     store: Arc<dyn Store>,
+    egress_controller: Option<Arc<dyn DockerEgressController>>,
     clock: Arc<dyn Clock>,
     namespace: String,
     failed_create_attempts: Arc<std::sync::Mutex<HashMap<BoxId, String>>>,
     pending_observed_cleanup: Arc<Mutex<HashMap<String, CleanupHandle>>>,
     observed_boxes: Arc<Mutex<HashMap<BoxId, ObservedBoxState>>>,
+}
+
+#[derive(Debug)]
+struct ControllerHost {
+    inner: Arc<dyn Host>,
+    controller: Arc<dyn DockerEgressController>,
+}
+
+impl ControllerHost {
+    fn request(&self, request: &ExecRequest) -> ExecRequest {
+        let mut request = request.clone();
+        if request
+            .argv
+            .first()
+            .is_some_and(|program| program == "docker")
+        {
+            request.argv = self.controller.docker_argv(request.argv);
+        }
+        request
+    }
+}
+
+#[async_trait]
+impl Host for ControllerHost {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn execution_location(&self) -> HostExecutionLocation {
+        self.inner.execution_location()
+    }
+
+    async fn run(&self, request: &ExecRequest) -> Result<ExecOutput> {
+        self.inner.run(&self.request(request)).await
+    }
+
+    async fn run_observed(
+        &self,
+        request: &ExecRequest,
+        observer: Arc<dyn ExecutionObserver>,
+    ) -> Result<ExecOutput> {
+        self.inner
+            .run_observed(&self.request(request), observer)
+            .await
+    }
+
+    fn has_pending_observed_cleanup(&self) -> bool {
+        self.inner.has_pending_observed_cleanup()
+    }
+
+    async fn retry_observed_cleanup(&self) -> Result<()> {
+        self.inner.retry_observed_cleanup().await
+    }
+
+    async fn open_workspace_file(
+        &self,
+        root: &Path,
+        relative: &Path,
+    ) -> Result<Box<dyn WorkspaceFileReader>> {
+        self.inner.open_workspace_file(root, relative).await
+    }
+
+    async fn begin_workspace_file_write(
+        &self,
+        root: &Path,
+        relative: &Path,
+        transfer_id: &str,
+    ) -> Result<Box<dyn WorkspaceFileWriter>> {
+        self.inner
+            .begin_workspace_file_write(root, relative, transfer_id)
+            .await
+    }
+
+    async fn forward(&self, remote: SocketAddr) -> Result<Forward> {
+        self.inner.forward(remote).await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +235,7 @@ impl DockerSandbox {
         Self {
             host,
             store,
+            egress_controller: None,
             clock: Arc::new(SystemClock::new()),
             namespace: DEFAULT_NAMESPACE.to_owned(),
             failed_create_attempts: Arc::default(),
@@ -195,6 +278,7 @@ impl DockerSandbox {
         Ok(Self {
             host,
             store,
+            egress_controller: None,
             clock: Arc::new(SystemClock::new()),
             namespace,
             failed_create_attempts: Arc::default(),
@@ -218,11 +302,74 @@ impl DockerSandbox {
         Self {
             host,
             store: self.store.clone(),
+            egress_controller: self.egress_controller.clone(),
             clock: self.clock.clone(),
             namespace: self.namespace.clone(),
             failed_create_attempts: self.failed_create_attempts.clone(),
             pending_observed_cleanup: Arc::default(),
             observed_boxes: self.observed_boxes.clone(),
+        }
+    }
+
+    /// Install an explicit egress controller for allowlist policies.
+    ///
+    /// The default sandbox refuses allowlists. The controller must validate
+    /// its host and fully prepare filtering before a workload starts.
+    #[must_use]
+    pub fn with_egress_controller(mut self, controller: Arc<dyn DockerEgressController>) -> Self {
+        self.egress_controller = Some(controller);
+        self
+    }
+
+    fn operation_host(&self) -> Arc<dyn Host> {
+        self.egress_controller.as_ref().map_or_else(
+            || self.host.clone(),
+            |controller| {
+                Arc::new(ControllerHost {
+                    inner: self.host.clone(),
+                    controller: controller.clone(),
+                }) as Arc<dyn Host>
+            },
+        )
+    }
+
+    async fn validate_network_policy(&self, spec: &BoxSpec) -> Result<()> {
+        if matches!(spec.network, NetworkPolicy::Allowlist(_)) {
+            let controller = self
+                .egress_controller
+                .as_ref()
+                .ok_or_else(|| unsupported_egress_policy())?;
+            controller.validate_host(self.host.as_ref()).await
+        } else {
+            spec.network.refuse_allowlist(self.name())
+        }
+    }
+
+    async fn prepare_egress_network(
+        &self,
+        spec: &BoxSpec,
+        id: &BoxId,
+    ) -> Result<Option<PreparedEgressNetwork>> {
+        let NetworkPolicy::Allowlist(allowlist) = &spec.network else {
+            return Ok(None);
+        };
+        let controller = self
+            .egress_controller
+            .as_ref()
+            .ok_or_else(|| unsupported_egress_policy())?;
+        controller
+            .prepare(self.host.as_ref(), &self.namespace, id, allowlist)
+            .await
+            .map(Some)
+    }
+
+    async fn cleanup_egress(&self, id: &BoxId) -> Result<()> {
+        if let Some(controller) = &self.egress_controller {
+            controller
+                .cleanup(self.host.as_ref(), &self.namespace, id)
+                .await
+        } else {
+            Err(unsupported_egress_policy())
         }
     }
 
@@ -263,7 +410,7 @@ impl DockerSandbox {
     /// completed a create before its response was lost, so callers reconcile
     /// that case by checking the created container's ownership label.
     async fn docker(&self, operation: &'static str, argv: Vec<String>) -> Result<String> {
-        let output = self.host.run(&ExecRequest::new(argv)).await?;
+        let output = self.operation_host().run(&ExecRequest::new(argv)).await?;
         if !output.succeeded() {
             return Err(Error::Backend {
                 sandbox: NAME.to_owned(),
@@ -277,7 +424,7 @@ impl DockerSandbox {
     /// Remove a named container, treating Docker's explicit missing-container
     /// response as an already-completed cleanup.
     async fn remove_container(&self, argv: Vec<String>) -> Result<()> {
-        let output = self.host.run(&ExecRequest::new(argv)).await?;
+        let output = self.operation_host().run(&ExecRequest::new(argv)).await?;
         if output.succeeded() || output.stderr_lossy().contains("No such container") {
             return Ok(());
         }
@@ -348,7 +495,7 @@ impl DockerSandbox {
     }
 
     async fn reserve_observed_execution(&self, handle: &CleanupHandle) -> Result<()> {
-        match reserve_remote(self.host.clone(), &self.namespace, handle).await {
+        match reserve_remote(self.operation_host(), &self.namespace, handle).await {
             Ok(()) => Ok(()),
             Err(reserve_error) => {
                 self.cleanup_or_retain(handle.clone()).await?;
@@ -358,7 +505,9 @@ impl DockerSandbox {
     }
 
     async fn cleanup_or_retain(&self, handle: CleanupHandle) -> Result<bool> {
-        if let Ok(unsupported) = cleanup_remote(self.host.clone(), &self.namespace, &handle).await {
+        if let Ok(unsupported) =
+            cleanup_remote(self.operation_host(), &self.namespace, &handle).await
+        {
             Ok(unsupported)
         } else if self.remember_observed_cleanup(handle) {
             Err(Error::ObservedCleanupPending {
@@ -393,7 +542,7 @@ impl Sandbox for DockerSandbox {
 
     async fn create(&self, spec: &BoxSpec) -> Result<BoxInfo> {
         spec.validate()?;
-        spec.network.refuse_allowlist(self.name())?;
+        self.validate_network_policy(spec).await?;
         // The workspace is bind-mounted read-write, so it gets the one-shot
         // mount policy before any record or container exists.
         // ponytail: through an SSH host the daemon's filesystem is remote, so
@@ -412,13 +561,46 @@ impl Sandbox for DockerSandbox {
         // resource first keeps the failure path short.
         let info =
             tinybox_core::insert_new(self.store.as_ref(), BoxState::Ready, spec, self.clock.now())?;
+        let egress_network = match self.prepare_egress_network(spec, &info.id).await {
+            Ok(network) => network,
+            Err(error) => {
+                if matches!(
+                    &error,
+                    Error::Backend {
+                        operation: "roll back egress network setup",
+                        ..
+                    }
+                ) {
+                    self.failed_create_attempts
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(info.id.clone(), attempt.clone());
+                } else {
+                    self.discard_failed_create_record(&info.id, &attempt);
+                }
+                return Err(error);
+            }
+        };
 
         // Build the command before running anything, so a source this backend
         // cannot handle leaves no container behind.
-        let argv = match args::run(&self.namespace, &info.id, &attempt, spec) {
+        let argv = match args::run(
+            &self.namespace,
+            &info.id,
+            &attempt,
+            spec,
+            egress_network.as_ref(),
+        ) {
             Ok(argv) => argv,
             Err(error) => {
-                self.discard_failed_create_record(&info.id, &attempt);
+                if egress_network.is_some() && self.cleanup_egress(&info.id).await.is_err() {
+                    self.failed_create_attempts
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(info.id.clone(), attempt.clone());
+                } else {
+                    self.discard_failed_create_record(&info.id, &attempt);
+                }
                 return Err(error);
             }
         };
@@ -467,6 +649,22 @@ impl Sandbox for DockerSandbox {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .insert(info.id.clone(), attempt);
+                }
+            }
+            if egress_network.is_some() {
+                let has_retained_attempt = self
+                    .failed_create_attempts
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .contains_key(&info.id);
+                if !has_retained_attempt {
+                    if let Err(cleanup_error) = self.cleanup_egress(&info.id).await {
+                        self.failed_create_attempts
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .insert(info.id.clone(), attempt);
+                        return Err(cleanup_error);
+                    }
                 }
             }
             return Err(error);
@@ -523,7 +721,7 @@ impl Sandbox for DockerSandbox {
 
         // A command that runs and fails is a result, so the raw output is
         // returned rather than being turned into a backend error.
-        self.host
+        self.operation_host()
             .run(&ExecRequest::new(args::exec(&self.namespace, id, request)?))
             .await
     }
@@ -571,7 +769,7 @@ impl Sandbox for DockerSandbox {
         let control = Arc::new(ObservedControl::default());
         let observer = Arc::new(DockerExecutionObserver {
             inner: observer,
-            host: self.host.clone(),
+            host: self.operation_host(),
             namespace: self.namespace.clone(),
             handle: handle.clone(),
             observed_boxes: self.observed_boxes.clone(),
@@ -579,7 +777,10 @@ impl Sandbox for DockerSandbox {
             control: control.clone(),
         });
 
-        let result = self.host.run_observed(&observed_request, observer).await;
+        let result = self
+            .operation_host()
+            .run_observed(&observed_request, observer)
+            .await;
 
         if matches!(&result, Err(Error::UnsupportedStreaming { .. })) {
             let reservation = CleanupHandle {
@@ -609,7 +810,7 @@ impl Sandbox for DockerSandbox {
 
         if !control.acknowledged.load(Ordering::Acquire) {
             if let Ok(unsupported) =
-                cleanup_remote(self.host.clone(), &self.namespace, &handle).await
+                cleanup_remote(self.operation_host(), &self.namespace, &handle).await
             {
                 control.unsupported.store(unsupported, Ordering::Release);
                 control.acknowledged.store(true, Ordering::Release);
@@ -630,7 +831,8 @@ impl Sandbox for DockerSandbox {
     }
 
     fn has_pending_observed_cleanup(&self) -> bool {
-        self.host.has_pending_observed_cleanup() || !lock(&self.pending_observed_cleanup).is_empty()
+        self.operation_host().has_pending_observed_cleanup()
+            || !lock(&self.pending_observed_cleanup).is_empty()
     }
 
     fn acknowledge_observed_cleanup_for_destroyed_box(&self, id: &BoxId) {
@@ -638,7 +840,7 @@ impl Sandbox for DockerSandbox {
     }
 
     async fn retry_observed_cleanup(&self) -> Result<()> {
-        let host_result = self.host.retry_observed_cleanup().await;
+        let host_result = self.operation_host().retry_observed_cleanup().await;
         let handles = self.pending_observed_handles();
         let mut failed = false;
         for handle in handles {
@@ -646,7 +848,7 @@ impl Sandbox for DockerSandbox {
                 self.clear_observed_cleanup(&handle.token);
                 continue;
             }
-            match cleanup_remote(self.host.clone(), &self.namespace, &handle).await {
+            match cleanup_remote(self.operation_host(), &self.namespace, &handle).await {
                 Err(_) if self.observed_handle_is_current(&handle) => failed = true,
                 _ => self.clear_observed_cleanup(&handle.token),
             }
@@ -715,7 +917,12 @@ impl Sandbox for DockerSandbox {
 
     async fn destroy(&self, id: &BoxId) -> Result<()> {
         // Fail on an unknown box before touching Docker.
-        self.store.get(id)?;
+        let info = self.store.get(id)?;
+        if matches!(info.spec.network, NetworkPolicy::Allowlist(_))
+            && self.egress_controller.is_none()
+        {
+            return Err(unsupported_egress_policy());
+        }
         let attempt = self
             .failed_create_attempts
             .lock()
@@ -746,6 +953,9 @@ impl Sandbox for DockerSandbox {
         // recoverable, a container without a record is a leak.
         self.remove_container(args::remove(&self.namespace, id))
             .await?;
+        if matches!(info.spec.network, NetworkPolicy::Allowlist(_)) {
+            self.cleanup_egress(id).await?;
+        }
         self.mark_observed_box_destroyed(id);
         self.acknowledge_observed_cleanup_for_destroyed_box(id);
         self.store.remove(id)?;
@@ -754,6 +964,14 @@ impl Sandbox for DockerSandbox {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(id);
         Ok(())
+    }
+}
+
+fn unsupported_egress_policy() -> Error {
+    Error::ConstraintNotEnforced {
+        sandbox: NAME.to_owned(),
+        constraint: tinybox_core::Constraint::Network,
+        enforcement: tinybox_core::Enforcement::Unsupported,
     }
 }
 
