@@ -196,11 +196,19 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
             .ok()
             .map(|value| value.to_ascii_lowercase())
     );
-    assert_eq!(
-        lines.get(2).map(|value| value.to_ascii_lowercase()),
-        std::env::var("LOCALAPPDATA")
-            .ok()
-            .map(|value| value.to_ascii_lowercase())
+    let host_local_app_data = std::env::var("LOCALAPPDATA")
+        .map_err(io::Error::other)?
+        .to_ascii_lowercase();
+    let child_local_app_data = lines
+        .get(2)
+        .ok_or_else(|| io::Error::other("child did not print LOCALAPPDATA"))?
+        .to_ascii_lowercase();
+    let package_root = format!("{}\\packages\\", host_local_app_data.trim_end_matches('\\'));
+    let package_profile = child_local_app_data.strip_prefix(&package_root);
+    assert!(
+        package_profile
+            .is_some_and(|profile| profile.starts_with("tinybox.") && profile.ends_with("\\ac")),
+        "AppContainer LOCALAPPDATA should resolve inside its package profile: child={child_local_app_data:?}, host={host_local_app_data:?}"
     );
     assert_eq!(lines.get(3), Some(&"cleared"));
     Ok(())
@@ -285,13 +293,19 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         &AppContainerBackend::new(),
         &Jail::new(root.path(), "owned-child-denial-test").deny_net(),
         &invocation,
-    )?;
+    )
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("spawn outside-root denial probe: {error}"),
+        )
+    })?;
     let mut output = String::new();
     child
         .take_stdout()
         .ok_or_else(|| io::Error::other("captured stdout missing"))?
         .read_to_string(&mut output)?;
-    let _ = child
+    let status = child
         .try_wait()?
         .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
 
@@ -299,8 +313,16 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         !escaped.exists(),
         "write outside the grant should be denied"
     );
+    let copied_contents = std::fs::read(&copied).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "read in-root redirection output after child status {status:?} and output {output:?}: {error}"
+            ),
+        )
+    })?;
     assert!(
-        std::fs::read(&copied)?.is_empty(),
+        copied_contents.is_empty(),
         "reading an outside file should be denied"
     );
     assert!(!output.contains("outside-secret"));

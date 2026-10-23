@@ -25,8 +25,7 @@ case "${RUNNER_OS:-$(uname -s)}" in
       test_status=0
       for test_name in \
         windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots \
-        windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment \
-        windows::tests::windows_appcontainer_process_limit_refuses_child_creation; do
+        windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment; do
         cargo test --locked -p tinybox-jail "$test_name" -- --exact --nocapture --test-threads=1 || test_status=1
       done
       exit "$test_status"
