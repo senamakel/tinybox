@@ -279,9 +279,8 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         .to_string_lossy()
         .into_owned();
     let script = format!(
-        "type \"{}\" > \"{}\" 2>NUL & echo escaped > \"{}\"",
+        "type \"{}\" > copied.txt 2>NUL & echo escaped > \"{}\"",
         secret.display(),
-        copied.display(),
         escaped.display()
     );
     let invocation = JailInvocation::new(
@@ -305,6 +304,11 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         .take_stdout()
         .ok_or_else(|| io::Error::other("captured stdout missing"))?
         .read_to_string(&mut output)?;
+    let mut error_output = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?
+        .read_to_string(&mut error_output)?;
     let status = child
         .try_wait()?
         .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
@@ -317,7 +321,7 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         io::Error::new(
             error.kind(),
             format!(
-                "read in-root redirection output after child status {status:?} and output {output:?}: {error}"
+                "read in-root redirection output after child status {status:?}, output {output:?}, and stderr {error_output:?}: {error}"
             ),
         )
     })?;
