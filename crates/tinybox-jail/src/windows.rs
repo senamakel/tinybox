@@ -234,17 +234,17 @@ fn spawn_captured<'a>(
         .map_err(|error| contextual_error("create AppContainer stdout pipe", &error))?;
     let (stderr_read, stderr_write) = anonymous_pipe()
         .map_err(|error| contextual_error("create AppContainer stderr pipe", &error))?;
+    let (drive, environment_cwd) = drive_current_directory(cwd)?;
     let mut launch = Launch::new(resolve_program(program, cwd)?);
     launch
         .args(args)
-        .current_dir(cwd)
+        .current_dir(&environment_cwd)
         .app_container(&profile)
         .stdin(&stdin_read)
         .stdout(&stdout_write)
         .stderr(&stderr_write);
-    let (drive, environment_cwd) = drive_current_directory(cwd)?;
     launch
-        .env_drive_current_dir(drive, environment_cwd)
+        .env_drive_current_dir(drive, &environment_cwd)
         .map_err(|error| contextual_error("set AppContainer drive current directory", &error))?;
     if clear_env {
         launch.env_clear();
@@ -264,7 +264,15 @@ fn spawn_captured<'a>(
     }
     let suspended = launch
         .spawn_suspended()
-        .map_err(|error| contextual_error("create suspended AppContainer child", &error))?;
+        .map_err(|error| {
+            let drive_entry = format!("={drive}:={}", environment_cwd.display());
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "create suspended AppContainer child (current_dir={environment_cwd:?}, drive_entry={drive_entry:?}): {error}"
+                ),
+            )
+        })?;
     job.assign(suspended.process())
         .map_err(|error| contextual_error("assign AppContainer child to Job Object", &error))?;
     let process = suspended
@@ -291,11 +299,10 @@ fn drive_current_directory(path: &Path) -> io::Result<(char, OsString)> {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
             Prefix::Disk(drive) => (drive, path.as_os_str().to_os_string()),
             Prefix::VerbatimDisk(drive) => {
-                // Per-drive current-directory environment entries use normal
-                // DOS paths. Passing Rust's canonical `\\?\C:\...` form as
-                // the `=C:` value makes CreateProcess reject the environment
-                // block with ERROR_ENVVAR_NOT_FOUND, even though it accepts
-                // that same path as lpCurrentDirectory.
+                // Use the normal DOS form for both lpCurrentDirectory and
+                // the per-drive environment entry. Rust's canonical
+                // `\\?\C:\...` form is not accepted for the `=C:` value by
+                // CreateProcess.
                 let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
                 let verbatim_prefix = [
                     u16::from(b'\\'),
