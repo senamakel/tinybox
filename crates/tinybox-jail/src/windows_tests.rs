@@ -398,3 +398,122 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
     assert!(!output.contains("outside-secret"));
     Ok(())
 }
+
+#[test]
+fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
+    use std::io::Read;
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+
+    // Prove the host can reach the controlled endpoint before using it as the
+    // denial probe. Keep the listener open for the AppContainer attempt.
+    let host_control = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let host_accepted = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "host loopback control connection was not accepted",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    drop(host_control);
+    drop(host_accepted);
+
+    let root = tempfile::tempdir()?;
+    let marker = root.path().join("loopback-probe.txt");
+    let executable = std::env::current_exe()?;
+    let executable_arg = executable.to_string_lossy().into_owned();
+    let address_arg = address.to_string();
+    let marker_arg = marker.to_string_lossy().into_owned();
+    let command = Command::new(executable)
+        .args([
+            "--exact",
+            "windows::tests::appcontainer_loopback_child_probe",
+            "--nocapture",
+        ])
+        .env("TINYBOX_APPCONTAINER_LOOPBACK_PROBE", &address_arg)
+        .env("TINYBOX_APPCONTAINER_LOOPBACK_MARKER", &marker_arg)
+        .current_dir(root.path());
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable_arg.as_str(),
+            "--exact",
+            "windows::tests::appcontainer_loopback_child_probe",
+            "--nocapture",
+        ])
+        .with_cwd(root.path()),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &Jail::new(root.path(), "loopback-denial-test").deny_net(),
+        &invocation,
+    )
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("spawn AppContainer loopback probe: {error}"),
+        )
+    })?;
+    drop(command);
+
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let mut error_output = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?
+        .read_to_string(&mut error_output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer network probe still running"))?;
+    assert!(
+        status.success(),
+        "AppContainer probe failed: status {status:?}, stdout {output:?}, stderr {error_output:?}"
+    );
+    let result = std::fs::read_to_string(marker)?;
+    assert!(
+        result.starts_with("denied:"),
+        "AppContainer reached the host loopback listener: {result:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn appcontainer_loopback_child_probe() {
+    use std::net::{SocketAddr, TcpStream};
+    use std::time::Duration;
+
+    let (Some(address), Some(marker)) = (
+        std::env::var_os("TINYBOX_APPCONTAINER_LOOPBACK_PROBE"),
+        std::env::var_os("TINYBOX_APPCONTAINER_LOOPBACK_MARKER"),
+    ) else {
+        return;
+    };
+    let address = address
+        .to_string_lossy()
+        .parse::<SocketAddr>()
+        .expect("parent should pass a valid loopback address");
+    let result = match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+        Ok(_stream) => "connected".to_owned(),
+        Err(error) => format!("denied: {error}"),
+    };
+    std::fs::write(marker, result).expect("AppContainer probe should write its result");
+}
