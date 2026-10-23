@@ -43,7 +43,9 @@ async fn it_reads_and_writes_workspace_files_and_returns_local_forward_addresses
     );
 
     let address = SocketAddr::from(([127, 0, 0, 1], 4321));
-    assert_eq!(host.forward(address).await?, address);
+    let forward = host.forward(address).await?;
+    assert_eq!(forward.local_addr(), address);
+    assert!(forward.is_direct());
     Ok(())
 }
 
