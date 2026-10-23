@@ -74,11 +74,9 @@ impl JailBackend for AppContainerBackend {
         ))
     }
 
-    fn spawn_owned_captured(&self, _jail: &Jail, _cmd: Command) -> io::Result<OwnedChild> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Windows AppContainer requires a typed invocation to preserve its environment",
-        ))
+    fn spawn_owned_captured(&self, jail: &Jail, command: Command) -> io::Result<OwnedChild> {
+        self.require_resources(jail).map_err(unsupported)?;
+        spawn_command(jail, &command)
     }
 
     fn spawn_owned_invocation_captured(
@@ -136,7 +134,30 @@ fn spawn_invocation(
     invocation: &JailInvocation,
     command: &Command,
 ) -> io::Result<OwnedChild> {
-    let request = &invocation.request;
+    spawn_command_with_environment(
+        jail,
+        command,
+        invocation.clear_env,
+        invocation.resources,
+        invocation.request.cwd.as_deref(),
+    )
+}
+
+fn spawn_command(jail: &Jail, command: &Command) -> io::Result<OwnedChild> {
+    // `Command` does not expose whether env_clear() was called, so the safe
+    // untyped API always starts from an empty environment and forwards only
+    // explicit env edits. Callers that need inherited values must pass them
+    // deliberately or use the typed invocation API.
+    spawn_command_with_environment(jail, command, true, None, None)
+}
+
+fn spawn_command_with_environment(
+    jail: &Jail,
+    command: &Command,
+    clear_env: bool,
+    resources: Option<ResourceLimitPlan>,
+    requested_cwd: Option<&Path>,
+) -> io::Result<OwnedChild> {
     let program = command.get_program();
     let args = command
         .get_args()
@@ -148,7 +169,7 @@ fn spawn_invocation(
         .collect::<Vec<_>>();
     let cwd = command
         .get_current_dir()
-        .or(request.cwd.as_deref())
+        .or(requested_cwd)
         .unwrap_or(&jail.root);
     spawn_captured(
         jail,
@@ -157,9 +178,9 @@ fn spawn_invocation(
         environment
             .iter()
             .map(|(name, value)| (name.as_os_str(), value.as_deref())),
-        invocation.clear_env,
+        clear_env,
         cwd,
-        invocation.resources,
+        resources,
     )
 }
 

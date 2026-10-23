@@ -125,8 +125,10 @@ not import that module.
   excluded).
 - Windows `spawn` and `spawn_with` return `Unsupported` because stable Rust
   cannot construct a `std::process::Child` from the native handle. Captured
-  invocation launches use `default_owned_backend()`, which retains the
-  process handle and Job Object in `OwnedChild`. AppContainer profile names
+  owned launches use `default_owned_backend()`, which retains the process
+  handle and Job Object in `OwnedChild`. Untyped `Command` launches clear the
+  inherited environment and forward only explicit `Command::env` edits;
+  typed invocations can choose whether to clear it. AppContainer profile names
   are unique per launch so persistent ACL entries from earlier runs cannot
   widen a later run's grants; profile and ACL cleanup remains outstanding.
   Memory and process-count limits use Job Objects. CPU and disk limits remain

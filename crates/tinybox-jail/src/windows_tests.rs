@@ -115,6 +115,47 @@ fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Resu
 }
 
 #[test]
+fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> io::Result<()> {
+    use std::io::Read;
+
+    const ALLOWED_ENV: &str = "TINYBOX_APPCONTAINER_EXPLICIT_ENV";
+    let root = tempfile::tempdir()?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+        .to_string_lossy()
+        .into_owned();
+    let mut command = Command::new(command);
+    command
+        .args([
+            "/D",
+            "/C",
+            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & if defined PATH (echo inherited) else (echo cleared)",
+        ])
+        .current_dir(root.path())
+        .env(ALLOWED_ENV, "explicit-value");
+
+    let mut child = crate::spawn_owned_captured_with(
+        &AppContainerBackend::new(),
+        &Jail::new(root.path(), "owned-command-env-test"),
+        command,
+    )?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
+
+    assert!(status.success(), "unexpected child status: {status:?}");
+    let lines = output.lines().map(str::trim).collect::<Vec<_>>();
+    assert_eq!(lines.first(), Some(&"explicit-value"));
+    assert_eq!(lines.get(1), Some(&"cleared"));
+    Ok(())
+}
+
+#[test]
 fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()> {
     use std::io::Read;
     use tinybox_core::ExecRequest;

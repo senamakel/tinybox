@@ -16,8 +16,9 @@ use tokio::sync::{oneshot, watch};
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
-// Native jail supervision is Unix-only today; retain a compile-time adapter for
-// other targets so this module stays buildable if that capability is added.
+// Unix backends use nonblocking AsyncFd pipes. Windows AppContainer pipes use
+// Tokio's standard file adapter and retain ownership in the Job-supervised
+// process handle.
 #[cfg(not(unix))]
 type AsyncPipe = tokio::fs::File;
 
