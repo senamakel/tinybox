@@ -4,7 +4,7 @@
 //! whose behavior is fixed, so they stay deterministic and need no network,
 //! clock, or ordering assumptions.
 
-use std::path::Path;
+use std::{fs, net::SocketAddr, path::Path};
 
 use tinybox_core::{Error, ExecRequest, Host, HostExecutionLocation, Result};
 
@@ -22,6 +22,29 @@ fn it_attests_that_it_runs_locally() {
         LocalHost::new().execution_location(),
         HostExecutionLocation::Local
     );
+}
+
+#[tokio::test]
+async fn it_reads_and_writes_workspace_files_and_returns_local_forward_addresses() -> Result<()> {
+    let root = tempfile::tempdir().map_err(|error| Error::io("tempdir", &error))?;
+    fs::write(root.path().join("input"), b"hello")
+        .map_err(|error| Error::io("write fixture", &error))?;
+    let host = LocalHost::new();
+
+    assert!(
+        host.open_workspace_file(root.path(), Path::new("input"))
+            .await
+            .is_ok()
+    );
+    assert!(
+        host.begin_workspace_file_write(root.path(), Path::new("output"), "transfer-1")
+            .await
+            .is_ok()
+    );
+
+    let address = SocketAddr::from(([127, 0, 0, 1], 4321));
+    assert_eq!(host.forward(address).await?, address);
+    Ok(())
 }
 
 #[tokio::test]
