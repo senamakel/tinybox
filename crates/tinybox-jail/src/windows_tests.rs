@@ -438,15 +438,6 @@ fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
     let executable_arg = executable.to_string_lossy().into_owned();
     let address_arg = address.to_string();
     let marker_arg = marker.to_string_lossy().into_owned();
-    let command = Command::new(executable)
-        .args([
-            "--exact",
-            "windows::tests::appcontainer_loopback_child_probe",
-            "--nocapture",
-        ])
-        .env("TINYBOX_APPCONTAINER_LOOPBACK_PROBE", &address_arg)
-        .env("TINYBOX_APPCONTAINER_LOOPBACK_MARKER", &marker_arg)
-        .current_dir(root.path());
     let invocation = JailInvocation::new(
         ExecRequest::new([
             executable_arg.as_str(),
@@ -454,7 +445,9 @@ fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
             "windows::tests::appcontainer_loopback_child_probe",
             "--nocapture",
         ])
-        .with_cwd(root.path()),
+        .with_cwd(root.path())
+        .with_env("TINYBOX_APPCONTAINER_LOOPBACK_PROBE", address_arg)
+        .with_env("TINYBOX_APPCONTAINER_LOOPBACK_MARKER", marker_arg),
         true,
         None,
     );
@@ -469,8 +462,6 @@ fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
             format!("spawn AppContainer loopback probe: {error}"),
         )
     })?;
-    drop(command);
-
     let mut output = String::new();
     child
         .take_stdout()
