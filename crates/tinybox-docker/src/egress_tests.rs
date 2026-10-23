@@ -144,3 +144,33 @@ fn rejects_a_hostname_with_no_resolver_answers() -> Result<(), Box<dyn std::erro
     ));
     Ok(())
 }
+
+#[test]
+fn accepts_public_ipv6_answers() -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = addresses("ipv6.example", &["2001:db8::8"])?;
+    let allowlist = EgressAllowlist::new(["ipv6.example"], [443]);
+
+    let plan = plan_egress_allowlist(&allowlist, &resolver)?;
+
+    assert_eq!(plan.targets().len(), 1);
+    assert_eq!(
+        plan.targets()[0].address(),
+        "2001:db8::8".parse::<IpAddr>()?
+    );
+    Ok(())
+}
+
+#[test]
+fn reports_resolver_errors_as_backend_failures() {
+    let resolver = StaticResolver(BTreeMap::new());
+    let allowlist = EgressAllowlist::new(["missing.example"], [443]);
+
+    assert!(matches!(
+        plan_egress_allowlist(&allowlist, &resolver),
+        Err(Error::Backend {
+            sandbox,
+            operation: "resolve an egress allowlist host",
+            message,
+        }) if sandbox == "docker" && message.starts_with("missing.example:")
+    ));
+}
