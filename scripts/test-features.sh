@@ -45,6 +45,11 @@ case "${RUNNER_OS:-$(uname -s)}" in
       echo "expected at least 22 real bwrap tests to run, saw $ran" >&2
       exit 1
     fi
+    # Exercise the public NamespaceSandbox network policy against a controlled
+    # host listener, and fail instead of skipping if namespace prerequisites
+    # are unavailable on this required Linux feature-test runner.
+    TINYBOX_LIVE_NAMESPACES=1 TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS=1 \
+      cargo test --locked -p tinybox-linux --test live_namespaces live_network_policy_controls_host_loopback_connectivity -- --nocapture
     ;;
 esac
 python3 scripts/test-e2e-version.py

@@ -12,6 +12,7 @@
 //! exactly the failure this backend exists to rule out.
 
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -439,6 +440,109 @@ async fn live_a_denied_network_really_is_denied() -> Result<()> {
     .await?;
 
     assert_eq!(count, "1", "expected loopback only");
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()> {
+    if !enabled() {
+        if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS").is_some() {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "enable required live network test",
+                message:
+                    "TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS=1 requires TINYBOX_LIVE_NAMESPACES=1"
+                        .to_owned(),
+            });
+        }
+        eprintln!(
+            "SKIP live_network_policy_controls_host_loopback_connectivity: set TINYBOX_LIVE_NAMESPACES=1 to enable live namespace tests"
+        );
+        return Ok(());
+    }
+    let dir = workspace()?;
+    let sandbox = sandbox();
+    match sandbox.availability() {
+        SandboxAvailability::Available => {}
+        SandboxAvailability::Unavailable { reason }
+            if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS").is_none() =>
+        {
+            eprintln!("SKIP live_network_policy_controls_host_loopback_connectivity: {reason}");
+            return Ok(());
+        }
+        SandboxAvailability::Unavailable { reason } => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: reason,
+            });
+        }
+        SandboxAvailability::Unknown => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: "namespace sandbox did not report runtime availability".to_owned(),
+            });
+        }
+        _ => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: "namespace sandbox reported an unknown availability state".to_owned(),
+            });
+        }
+    }
+
+    // Check the positive path first against a local listener. This proves the
+    // probe can connect before the denied case is allowed to pass.
+    let egress_listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| Error::io("bind egress control listener", &error))?;
+    let egress_port = egress_listener
+        .local_addr()
+        .map_err(|error| Error::io("read egress control listener address", &error))?
+        .port();
+    let egress = run_in_box(
+        &sandbox,
+        &spec(dir.path())?.with_network(NetworkPolicy::Egress),
+        &format!(
+            r#"/usr/bin/python3 -c "import socket; s=socket.socket(); s.settimeout(2); print('CONNECTED' if s.connect_ex(('127.0.0.1', {egress_port})) == 0 else 'DENIED')""#
+        ),
+    )
+    .await?;
+    assert_eq!(egress, "CONNECTED", "Egress must reach the local listener");
+    let (_stream, _) = egress_listener
+        .accept()
+        .map_err(|error| Error::io("accept egress control connection", &error))?;
+
+    let denied_listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| Error::io("bind denied-network listener", &error))?;
+    denied_listener
+        .set_nonblocking(true)
+        .map_err(|error| Error::io("set denied-network listener nonblocking", &error))?;
+    let denied_port = denied_listener
+        .local_addr()
+        .map_err(|error| Error::io("read denied-network listener address", &error))?
+        .port();
+    let denied = run_in_box(
+        &sandbox,
+        &spec(dir.path())?,
+        &format!(
+            r#"/usr/bin/python3 -c "import socket; s=socket.socket(); s.settimeout(2); print('CONNECTED' if s.connect_ex(('127.0.0.1', {denied_port})) == 0 else 'DENIED')""#
+        ),
+    )
+    .await?;
+    assert_eq!(denied, "DENIED", "Denied must block the local listener");
+    match denied_listener.accept() {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok((_stream, peer)) => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "verify denied network policy",
+                message: format!("denied box reached the local listener from {peer}"),
+            });
+        }
+        Err(error) => return Err(Error::io("accept denied-network probe", &error)),
+    }
     Ok(())
 }
 
