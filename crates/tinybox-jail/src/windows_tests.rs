@@ -253,8 +253,12 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     };
     let executable = std::env::current_exe()?;
     let root = std::env::current_dir()?;
-    let child_stdout = std::fs::File::create(root.join("descendant.stdout"))?;
-    let child_stderr = std::fs::File::create(root.join("descendant.stderr"))?;
+    let child_stdout = std::fs::File::create(root.join("descendant.stdout")).map_err(|error| {
+        io::Error::new(error.kind(), format!("create descendant stdout: {error}"))
+    })?;
+    let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
+        io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
+    })?;
     let mut descendant = Command::new(executable)
         .args([
             "--exact",
@@ -265,7 +269,10 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
-        .spawn()?;
+        .spawn()
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("spawn descendant probe: {error}"))
+        })?;
     let pid_file = PathBuf::from(pid_file);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !pid_file.exists() {
