@@ -635,7 +635,7 @@ impl Sandbox for DockerSandbox {
                         self.failed_create_attempts
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .insert(info.id.clone(), attempt);
+                            .insert(info.id.clone(), attempt.clone());
                     }
                 }
                 Ok(_) => {
@@ -648,7 +648,7 @@ impl Sandbox for DockerSandbox {
                     self.failed_create_attempts
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .insert(info.id.clone(), attempt);
+                        .insert(info.id.clone(), attempt.clone());
                 }
             }
             if egress_network.is_some() {
@@ -662,7 +662,7 @@ impl Sandbox for DockerSandbox {
                         self.failed_create_attempts
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .insert(info.id.clone(), attempt);
+                            .insert(info.id.clone(), attempt.clone());
                         return Err(cleanup_error);
                     }
                 }
