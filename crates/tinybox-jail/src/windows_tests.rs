@@ -220,6 +220,7 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
+    const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
     let root = tempfile::tempdir()?;
     let test_executable = std::env::current_exe()?;
     let executable_directory = test_executable.parent().ok_or_else(|| {
@@ -228,7 +229,6 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
             "test executable has no parent directory",
         )
     })?;
-    const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
     let invocation = JailInvocation::new(
         ExecRequest::new(vec![
             test_executable.to_string_lossy().into_owned(),
@@ -285,8 +285,7 @@ fn appcontainer_process_limit_child_probe() {
 
     let root = std::env::current_dir().expect("AppContainer probe cwd should be available");
     let command = std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
         .join("cmd.exe");
     match Command::new(command)
