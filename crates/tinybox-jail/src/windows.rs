@@ -206,14 +206,14 @@ fn spawn_captured<'a>(
             &[]
         },
     )
-    .map_err(|error| contextual_error("create AppContainer profile", error))?;
+    .map_err(|error| contextual_error("create AppContainer profile", &error))?;
     let writable = std::iter::once(&jail.root)
         .chain(jail.read_write.iter())
         .collect::<Vec<_>>();
     for path in &writable {
         profile
             .grant_path(path, AppContainerAccess::ReadWrite)
-            .map_err(|error| contextual_error("grant AppContainer read/write path", error))?;
+            .map_err(|error| contextual_error("grant AppContainer read/write path", &error))?;
     }
     for path in jail.read_only.iter().filter(|path| {
         !writable
@@ -222,17 +222,17 @@ fn spawn_captured<'a>(
     }) {
         profile
             .grant_path(path, AppContainerAccess::Read)
-            .map_err(|error| contextual_error("grant AppContainer read-only path", error))?;
+            .map_err(|error| contextual_error("grant AppContainer read-only path", &error))?;
     }
 
     let job = Job::create(&job_limits(jail, resources)?)
-        .map_err(|error| contextual_error("create AppContainer Job Object", error))?;
+        .map_err(|error| contextual_error("create AppContainer Job Object", &error))?;
     let (stdin_read, stdin_write) = anonymous_pipe()
-        .map_err(|error| contextual_error("create AppContainer stdin pipe", error))?;
+        .map_err(|error| contextual_error("create AppContainer stdin pipe", &error))?;
     let (stdout_read, stdout_write) = anonymous_pipe()
-        .map_err(|error| contextual_error("create AppContainer stdout pipe", error))?;
+        .map_err(|error| contextual_error("create AppContainer stdout pipe", &error))?;
     let (stderr_read, stderr_write) = anonymous_pipe()
-        .map_err(|error| contextual_error("create AppContainer stderr pipe", error))?;
+        .map_err(|error| contextual_error("create AppContainer stderr pipe", &error))?;
     let mut launch = Launch::new(resolve_program(program, cwd)?);
     launch
         .args(args)
@@ -259,7 +259,7 @@ fn spawn_captured<'a>(
     }
     let process = launch
         .spawn_in_job(&job)
-        .map_err(|error| contextual_error("create and assign AppContainer child", error))?;
+        .map_err(|error| contextual_error("create and assign AppContainer child", &error))?;
     drop(stdin_read);
     drop(stdout_write);
     drop(stderr_write);
@@ -272,7 +272,7 @@ fn spawn_captured<'a>(
     ))
 }
 
-fn contextual_error(context: &str, error: io::Error) -> io::Error {
+fn contextual_error(context: &str, error: &io::Error) -> io::Error {
     io::Error::new(error.kind(), format!("{context}: {error}"))
 }
 
