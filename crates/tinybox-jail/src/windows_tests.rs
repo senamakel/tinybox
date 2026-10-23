@@ -38,6 +38,16 @@ fn appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants() {
 }
 
 #[test]
+fn appcontainer_drive_environment_uses_a_dos_path_for_verbatim_cwds() {
+    let cwd = Path::new(r"\\?\C:\sandbox\root");
+
+    let (drive, environment_cwd) = drive_current_directory(cwd).unwrap();
+
+    assert_eq!(drive, 'C');
+    assert_eq!(environment_cwd, Path::new(r"C:\sandbox\root"));
+}
+
+#[test]
 fn appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims() {
     use tinybox_core::{Constraint, Enforcement};
 
