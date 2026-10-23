@@ -252,6 +252,9 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         return Ok(());
     };
     let executable = std::env::current_exe()?;
+    let root = std::env::current_dir()?;
+    let child_stdout = std::fs::File::create(root.join("descendant.stdout"))?;
+    let child_stderr = std::fs::File::create(root.join("descendant.stderr"))?;
     let mut descendant = Command::new(executable)
         .args([
             "--exact",
@@ -259,9 +262,9 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             "--nocapture",
         ])
         .env("TINYBOX_APPCONTAINER_DESCENDANT_CHILD_PID_FILE", &pid_file)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(child_stdout))
+        .stderr(std::process::Stdio::from(child_stderr))
         .spawn()?;
     let pid_file = PathBuf::from(pid_file);
     let deadline = Instant::now() + Duration::from_secs(5);
