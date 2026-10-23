@@ -453,6 +453,38 @@ async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()>
     }
     let dir = workspace()?;
     let sandbox = sandbox();
+    match sandbox.availability() {
+        SandboxAvailability::Available => {}
+        SandboxAvailability::Unavailable { reason }
+            if std::env::var_os("TINYBOX_REQUIRE_NAMESPACE_NETWORK_TESTS").is_none() =>
+        {
+            eprintln!(
+                "SKIP live_network_policy_controls_host_loopback_connectivity: {reason}"
+            );
+            return Ok(());
+        }
+        SandboxAvailability::Unavailable { reason } => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: reason,
+            });
+        }
+        SandboxAvailability::Unknown => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: "namespace sandbox did not report runtime availability".to_owned(),
+            });
+        }
+        _ => {
+            return Err(Error::Backend {
+                sandbox: "namespace".to_owned(),
+                operation: "probe live network-test prerequisites",
+                message: "namespace sandbox reported an unknown availability state".to_owned(),
+            });
+        }
+    }
 
     // Check the positive path first against a local listener. This proves the
     // probe can connect before the denied case is allowed to pass.
