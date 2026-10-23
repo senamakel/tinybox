@@ -64,7 +64,7 @@ fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Resu
 
     let mut output = String::new();
     child
-        .stdout_mut()
+        .take_stdout()
         .ok_or_else(|| io::Error::other("captured stdout missing"))?
         .read_to_string(&mut output)?;
     let status = child
@@ -111,7 +111,7 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
     )?;
     let mut output = String::new();
     child
-        .stdout_mut()
+        .take_stdout()
         .ok_or_else(|| io::Error::other("captured stdout missing"))?
         .read_to_string(&mut output)?;
     let status = child
