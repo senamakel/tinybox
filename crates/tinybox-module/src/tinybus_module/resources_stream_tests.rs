@@ -1619,6 +1619,18 @@ async fn wait_for_resource_descendant(
 }
 
 #[cfg(target_os = "linux")]
+#[test]
+fn resource_descendant_identity_requires_both_fields_before_it_is_ready() {
+    assert_eq!(parse_resource_descendant_identity(""), None);
+    assert_eq!(parse_resource_descendant_identity("1234"), None);
+    assert_eq!(parse_resource_descendant_identity("1234 "), None);
+    assert_eq!(
+        parse_resource_descendant_identity("1234 5678"),
+        Some((1234, 5678))
+    );
+}
+
+#[cfg(target_os = "linux")]
 async fn cancel_resource_descendant(
     resources: &Resources,
     process: &ProcessRef,
