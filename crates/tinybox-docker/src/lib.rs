@@ -33,6 +33,10 @@
 //! # }
 //! ```
 
+#[cfg(test)]
+#[path = "egress_tests.rs"]
+mod egress_tests;
+mod egress;
 mod oneshot;
 mod policy;
 mod sandbox;
