@@ -15,6 +15,10 @@ use tinybox_core::{EgressAllowlist, Error, Result};
 /// enforcing backend will use the result.
 pub trait EgressResolver: std::fmt::Debug + Send + Sync {
     /// Resolve `hostname` once and return every address in the answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the hostname cannot be resolved.
     fn resolve(&self, hostname: &str) -> std::io::Result<Vec<IpAddr>>;
 }
 
