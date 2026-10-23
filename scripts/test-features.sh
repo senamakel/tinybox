@@ -19,6 +19,18 @@ case "${RUNNER_OS:-$(uname -s)}" in
     pwsh -NoProfile -File scripts/test-windows-fixtures.ps1
     pwsh -NoProfile -File scripts/prepare-windows-fixtures.ps1 -PosixBin "$(cygpath -w /usr/bin)"
     export PATH="/usr/bin:$PATH"
+    if [ "${GITHUB_HEAD_REF:-}" = "tinybox-27-win-diagnostic" ]; then
+      # This short-lived diagnostic PR isolates the Windows AppContainer
+      # failures and makes Rust emit each test's assertion before another
+      # Windows process-limit fixture can hang the full suite.
+      for test_name in \
+        windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots \
+        windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment \
+        windows::tests::windows_appcontainer_process_limit_refuses_child_creation; do
+        cargo test --locked -p tinybox-jail "$test_name" -- --exact --nocapture --test-threads=1
+      done
+      exit 0
+    fi
     ;;
 esac
 case "${RUNNER_OS:-$(uname -s)}" in
