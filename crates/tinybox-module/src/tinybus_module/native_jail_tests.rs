@@ -92,7 +92,7 @@ fn config() -> NativeJailConfig {
 
 #[test]
 fn native_jail_refuses_allowlists_before_backend_admission()
--> Result<(), Box<dyn std::error::Error>> {
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let mut command = tinybox_core::ExecRequest::new(["irrelevant"]);
     command.cwd = Some(root.path().into());
