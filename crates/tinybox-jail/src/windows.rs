@@ -12,7 +12,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
-use std::os::windows::io::OwnedHandle;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
@@ -340,11 +339,6 @@ impl OwnedProcess for AppContainerProcess {
             }
         })
     }
-}
-
-#[allow(dead_code)]
-fn _owned_handle_to_file(handle: OwnedHandle) -> File {
-    File::from(handle)
 }
 
 #[cfg(test)]
