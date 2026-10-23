@@ -257,9 +257,14 @@ fn spawn_captured<'a>(
             launch.env_remove(name);
         }
     }
-    let process = launch
-        .spawn_in_job(&job)
-        .map_err(|error| contextual_error("create and assign AppContainer child", &error))?;
+    let suspended = launch
+        .spawn_suspended()
+        .map_err(|error| contextual_error("create suspended AppContainer child", &error))?;
+    job.assign(suspended.process())
+        .map_err(|error| contextual_error("assign AppContainer child to Job Object", &error))?;
+    let process = suspended
+        .resume()
+        .map_err(|error| contextual_error("resume AppContainer child", &error))?;
     drop(stdin_read);
     drop(stdout_write);
     drop(stderr_write);
