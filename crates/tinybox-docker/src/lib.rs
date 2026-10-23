@@ -34,7 +34,11 @@
 //! ```
 
 mod egress;
+mod egress_enforcement;
 pub use egress::{EgressResolver, PinnedEgressPlan, PinnedEgressTarget, plan_egress_allowlist};
+pub use egress_enforcement::{
+    DockerEgressController, NativeLinuxDockerEgressController, PreparedEgressNetwork,
+};
 mod oneshot;
 mod policy;
 mod sandbox;

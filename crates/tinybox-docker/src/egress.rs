@@ -1,8 +1,7 @@
-//! Planning helpers for future network allowlist enforcement.
+//! Resolve and pin network allowlist destinations for the Docker firewall.
 //!
-//! These types pin resolver answers for a later proxy or firewall to consume.
-//! They do not enforce traffic and do not make `NetworkPolicy::Allowlist`
-//! available in [`DockerSandbox`](crate::DockerSandbox).
+//! The native Linux controller consumes pinned answers for firewall rules and
+//! container `/etc/hosts` entries. Planning alone does not enforce traffic.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,11 +17,14 @@ pub trait EgressResolver: std::fmt::Debug + Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an error when the hostname cannot be resolved.
+    /// Returns the resolver's error if the hostname cannot be resolved.
     fn resolve(&self, hostname: &str) -> std::io::Result<Vec<IpAddr>>;
 }
 
 /// A resolved allowlist plan whose destinations no longer depend on DNS.
+///
+/// The native Linux Docker controller uses each target both to install a
+/// destination rule and to create a static hostname mapping for the workload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinnedEgressPlan {
     targets: Vec<PinnedEgressTarget>,
@@ -76,16 +78,18 @@ impl PinnedEgressTarget {
 /// is a cloud metadata or loopback address, the whole plan is rejected. Safe
 /// private addresses are retained because this policy does not forbid them.
 ///
-/// This function only prepares data for an enforcing proxy or firewall. It does
-/// not apply network rules and does not enable allowlists in `DockerSandbox`.
+/// This function only prepares pinned data. It does not apply network rules;
+/// the native Linux Docker controller consumes the result during preparation.
 /// The resolver must answer in the environment where the eventual enforcer will
 /// use the plan, which may be remote from the caller for an SSH-backed host.
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidNetworkPolicy`] for a malformed allowlist, an empty
-/// DNS answer, or any resolved metadata or loopback address. Resolver errors
-/// are returned as [`Error::Backend`].
+/// DNS answer, or any resolved metadata or loopback address. Returns
+/// [`Error::ConstraintNotEnforced`] when an IPv6 link-local target needs an
+/// interface scope that this backend cannot preserve. Resolver errors are
+/// returned as [`Error::Backend`].
 pub fn plan_egress_allowlist(
     allowlist: &EgressAllowlist,
     resolver: &dyn EgressResolver,
@@ -112,12 +116,23 @@ pub fn plan_egress_allowlist(
                 reason: "allowlist host resolved to no addresses",
             });
         }
+        let addresses = addresses
+            .into_iter()
+            .map(normalize_ip_address)
+            .collect::<BTreeSet<_>>();
         if addresses.iter().any(is_forbidden_address) {
             return Err(Error::InvalidNetworkPolicy {
                 reason: "allowlist host resolves to a metadata or loopback address",
             });
         }
-        addresses_by_host.insert(host, addresses.into_iter().collect());
+        if addresses.iter().any(is_ipv6_link_local) {
+            return Err(Error::ConstraintNotEnforced {
+                sandbox: "docker".to_owned(),
+                constraint: tinybox_core::Constraint::Network,
+                enforcement: tinybox_core::Enforcement::Unsupported,
+            });
+        }
+        addresses_by_host.insert(host, addresses);
     }
 
     let ports: BTreeSet<_> = allowlist.ports.iter().copied().collect();
@@ -138,10 +153,16 @@ pub fn plan_egress_allowlist(
 }
 
 fn normalize_host(host: &str) -> String {
-    host.trim()
-        .trim_matches(['[', ']'])
-        .trim_end_matches('.')
-        .to_ascii_lowercase()
+    host.trim().trim_matches(['[', ']']).to_ascii_lowercase()
+}
+
+fn normalize_ip_address(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(address) => address
+            .to_ipv4_mapped()
+            .map_or(IpAddr::V6(address), IpAddr::V4),
+        IpAddr::V4(address) => IpAddr::V4(address),
+    }
 }
 
 fn is_forbidden_address(address: &IpAddr) -> bool {
@@ -157,6 +178,13 @@ fn is_forbidden_address(address: &IpAddr) -> bool {
                     mapped.is_loopback() || EgressAllowlist::is_metadata_host(&mapped.to_string())
                 })
         }
+    }
+}
+
+fn is_ipv6_link_local(address: &IpAddr) -> bool {
+    match address {
+        IpAddr::V4(_) => false,
+        IpAddr::V6(address) => address.segments()[0] & 0xffc0 == 0xfe80,
     }
 }
 

@@ -39,7 +39,10 @@ impl super::DockerEgressController for RecordingEgressController {
             .await?;
         Ok(super::PreparedEgressNetwork::new(
             "tinybox-allowlist-test".to_owned(),
-            vec![("api.example.test".to_owned(), "203.0.113.8".parse().unwrap())],
+            vec![(
+                "api.example.test".to_owned(),
+                "203.0.113.8".parse().unwrap(),
+            )],
         ))
     }
 
