@@ -16,8 +16,9 @@ use tokio::sync::{oneshot, watch};
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
-// Native jail supervision is Unix-only today; retain a compile-time adapter for
-// other targets so this module stays buildable if that capability is added.
+// Unix backends use nonblocking AsyncFd pipes. Windows AppContainer pipes use
+// Tokio's standard file adapter and retain ownership in the Job-supervised
+// process handle.
 #[cfg(not(unix))]
 type AsyncPipe = tokio::fs::File;
 
@@ -608,13 +609,13 @@ impl std::fmt::Debug for JailLocalHost {
 impl JailLocalHost {
     /// Use the detected backend without weakening unavailable confinement.
     /// # Errors
-    /// Rejects unavailable backends and platforms without supervised standard children.
+    /// Rejects unavailable backends that cannot supervise owned processes.
     pub fn new(jail: Jail, limit: usize) -> std::io::Result<Self> {
-        Self::with_backend(jail, tinybox_jail::default_backend(), limit)
+        Self::with_backend(jail, tinybox_jail::default_owned_backend(), limit)
     }
     /// Use an explicitly selected provider; hosts apply policy to its enforcement facts.
     /// # Errors
-    /// Rejects unavailable providers and unsupported native ownership platforms.
+    /// Rejects unavailable providers before creating the supervisor.
     pub fn with_backend(
         jail: Jail,
         backend: Arc<dyn JailBackend>,
@@ -639,7 +640,7 @@ impl JailLocalHost {
         limit: usize,
         resource_plan: Option<ResourceLimitPlan>,
     ) -> std::io::Result<Self> {
-        if !cfg!(unix) || !backend.is_available() {
+        if !backend.is_available() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "native jail supervision is unavailable",

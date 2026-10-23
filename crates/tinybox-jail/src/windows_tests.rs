@@ -1,106 +1,400 @@
 use super::*;
 
 #[test]
-fn net_capability_names_is_outbound_client_only() {
-    // `Jail.allow_net` is documented as "Allow outbound network" in
-    // `jail.rs`, so the granted capability set must be strictly
-    // outbound-client.
-    assert!(NET_CAPABILITY_NAMES.contains(&"internetClient"));
-    // The following would over-grant inbound bind() rights and are
-    // intentionally NOT exposed via the coarse `allow_net` switch.
-    // A future caller that needs them should add a separate `Jail`
-    // flag (e.g. `allow_private_lan_server`) and gate them on it.
-    assert!(!NET_CAPABILITY_NAMES.contains(&"privateNetworkClientServer"));
-    assert!(!NET_CAPABILITY_NAMES.contains(&"internetClientServer"));
+fn appcontainer_backend_is_available_through_owned_process_supervision() {
+    assert!(AppContainerBackend::new().is_available());
+    assert_eq!(crate::detect::pick_owned_backend().name(), "appcontainer");
+    assert_eq!(
+        crate::detect::pick_backend().name(),
+        crate::detect::UNSUPPORTED_BACKEND_NAME,
+        "the legacy std::process::Child API remains fail-closed on Windows"
+    );
 }
 
 #[test]
-fn derive_capability_resolves_well_known_internet_client() {
-    // `internetClient` is one of the Windows manifest-defined
-    // capabilities present on every supported Windows version
-    // (10+). DeriveCapabilitySidsFromName must succeed and return
-    // at least one non-null capability SID.
-    let deriv = unsafe { derive_capability("internetClient") }
-        .expect("internetClient must resolve on any supported Windows");
-    assert!(
-        !deriv.capability_sids.is_empty(),
-        "expected at least one capability SID for internetClient"
+fn appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let support = AppContainerBackend::new().constraint_support();
+    assert_eq!(
+        support.enforcement(Constraint::Cpu),
+        Enforcement::Unsupported,
+        "Windows CPU quota enforcement remains deferred"
     );
-    for &sid in &deriv.capability_sids {
-        assert!(!sid.is_null(), "capability SID must not be null");
+    assert_eq!(
+        support.enforcement(Constraint::Memory),
+        Enforcement::Enforced
+    );
+    assert_eq!(support.enforcement(Constraint::Pids), Enforcement::Enforced);
+}
+
+#[test]
+fn appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants() {
+    let first = unique_profile_name();
+    let second = unique_profile_name();
+    assert_ne!(first, second);
+    assert!(first.len() <= 64, "profile name exceeds Windows' limit");
+    assert!(second.len() <= 64, "profile name exceeds Windows' limit");
+}
+
+#[test]
+fn appcontainer_drive_environment_uses_a_dos_path_for_verbatim_cwds() {
+    let cwd = Path::new(r"\\?\C:\sandbox\root");
+
+    let (drive, environment_cwd) = drive_current_directory(cwd).unwrap();
+
+    assert_eq!(drive, 'C');
+    assert_eq!(environment_cwd, Path::new(r"C:\sandbox\root"));
+}
+
+#[test]
+fn appcontainer_local_app_data_must_be_present_and_absolute() {
+    assert_eq!(
+        validate_local_app_data(None).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+    assert_eq!(
+        validate_local_app_data(Some(OsString::from(r"relative\profile")))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    let nul_path = OsString::from_wide(&[
+        u16::from(b'C'),
+        u16::from(b':'),
+        u16::from(b'\\'),
+        u16::from(b'x'),
+        0,
+    ]);
+    assert_eq!(
+        validate_local_app_data(Some(nul_path)).unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        validate_local_app_data(Some(OsString::from(r"C:\Users\agent\AppData\Local"))).unwrap(),
+        OsString::from(r"C:\Users\agent\AppData\Local")
+    );
+}
+
+#[test]
+fn appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let root = tempfile::tempdir().unwrap();
+    let limits = job_limits(
+        &Jail::new(root.path(), "job-limit-map"),
+        Some(ResourceLimitPlan {
+            memory_bytes: Some(128 * 1024 * 1024),
+            pids_max: Some(3),
+            ..ResourceLimitPlan::default()
+        }),
+    )
+    .unwrap();
+    assert!(limits.kills_on_close());
+    assert_eq!(limits.job_memory_limit(), Some(128 * 1024 * 1024));
+    assert_eq!(limits.active_process_limit(), Some(3));
+    assert_eq!(
+        AppContainerBackend::new()
+            .constraint_support()
+            .enforcement(Constraint::Cpu),
+        Enforcement::Unsupported
+    );
+}
+
+#[test]
+fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Result<()> {
+    use std::io::Read;
+    use tinybox_core::ExecRequest;
+    use win_custody::{Process, ProcessAccess};
+
+    let backend = AppContainerBackend::new();
+    let root = tempfile::tempdir()?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+        .to_string_lossy()
+        .into_owned();
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            command.as_str(),
+            "/D",
+            "/C",
+            "echo appcontainer-owned > marker.txt & type marker.txt",
+        ])
+        .with_cwd(root.path()),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &backend,
+        &Jail::new(root.path(), "owned-child-live-test"),
+        &invocation,
+    )?;
+    let pid = child
+        .id()
+        .ok_or_else(|| io::Error::other("AppContainer child PID unavailable"))?;
+    let process = Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize)?;
+    assert!(process.is_app_container()?);
+
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
+
+    assert!(status.success(), "unexpected child status: {status:?}");
+    assert_eq!(output.trim(), "appcontainer-owned");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("marker.txt"))?.trim(),
+        "appcontainer-owned"
+    );
+    Ok(())
+}
+
+#[test]
+fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> io::Result<()> {
+    use std::io::Read;
+
+    const ALLOWED_ENV: &str = "TINYBOX_APPCONTAINER_EXPLICIT_ENV";
+    let root = tempfile::tempdir()?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+        .to_string_lossy()
+        .into_owned();
+    let mut command = Command::new(command);
+    command
+        .args([
+            "/D",
+            "/C",
+            "echo %TINYBOX_APPCONTAINER_EXPLICIT_ENV% & echo %SystemRoot% & echo %LOCALAPPDATA% & if defined PATH (echo inherited) else (echo cleared)",
+        ])
+        .current_dir(root.path())
+        .env(ALLOWED_ENV, "explicit-value");
+
+    let mut child = crate::spawn_owned_captured_with(
+        &AppContainerBackend::new(),
+        &Jail::new(root.path(), "owned-command-env-test"),
+        command,
+    )?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
+
+    assert!(status.success(), "unexpected child status: {status:?}");
+    let lines = output.lines().map(str::trim).collect::<Vec<_>>();
+    assert_eq!(lines.first(), Some(&"explicit-value"));
+    assert_eq!(
+        lines.get(1).map(|value| value.to_ascii_lowercase()),
+        std::env::var("SystemRoot")
+            .ok()
+            .map(|value| value.to_ascii_lowercase())
+    );
+    let host_local_app_data = std::env::var("LOCALAPPDATA")
+        .map_err(io::Error::other)?
+        .to_ascii_lowercase();
+    let child_local_app_data = lines
+        .get(2)
+        .ok_or_else(|| io::Error::other("child did not print LOCALAPPDATA"))?
+        .to_ascii_lowercase();
+    let package_root = format!("{}\\packages\\", host_local_app_data.trim_end_matches('\\'));
+    let package_profile = child_local_app_data.strip_prefix(&package_root);
+    assert!(
+        package_profile
+            .is_some_and(|profile| profile.starts_with("tinybox.") && profile.ends_with("\\ac")),
+        "AppContainer LOCALAPPDATA should resolve inside its package profile: child={child_local_app_data:?}, host={host_local_app_data:?}"
+    );
+    assert_eq!(lines.get(3), Some(&"cleared"));
+    Ok(())
+}
+
+#[test]
+fn appcontainer_process_limit_enforces_maximum_child_count() -> io::Result<()> {
+    use std::thread;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
+    let test_executable = std::env::current_exe()?;
+    let executable_directory = test_executable.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test executable has no parent directory",
+        )
+    })?;
+
+    let run_probe = |root: &Path, pids_max: u64, child_expected: bool| -> io::Result<()> {
+        let invocation = JailInvocation::new(
+            ExecRequest::new(vec![
+                test_executable.to_string_lossy().into_owned(),
+                "--exact".to_owned(),
+                "windows::tests::appcontainer_process_limit_child_probe".to_owned(),
+                "--nocapture".to_owned(),
+            ])
+            .with_cwd(root)
+            .with_env(
+                CHILD_PROBE,
+                if child_expected { "allowed" } else { "denied" },
+            ),
+            true,
+            Some(ResourceLimitPlan {
+                pids_max: Some(pids_max),
+                ..ResourceLimitPlan::default()
+            }),
+        );
+        let jail = Jail::new(root, "owned-child-pids-test").add_read_only(executable_directory);
+        let mut child = crate::spawn_owned_invocation_captured_with(
+            &AppContainerBackend::new(),
+            &jail,
+            &invocation,
+        )?;
+        // The probe test attempts to start a command. Avoid shell `start`: it
+        // waits inside cmd.exe when the active-process limit blocks creation.
+        // The outer wait is bounded and terminates the Job Object on timeout.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.terminate()?;
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "AppContainer process-limit child probe did not exit within 10 seconds",
+                ));
+            }
+            thread::sleep(Duration::from_millis(25));
+        };
+
+        assert!(status.success(), "process-limit probe failed: {status:?}");
+        assert_eq!(
+            std::fs::read(root.join("process-limit-probe-ran.txt"))?,
+            b"started",
+            "the nested test harness must execute the process-limit probe"
+        );
+        assert_eq!(
+            root.join("child.txt").exists(),
+            child_expected,
+            "the process-count limit should match the allowed child count"
+        );
+        Ok(())
+    };
+
+    let allowed_root = tempfile::tempdir()?;
+    run_probe(allowed_root.path(), 2, true)?;
+
+    let denied_root = tempfile::tempdir()?;
+    run_probe(denied_root.path(), 1, false)?;
+    Ok(())
+}
+
+#[test]
+fn appcontainer_process_limit_child_probe() {
+    let Some(expectation) = std::env::var_os("TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE")
+    else {
+        return;
+    };
+
+    let root = std::env::current_dir().expect("AppContainer probe cwd should be available");
+    std::fs::write(root.join("process-limit-probe-ran.txt"), b"started")
+        .expect("AppContainer probe should mark that its test body ran");
+    let command = std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+        .join("System32")
+        .join("cmd.exe");
+    let child = Command::new(command)
+        .args(["/D", "/C", "echo child > child.txt"])
+        .current_dir(root)
+        .spawn();
+    match (expectation.to_string_lossy().as_ref(), child) {
+        ("denied", Err(error)) => eprintln!("Job Object refused child creation: {error}"),
+        ("allowed", Err(error)) => {
+            panic!("Job Object unexpectedly refused an allowed child: {error}")
+        }
+        (other, Err(error)) => panic!("unknown process-limit expectation {other:?}: {error}"),
+        (other, Ok(mut child)) => {
+            let status = child.wait().expect("join the attempted descendant");
+            assert_eq!(
+                status.success(),
+                other == "allowed",
+                "Job Object process limit returned unexpected descendant status: {status:?}"
+            );
+        }
     }
-    // Dropping `deriv` here exercises the Drop impl that LocalFrees
-    // every SID + array — a no-op for the test runner unless it
-    // double-frees, which would crash the process.
 }
 
 #[test]
-fn sanitize_profile_name_keeps_alnum_and_dot() {
-    let s = sanitize_profile_name("agent.delegate-7");
-    assert!(s.starts_with("openhuman."));
-    // hyphen mapped to underscore
-    assert!(s.contains("agent.delegate_7"));
-    assert!(s.len() <= 70); // "openhuman." (10) + label (≤60)
-}
+fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()> {
+    use std::io::Read;
+    use tinybox_core::ExecRequest;
 
-#[test]
-fn sanitize_profile_name_truncates_long_labels() {
-    let long: String = "a".repeat(200);
-    let s = sanitize_profile_name(&long);
-    // Per the in-function comment: truncate to 60 then prefix.
-    assert!(s.len() <= 70);
-    assert!(s.starts_with("openhuman."));
-}
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let secret = outside.path().join("secret.txt");
+    let escaped = outside.path().join("escaped.txt");
+    let copied = root.path().join("copied.txt");
+    std::fs::write(&secret, b"outside-secret")?;
+    let command = std::env::var_os("ComSpec")
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+        .to_string_lossy()
+        .into_owned();
+    let script = format!(
+        "type \"{}\" > copied.txt 2>NUL & echo escaped > \"{}\"",
+        secret.display(),
+        escaped.display()
+    );
+    let invocation = JailInvocation::new(
+        ExecRequest::new([command.as_str(), "/D", "/C", script.as_str()]).with_cwd(root.path()),
+        true,
+        None,
+    );
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &Jail::new(root.path(), "owned-child-denial-test").deny_net(),
+        &invocation,
+    )
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("spawn outside-root denial probe: {error}"),
+        )
+    })?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?
+        .read_to_string(&mut output)?;
+    let mut error_output = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?
+        .read_to_string(&mut error_output)?;
+    let status = child
+        .try_wait()?
+        .ok_or_else(|| io::Error::other("AppContainer child still running after stdout closed"))?;
 
-/// PR #4723 review — `AppContainerBackend::is_available()` must
-/// stay `false` until the spawn path can return a
-/// `std::process::Child`. Reporting available strands a
-/// successfully-spawned `cmd.exe` process because `spawn_in_container`
-/// currently answers `Err(Unsupported)` after `CreateProcessW`, and
-/// callers (e.g. `execute_local_jail`) drop the child on the floor.
-/// Flip back to `true` in the same commit that lands the
-/// `OwnedHandle -> Child` bridge.
-#[test]
-fn appcontainer_backend_reports_unavailable_until_child_bridge_lands() {
     assert!(
-        !AppContainerBackend::new().is_available(),
-        "AppContainer must report unavailable while its spawn path \
-         cannot yield a waitable std::process::Child — see #4705 / \
-         PR #4723 for the orphan-spawn hazard"
+        !escaped.exists(),
+        "write outside the grant should be denied"
     );
-}
-
-#[test]
-fn path_grants_give_read_write_paths_the_same_access_as_the_root() {
-    let jail = Jail::new(r"C:\work\root", "x")
-        .add_read_write(r"C:\state\capture\1")
-        .add_read_only(r"C:\tools");
-    let grants = path_grants(&jail);
-    let rw = GENERIC_READ | GENERIC_WRITE | DELETE;
-    assert_eq!(
-        grants,
-        vec![
-            (Path::new(r"C:\work\root"), rw),
-            (Path::new(r"C:\state\capture\1"), rw),
-            (Path::new(r"C:\tools"), GENERIC_READ),
-        ]
+    let copied_contents = std::fs::read(&copied).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "read in-root redirection output after child status {status:?}, output {output:?}, and stderr {error_output:?}: {error}"
+            ),
+        )
+    })?;
+    assert!(
+        copied_contents.is_empty(),
+        "reading an outside file should be denied"
     );
-}
-
-#[test]
-fn path_grants_keep_write_access_on_paths_also_listed_read_only() {
-    let jail = Jail::new(r"C:\work\root", "x")
-        .add_read_write(r"C:\state\capture")
-        .add_read_only(r"C:\work\root")
-        .add_read_only(r"C:\state\capture")
-        .add_read_only(r"C:\tools");
-    let rw = GENERIC_READ | GENERIC_WRITE | DELETE;
-    assert_eq!(
-        path_grants(&jail),
-        vec![
-            (Path::new(r"C:\work\root"), rw),
-            (Path::new(r"C:\state\capture"), rw),
-            (Path::new(r"C:\tools"), GENERIC_READ),
-        ]
-    );
+    assert!(!output.contains("outside-secret"));
+    Ok(())
 }

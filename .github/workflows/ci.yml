@@ -90,6 +90,40 @@ jobs:
       - name: Run Windows feature tests
         shell: bash
         run: scripts/test-features.sh
+  windows-appcontainer-tests:
+    name: Windows AppContainer jail tests
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - name: Require Windows Server 2025 x64 runner
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          if ($os.Caption -notmatch 'Windows Server 2025' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw "Expected Windows Server 2025 x64, got '$($os.Caption)' / '$env:RUNNER_ARCH'"
+          }
+      - name: Run focused AppContainer jail tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            windows::tests::appcontainer_backend_is_available_through_owned_process_supervision
+            windows::tests::appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits
+            windows::tests::appcontainer_profiles_are_unique_to_avoid_reusing_old_path_acl_grants
+            windows::tests::appcontainer_drive_environment_uses_a_dos_path_for_verbatim_cwds
+            windows::tests::appcontainer_local_app_data_must_be_present_and_absolute
+            windows::tests::appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims
+            windows::tests::appcontainer_owned_launch_captures_output_from_a_confined_child
+            windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
+            windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
+          )
+          for test in "${tests[@]}"; do
+            cargo test --locked -p tinybox-jail --lib "$test" -- --exact --nocapture --test-threads=1
+          done
   native-resource-live:
     runs-on: ubuntu-latest
     steps:

@@ -15,11 +15,12 @@
 //! | Linux   | bubblewrap    | `bwrap` namespaces; process isolation      |
 //! | Linux   | landlock      | Fallback: kernel 5.13+ LSM, spawn thread   |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | (not compiled)| `AppContainer`, pending a `Child` bridge   |
+//! | Windows | `AppContainer` | `AppContainer` ACLs + a kill-on-close Job |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
-//! The Windows backend is not compiled yet (see `windows.rs`); on Windows the
-//! default backend is `unsupported` and a host must opt into `NoopBackend`.
+//! The Windows `AppContainer` backend is available to `TinyBox`'s captured,
+//! owned-process API. The legacy API returning `std::process::Child` remains
+//! unsupported on Windows; use [`default_owned_backend`] for owned launches.
 //!
 //! ## Quick start
 //!
@@ -59,14 +60,16 @@ pub mod registry;
 // Platform backends. Linux (Landlock) is compiled on Linux only. The Seatbelt
 // module is plain `std` (it shells out to `sandbox-exec`), so it compiles
 // everywhere and its profile renderer is unit-tested on every host; it is only
-// *selected* on macOS. The Windows AppContainer module (`windows.rs`) is
-// deliberately not compiled: it needs `unsafe` FFI the workspace forbids and
-// cannot yet return a waitable `std::process::Child`.
+// *selected* on macOS. Windows launches use the safe `win-custody` API and
+// TinyBox's owned process boundary because stable Rust cannot construct a
+// `std::process::Child` from the native handle.
 #[cfg(target_os = "linux")]
 pub mod bwrap;
 #[cfg(target_os = "linux")]
 pub mod linux;
 pub mod macos;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
@@ -78,16 +81,32 @@ pub use linux::LandlockBackend;
 pub use macos::SeatbeltBackend;
 pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
 pub use registry::{IndexStore, JailRecord, JailRegistry};
+#[cfg(target_os = "windows")]
+pub use windows::AppContainerBackend;
 
 use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
 
 /// Cached default backend for the current platform.
 static DEFAULT_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
+static DEFAULT_OWNED_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
 
 /// Returns the process-wide default backend, lazily auto-detected.
 pub fn default_backend() -> Arc<dyn JailBackend> {
     DEFAULT_BACKEND.get_or_init(detect::pick_backend).clone()
+}
+
+/// Returns the process-wide backend for captured launches with an owned
+/// process handle.
+///
+/// On Unix this is the same backend as [`default_backend`]. On Windows it
+/// selects `AppContainer`, whose native process handle is retained through
+/// [`OwnedChild`] instead of being converted into an unavailable
+/// `std::process::Child`.
+pub fn default_owned_backend() -> Arc<dyn JailBackend> {
+    DEFAULT_OWNED_BACKEND
+        .get_or_init(detect::pick_owned_backend)
+        .clone()
 }
 
 /// Spawn `cmd` inside the jail described by `jail`, using the default backend.

@@ -41,5 +41,8 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # `tinybox-drivers` (never published) takes the storage ports from the
 # canonical tinystoragedrivers v2.1 commit.
 allow-git = [
+    # Windows AppContainer launch dependency; Cargo.toml pins the reviewed
+    # Win-Custody fork-epic merge; Cargo.toml pins the exact reviewed revision.
+    "https://github.com/senamakel/Win-Custody.rs",
     "https://github.com/tinyhumansai/tinystoragedrivers",
 ]

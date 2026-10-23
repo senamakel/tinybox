@@ -30,8 +30,8 @@ impl JailBackend for UnsupportedBackend {
 
 /// The OS backends this build knows about, strongest first.
 ///
-/// Windows `AppContainer` is intentionally absent: it cannot hand back a
-/// waitable `std::process::Child` yet (see `windows.rs`).
+/// Windows `AppContainer` is intentionally absent from this picker because it
+/// returns `TinyBox`'s owned-process abstraction instead of `std::process::Child`.
 #[cfg(target_os = "linux")]
 fn candidates() -> Vec<Arc<dyn JailBackend>> {
     vec![
@@ -60,6 +60,24 @@ fn candidates() -> Vec<Arc<dyn JailBackend>> {
 #[must_use]
 pub fn pick_backend() -> Arc<dyn JailBackend> {
     pick_from(candidates())
+}
+
+/// Select the strongest available backend that returns a TinyBox-owned
+/// process handle.
+///
+/// The Windows `AppContainer` backend is included here because it cannot return
+/// `std::process::Child` on stable Rust. Legacy callers should continue to use
+/// [`pick_backend`], which deliberately leaves Windows fail-closed.
+#[must_use]
+pub fn pick_owned_backend() -> Arc<dyn JailBackend> {
+    #[cfg(target_os = "windows")]
+    {
+        pick_from(vec![Arc::new(crate::windows::AppContainerBackend::new())])
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        pick_backend()
+    }
 }
 
 /// Select an available backend from the ordered platform candidates.
