@@ -1,11 +1,11 @@
-//! Windows directory jail using the safe `win-custody` AppContainer launcher.
+//! Windows directory jail using the safe `win-custody` `AppContainer` launcher.
 //!
-//! This backend returns TinyBox's owned-process abstraction because stable
+//! This backend returns `TinyBox`'s owned-process abstraction because stable
 //! `std::process::Child` cannot be constructed from a Win32 process handle.
 //! Every child is assigned to a kill-on-close Job Object while suspended,
 //! before its first instruction runs. CPU quota enforcement is deliberately
 //! unsupported; Windows Job Objects do not provide the CPU quota contract used
-//! by TinyBox's resource plan.
+//! by `TinyBox`'s resource plan.
 
 #![cfg(target_os = "windows")]
 
@@ -27,12 +27,12 @@ use super::jail::{ChildStatus, Jail, JailBackend, OwnedChild, OwnedProcess};
 
 static PROFILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-/// Windows AppContainer backend.
+/// Windows `AppContainer` backend.
 #[derive(Debug, Default)]
 pub struct AppContainerBackend;
 
 impl AppContainerBackend {
-    /// Construct the AppContainer backend.
+    /// Construct the `AppContainer` backend.
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -89,7 +89,7 @@ impl JailBackend for AppContainerBackend {
     ) -> io::Result<OwnedChild> {
         self.require_resources(jail).map_err(unsupported)?;
         require_plan(self, invocation.resources)?;
-        spawn_invocation(jail, invocation, command)
+        spawn_invocation(jail, invocation, &command)
     }
 }
 
@@ -134,7 +134,7 @@ fn require_plan(backend: &AppContainerBackend, plan: Option<ResourceLimitPlan>) 
 fn spawn_invocation(
     jail: &Jail,
     invocation: &JailInvocation,
-    command: Command,
+    command: &Command,
 ) -> io::Result<OwnedChild> {
     let request = &invocation.request;
     let program = command.get_program();
@@ -226,7 +226,7 @@ fn spawn_captured<'a>(
     drop(stderr_write);
 
     Ok(OwnedChild::new(
-        AppContainerProcess { process, _job: job },
+        AppContainerProcess { process, job },
         Some(File::from(stdin_write)),
         Some(File::from(stdout_read)),
         Some(File::from(stderr_read)),
@@ -325,7 +325,7 @@ fn unique_profile_name() -> String {
 
 struct AppContainerProcess {
     process: Process,
-    _job: Job,
+    job: Job,
 }
 
 impl OwnedProcess for AppContainerProcess {
@@ -336,14 +336,14 @@ impl OwnedProcess for AppContainerProcess {
     fn try_wait(&mut self) -> io::Result<Option<ChildStatus>> {
         self.process
             .exit_code()
-            .map(|code| code.map(|code| ChildStatus::from_code(Some(code as i32))))
+            .map(|code| code.map(|code| ChildStatus::from_code(Some(code.cast_signed()))))
     }
 
     fn terminate(&mut self) -> io::Result<()> {
         if self.process.exit_code()?.is_some() {
             return Ok(());
         }
-        self._job.terminate(1).or_else(|error| {
+        self.job.terminate(1).or_else(|error| {
             if self.process.exit_code()?.is_some() {
                 Ok(())
             } else {

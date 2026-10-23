@@ -65,9 +65,10 @@ pub fn pick_backend() -> Arc<dyn JailBackend> {
 /// Select the strongest available backend that returns a TinyBox-owned
 /// process handle.
 ///
-/// The Windows AppContainer backend is included here because it cannot return
+/// The Windows `AppContainer` backend is included here because it cannot return
 /// `std::process::Child` on stable Rust. Legacy callers should continue to use
 /// [`pick_backend`], which deliberately leaves Windows fail-closed.
+#[must_use]
 pub fn pick_owned_backend() -> Arc<dyn JailBackend> {
     #[cfg(target_os = "windows")]
     {

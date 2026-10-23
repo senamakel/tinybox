@@ -15,10 +15,10 @@
 //! | Linux   | bubblewrap    | `bwrap` namespaces; process isolation      |
 //! | Linux   | landlock      | Fallback: kernel 5.13+ LSM, spawn thread   |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | AppContainer | AppContainer ACLs + a kill-on-close Job    |
+//! | Windows | `AppContainer` | `AppContainer` ACLs + a kill-on-close Job |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
-//! The Windows AppContainer backend is available to TinyBox's captured,
+//! The Windows `AppContainer` backend is available to `TinyBox`'s captured,
 //! owned-process API. The legacy API returning `std::process::Child` remains
 //! unsupported on Windows; use [`default_owned_backend`] for owned launches.
 //!
@@ -100,7 +100,7 @@ pub fn default_backend() -> Arc<dyn JailBackend> {
 /// process handle.
 ///
 /// On Unix this is the same backend as [`default_backend`]. On Windows it
-/// selects AppContainer, whose native process handle is retained through
+/// selects `AppContainer`, whose native process handle is retained through
 /// [`OwnedChild`] instead of being converted into an unavailable
 /// `std::process::Child`.
 pub fn default_owned_backend() -> Arc<dyn JailBackend> {
