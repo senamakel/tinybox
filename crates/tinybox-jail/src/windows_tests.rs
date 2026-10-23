@@ -317,6 +317,7 @@ fn appcontainer_process_limit_child_probe() {
         ("allowed", Err(error)) => {
             panic!("Job Object unexpectedly refused an allowed child: {error}")
         }
+        (other, Err(error)) => panic!("unknown process-limit expectation {other:?}: {error}"),
         (other, Ok(mut child)) => {
             let status = child.wait().expect("join the attempted descendant");
             assert_eq!(
