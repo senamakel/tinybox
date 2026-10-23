@@ -772,7 +772,7 @@ fn assert_memory_process_was_killed(output: &tinybox_bus::OutputBatch) {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_memory_limit_emits_provenance_before_terminal_exit()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
@@ -882,7 +882,7 @@ async fn native_memory_limit_emits_provenance_before_terminal_exit()
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{
@@ -972,7 +972,7 @@ async fn native_pids_limit_emits_a_proven_limit_event_for_a_blocked_fork()
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_cpu_quota_emits_a_proven_limit_event_for_a_throttled_workload()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use tinybox_bus::{

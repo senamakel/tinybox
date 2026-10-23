@@ -56,11 +56,21 @@ struct BoxService {
 impl BoxService {
     /// A service whose box records live on the host storage behind
     /// `connection`.
+    #[cfg(not(test))]
     fn connected(connection: Connection) -> Self {
         Self {
             resources: std::sync::Arc::new(resources::Resources::with_connection(
                 connection.clone(),
             )),
+            connection: Some(connection),
+        }
+    }
+
+    /// Unit-test service backed by the testkit storage port.
+    #[cfg(test)]
+    fn connected(connection: Connection) -> Self {
+        Self {
+            resources: std::sync::Arc::new(resources::Resources::test_resources()),
             connection: Some(connection),
         }
     }
