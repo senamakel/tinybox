@@ -215,14 +215,12 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
 }
 
 #[test]
-fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
+fn appcontainer_process_limit_enforces_maximum_child_count() -> io::Result<()> {
     use std::thread;
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
     const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
-    let root = tempfile::tempdir()?;
-    let probe_marker = root.path().join("process-limit-probe-ran.txt");
     let test_executable = std::env::current_exe()?;
     let executable_directory = test_executable.parent().ok_or_else(|| {
         io::Error::new(
@@ -230,64 +228,78 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
             "test executable has no parent directory",
         )
     })?;
-    let invocation = JailInvocation::new(
-        ExecRequest::new(vec![
-            test_executable.to_string_lossy().into_owned(),
-            "--exact".to_owned(),
-            "windows::tests::appcontainer_process_limit_child_probe".to_owned(),
-            "--nocapture".to_owned(),
-        ])
-        .with_cwd(root.path())
-        .with_env(CHILD_PROBE, "1"),
-        true,
-        Some(ResourceLimitPlan {
-            pids_max: Some(1),
-            ..ResourceLimitPlan::default()
-        }),
-    );
-    let jail = Jail::new(root.path(), "owned-child-pids-test").add_read_only(executable_directory);
-    let mut child = crate::spawn_owned_invocation_captured_with(
-        &AppContainerBackend::new(),
-        &jail,
-        &invocation,
-    )?;
-    // The probe test attempts to start a command and records an error if the
-    // Job Object rejects it. Avoid shell `start`: it waits inside cmd.exe when
-    // the active-process limit blocks child creation. Also avoid reading
-    // stdout to EOF because any unexpected descendant could inherit its pipe.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            child.terminate()?;
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "AppContainer process-limit child probe did not exit within 10 seconds",
-            ));
-        }
-        thread::sleep(Duration::from_millis(25));
+
+    let run_probe = |root: &Path, pids_max: u64, child_expected: bool| -> io::Result<()> {
+        let invocation = JailInvocation::new(
+            ExecRequest::new(vec![
+                test_executable.to_string_lossy().into_owned(),
+                "--exact".to_owned(),
+                "windows::tests::appcontainer_process_limit_child_probe".to_owned(),
+                "--nocapture".to_owned(),
+            ])
+            .with_cwd(root)
+            .with_env(
+                CHILD_PROBE,
+                if child_expected { "allowed" } else { "denied" },
+            ),
+            true,
+            Some(ResourceLimitPlan {
+                pids_max: Some(pids_max),
+                ..ResourceLimitPlan::default()
+            }),
+        );
+        let jail = Jail::new(root, "owned-child-pids-test").add_read_only(executable_directory);
+        let mut child = crate::spawn_owned_invocation_captured_with(
+            &AppContainerBackend::new(),
+            &jail,
+            &invocation,
+        )?;
+        // The probe test attempts to start a command. Avoid shell `start`: it
+        // waits inside cmd.exe when the active-process limit blocks creation.
+        // The outer wait is bounded and terminates the Job Object on timeout.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.terminate()?;
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "AppContainer process-limit child probe did not exit within 10 seconds",
+                ));
+            }
+            thread::sleep(Duration::from_millis(25));
+        };
+
+        assert!(status.success(), "process-limit probe failed: {status:?}");
+        assert_eq!(
+            std::fs::read(root.join("process-limit-probe-ran.txt"))?,
+            b"started",
+            "the nested test harness must execute the process-limit probe"
+        );
+        assert_eq!(
+            root.join("child.txt").exists(),
+            child_expected,
+            "the process-count limit should match the allowed child count"
+        );
+        Ok(())
     };
 
-    assert!(status.success(), "process-limit probe failed: {status:?}");
-    assert_eq!(
-        std::fs::read(probe_marker)?,
-        b"started",
-        "the nested test harness must execute the process-limit probe"
-    );
-    assert!(
-        !root.path().join("child.txt").exists(),
-        "the one-process Job Object limit must prevent descendant creation"
-    );
+    let allowed_root = tempfile::tempdir()?;
+    run_probe(allowed_root.path(), 2, true)?;
+
+    let denied_root = tempfile::tempdir()?;
+    run_probe(denied_root.path(), 1, false)?;
     Ok(())
 }
 
 #[test]
 fn appcontainer_process_limit_child_probe() {
-    if std::env::var_os("TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE").is_none() {
+    let Some(expectation) = std::env::var_os("TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE")
+    else {
         return;
-    }
+    };
 
     let root = std::env::current_dir().expect("AppContainer probe cwd should be available");
     std::fs::write(root.join("process-limit-probe-ran.txt"), b"started")
@@ -296,19 +308,22 @@ fn appcontainer_process_limit_child_probe() {
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
         .join("cmd.exe");
-    match Command::new(command)
+    let child = Command::new(command)
         .args(["/D", "/C", "echo child > child.txt"])
         .current_dir(root)
-        .spawn()
-    {
-        Err(error) => eprintln!("Job Object refused child creation: {error}"),
-        Ok(mut child) => {
+        .spawn();
+    match (expectation.to_string_lossy().as_ref(), child) {
+        ("denied", Err(error)) => eprintln!("Job Object refused child creation: {error}"),
+        ("allowed", Err(error)) => {
+            panic!("Job Object unexpectedly refused an allowed child: {error}")
+        }
+        (other, Ok(mut child)) => {
             let status = child.wait().expect("join the attempted descendant");
-            assert!(
-                !status.success(),
-                "the one-process Job Object limit must terminate the attempted descendant"
+            assert_eq!(
+                status.success(),
+                other == "allowed",
+                "Job Object process limit returned unexpected descendant status: {status:?}"
             );
-            eprintln!("Job Object terminated attempted descendant: {status:?}");
         }
     }
 }
