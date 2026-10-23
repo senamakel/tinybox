@@ -33,10 +33,8 @@
 //! # }
 //! ```
 
-#[cfg(test)]
-#[path = "egress_tests.rs"]
-mod egress_tests;
 mod egress;
+pub use egress::{EgressResolver, PinnedEgressPlan, PinnedEgressTarget, plan_egress_allowlist};
 mod oneshot;
 mod policy;
 mod sandbox;
