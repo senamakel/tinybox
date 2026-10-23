@@ -469,3 +469,9 @@ unsupported and refuse before starting the child. See
 Version 2.0 removes TinyBox command classification and execution-policy results
 after the contract 1.22 deprecation window. Hosts must reject modules from a
 different contract major. See `docs/specs/contract-2-0.md`.
+
+Version 2.5 adds optional native-jail `network_allowlist` intent. Hosts must
+check `supports_native_jail_network_allowlist` before sending it because older
+modules may ignore unknown fields. Native jail currently returns the typed
+`ConstraintNotEnforced` error before admission; no host or port filtering is
+claimed. See `docs/specs/contract-2-5.md`.
