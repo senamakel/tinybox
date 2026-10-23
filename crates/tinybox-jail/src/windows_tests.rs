@@ -207,9 +207,8 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
         !escaped.exists(),
         "write outside the grant should be denied"
     );
-    assert_eq!(
-        std::fs::read(&copied)?,
-        [],
+    assert!(
+        std::fs::read(&copied)?.is_empty(),
         "reading an outside file should be denied"
     );
     assert!(!output.contains("outside-secret"));
