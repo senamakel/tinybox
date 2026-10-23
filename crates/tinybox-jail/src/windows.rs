@@ -190,11 +190,11 @@ fn spawn_captured<'a>(
     for path in &writable {
         profile.grant_path(path, AppContainerAccess::ReadWrite)?;
     }
-    for path in jail
-        .read_only
-        .iter()
-        .filter(|path| !writable.iter().any(|writable| *writable == path))
-    {
+    for path in jail.read_only.iter().filter(|path| {
+        !writable
+            .iter()
+            .any(|writable| writable.as_path() == path.as_path())
+    }) {
         profile.grant_path(path, AppContainerAccess::Read)?;
     }
 
