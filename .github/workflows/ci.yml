@@ -90,6 +90,23 @@ jobs:
       - name: Run Windows feature tests
         shell: bash
         run: scripts/test-features.sh
+  windows-appcontainer-tests:
+    name: Windows AppContainer jail tests
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+      - name: Require Windows Server 2025 x64 runner
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          if ($os.Caption -notmatch 'Windows Server 2025' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw "Expected Windows Server 2025 x64, got '$($os.Caption)' / '$env:RUNNER_ARCH'"
+          }
+      - name: Run focused AppContainer jail tests
+        run: cargo test --locked -p tinybox-jail appcontainer_ -- --nocapture --test-threads=1
   native-resource-live:
     runs-on: ubuntu-latest
     steps:
