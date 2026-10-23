@@ -12,7 +12,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -241,6 +241,10 @@ fn spawn_captured<'a>(
         .stdin(&stdin_read)
         .stdout(&stdout_write)
         .stderr(&stderr_write);
+    let drive = drive_letter(cwd)?;
+    launch
+        .env_drive_current_dir(drive, cwd)
+        .map_err(|error| contextual_error("set AppContainer drive current directory", &error))?;
     if clear_env {
         launch.env_clear();
         // CreateProcess requires SystemRoot even when the caller clears the
@@ -279,6 +283,22 @@ fn spawn_captured<'a>(
 
 fn contextual_error(context: &str, error: &io::Error) -> io::Error {
     io::Error::new(error.kind(), format!("{context}: {error}"))
+}
+
+fn drive_letter(path: &Path) -> io::Result<char> {
+    let drive = match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => Some(drive),
+            _ => None,
+        },
+        _ => None,
+    };
+    drive.map(char::from).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "AppContainer working directory must be on a drive-letter volume",
+        )
+    })
 }
 
 fn job_limits(jail: &Jail, plan: Option<ResourceLimitPlan>) -> io::Result<JobLimits> {

@@ -42,7 +42,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # canonical tinystoragedrivers v2.1 commit.
 allow-git = [
     # Windows AppContainer launch dependency; Cargo.toml pins the reviewed
-    # Win-Custody source to an exact commit.
-    "https://github.com/115dkk/Win-Custody.rs",
+    # Win-Custody fork-epic merge; Cargo.toml pins the exact reviewed revision.
+    "https://github.com/senamakel/Win-Custody.rs",
     "https://github.com/tinyhumansai/tinystoragedrivers",
 ]
