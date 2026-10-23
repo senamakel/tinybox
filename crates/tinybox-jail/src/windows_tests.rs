@@ -570,12 +570,16 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
         )?;
         // The probe emits only marker files. Drop the captured pipes before waiting so
         // the timeout below cannot be defeated by a child that leaves a pipe open.
-        drop(child
-            .take_stdout()
-            .ok_or_else(|| io::Error::other("captured stdout missing"))?);
-        drop(child
-            .take_stderr()
-            .ok_or_else(|| io::Error::other("captured stderr missing"))?);
+        drop(
+            child
+                .take_stdout()
+                .ok_or_else(|| io::Error::other("captured stdout missing"))?,
+        );
+        drop(
+            child
+                .take_stderr()
+                .ok_or_else(|| io::Error::other("captured stderr missing"))?,
+        );
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -601,7 +605,10 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
                 status.success(),
                 "unlimited memory control failed: status={status:?}"
             );
-            assert!(completed.exists(), "unlimited control did not touch all pages");
+            assert!(
+                completed.exists(),
+                "unlimited control did not touch all pages"
+            );
             assert!(!refused.exists(), "unlimited control refused allocation");
         } else {
             assert!(!completed.exists(), "limited child touched all pages");
