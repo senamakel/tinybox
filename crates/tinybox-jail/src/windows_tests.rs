@@ -521,7 +521,6 @@ fn appcontainer_loopback_child_probe() {
 
 #[test]
 fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<()> {
-    use std::io::Read;
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
@@ -569,16 +568,14 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             &jail,
             &invocation,
         )?;
-        let mut output = String::new();
-        child
+        // The probe emits only marker files. Drop the captured pipes before waiting so
+        // the timeout below cannot be defeated by a child that leaves a pipe open.
+        drop(child
             .take_stdout()
-            .ok_or_else(|| io::Error::other("captured stdout missing"))?
-            .read_to_string(&mut output)?;
-        let mut error_output = String::new();
-        child
+            .ok_or_else(|| io::Error::other("captured stdout missing"))?);
+        drop(child
             .take_stderr()
-            .ok_or_else(|| io::Error::other("captured stderr missing"))?
-            .read_to_string(&mut error_output)?;
+            .ok_or_else(|| io::Error::other("captured stderr missing"))?);
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -589,22 +586,20 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
                 child.terminate()?;
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    format!(
-                        "AppContainer memory probe exceeded 15 seconds; stdout={output:?}, stderr={error_output:?}"
-                    ),
+                    "AppContainer memory probe exceeded 15 seconds",
                 ));
             }
             std::thread::sleep(Duration::from_millis(25));
         };
         if !started.exists() {
             return Err(io::Error::other(format!(
-                "AppContainer memory probe did not reach its allocation body: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+                "AppContainer memory probe did not reach its allocation body: status={status:?}"
             )));
         }
         if memory_limit.is_none() {
             assert!(
                 status.success(),
-                "unlimited memory control failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+                "unlimited memory control failed: status={status:?}"
             );
             assert!(completed.exists(), "unlimited control did not touch all pages");
             assert!(!refused.exists(), "unlimited control refused allocation");
@@ -612,7 +607,7 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
             assert!(!completed.exists(), "limited child touched all pages");
             assert!(
                 refused.exists() || !status.success(),
-                "memory limit did not block the over-budget allocation: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+                "memory limit did not block the over-budget allocation: status={status:?}"
             );
         }
         Ok(())

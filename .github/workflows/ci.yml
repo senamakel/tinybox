@@ -110,6 +110,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export TINYBOX_REQUIRE_APPCONTAINER_RESOURCE_TESTS=1
           tests=(
             windows::tests::appcontainer_backend_is_available_through_owned_process_supervision
             windows::tests::appcontainer_plan_check_keeps_cpu_unsupported_and_reports_job_limits
@@ -121,6 +122,7 @@ jobs:
             windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
             windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
             windows::tests::appcontainer_child_cannot_connect_to_host_loopback
+            windows::tests::live_appcontainer_memory_limit_blocks_over_budget_allocation
           )
           for test in "${tests[@]}"; do
             cargo test --locked -p tinybox-jail --lib "$test" -- --exact --nocapture --test-threads=1
