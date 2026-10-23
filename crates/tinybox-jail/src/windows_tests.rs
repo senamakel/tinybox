@@ -234,12 +234,14 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
                 format!("open descendant process {pid}: {error}"),
             )
         })?;
+    let descendant_exit_code = descendant
+        .exit_code()
+        .map_err(|error| io::Error::new(error.kind(), format!("query descendant: {error}")))?;
+    let descendant_stdout = std::fs::read_to_string(root.path().join("descendant.stdout"))?;
+    let descendant_stderr = std::fs::read_to_string(root.path().join("descendant.stderr"))?;
     assert_eq!(
-        descendant
-            .exit_code()
-            .map_err(|error| io::Error::new(error.kind(), format!("query descendant: {error}")))?,
-        None,
-        "descendant exited too early"
+        descendant_exit_code, None,
+        "descendant exited too early: stdout={descendant_stdout:?}, stderr={descendant_stderr:?}"
     );
 
     child
@@ -288,8 +290,13 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
         .join("cmd.exe");
+    let timeout = std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+        .join("System32")
+        .join("timeout.exe");
+    let command_line = format!("\"{}\" /T 300 /NOBREAK", timeout.display());
     let descendant = Command::new(command)
-        .args(["/D", "/C", "ping -n 300 127.0.0.1 > NUL"])
+        .args(["/D", "/C", command_line.as_str()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
