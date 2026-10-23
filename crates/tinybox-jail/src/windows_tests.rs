@@ -215,40 +215,45 @@ fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> 
 }
 
 #[test]
-fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()> {
+fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
     use std::thread;
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
     let root = tempfile::tempdir()?;
-    let command = std::env::var_os("ComSpec")
-        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
-        .to_string_lossy()
-        .into_owned();
+    let test_executable = std::env::current_exe()?;
+    let executable_directory = test_executable.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test executable has no parent directory",
+        )
+    })?;
+    const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
     let invocation = JailInvocation::new(
         ExecRequest::new([
-            command.as_str(),
-            "/D",
-            "/C",
-            "start \"\" /B cmd.exe /D /C \"echo child > child.txt\" & timeout /T 2 >NUL",
+            test_executable.as_os_str(),
+            OsStr::new("--exact"),
+            OsStr::new("windows::tests::appcontainer_process_limit_child_probe"),
+            OsStr::new("--nocapture"),
         ])
-        .with_cwd(root.path()),
+        .with_cwd(root.path())
+        .env(CHILD_PROBE, "1"),
         true,
         Some(ResourceLimitPlan {
             pids_max: Some(1),
             ..ResourceLimitPlan::default()
         }),
     );
+    let jail = Jail::new(root.path(), "owned-child-pids-test").add_read_only(executable_directory);
     let mut child = crate::spawn_owned_invocation_captured_with(
         &AppContainerBackend::new(),
-        &Jail::new(root.path(), "owned-child-pids-test"),
+        &jail,
         &invocation,
     )?;
-    // A child that escapes the process limit may inherit the captured stdout
-    // handle. Reading until EOF would then wait for that descendant forever,
-    // hiding the process-limit failure as a hung test. Observe the owned
-    // process directly and bound the wait; the Job Object is terminated on a
-    // timeout and again when `child` is dropped.
+    // The probe test attempts to start a command and records an error if the
+    // Job Object rejects it. Avoid shell `start`: it waits inside cmd.exe when
+    // the active-process limit blocks child creation. Also avoid reading
+    // stdout to EOF because any unexpected descendant could inherit its pipe.
     let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -258,18 +263,47 @@ fn windows_appcontainer_process_limit_refuses_child_creation() -> io::Result<()>
             child.terminate()?;
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "AppContainer process-limit parent did not exit within 10 seconds",
+                "AppContainer process-limit child probe did not exit within 10 seconds",
             ));
         }
         thread::sleep(Duration::from_millis(25));
     };
 
-    assert!(status.success(), "unexpected parent status: {status:?}");
+    assert!(status.success(), "process-limit probe failed: {status:?}");
     assert!(
         !root.path().join("child.txt").exists(),
         "the one-process Job Object limit must prevent descendant creation"
     );
     Ok(())
+}
+
+#[test]
+fn appcontainer_process_limit_child_probe() {
+    if std::env::var_os("TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE").is_none() {
+        return;
+    }
+
+    let root = std::env::current_dir().expect("AppContainer probe cwd should be available");
+    let command = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("cmd.exe");
+    match Command::new(command)
+        .args(["/D", "/C", "echo child > child.txt"])
+        .current_dir(root)
+        .spawn()
+    {
+        Err(error) => eprintln!("Job Object refused child creation: {error}"),
+        Ok(mut child) => {
+            let status = child.wait().expect("join the attempted descendant");
+            assert!(
+                !status.success(),
+                "the one-process Job Object limit must terminate the attempted descendant"
+            );
+            eprintln!("Job Object terminated attempted descendant: {status:?}");
+        }
+    }
 }
 
 #[test]
