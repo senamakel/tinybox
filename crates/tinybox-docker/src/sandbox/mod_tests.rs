@@ -23,6 +23,64 @@ use tinybox_core::{
 
 use super::{DockerSandbox, NAME, args, cleanup_timeout_error, state};
 
+#[derive(Debug)]
+struct RecordingEgressController;
+
+#[async_trait]
+impl super::DockerEgressController for RecordingEgressController {
+    async fn prepare(
+        &self,
+        host: &dyn Host,
+        _namespace: &str,
+        _id: &BoxId,
+        _allowlist: &tinybox_core::EgressAllowlist,
+    ) -> Result<super::PreparedEgressNetwork> {
+        host.run(&ExecRequest::new(["controller", "prepare"]))
+            .await?;
+        Ok(super::PreparedEgressNetwork::new(
+            "tinybox-allowlist-test".to_owned(),
+            vec![("api.example.test".to_owned(), "203.0.113.8".parse().unwrap())],
+        ))
+    }
+
+    async fn cleanup(&self, host: &dyn Host, _namespace: &str, _id: &BoxId) -> Result<()> {
+        host.run(&ExecRequest::new(["controller", "cleanup"]))
+            .await?;
+        Ok(())
+    }
+
+    fn docker_argv(&self, argv: Vec<String>) -> Vec<String> {
+        argv
+    }
+}
+
+#[tokio::test]
+async fn allowlist_controller_prepares_before_start_and_cleans_after_destroy() -> Result<()> {
+    let host = ScriptedHost::silent();
+    let sandbox = DockerSandbox::new(host.clone(), Arc::new(MemoryStore::new()))
+        .with_egress_controller(Arc::new(RecordingEgressController));
+    let allowlist = tinybox_core::EgressAllowlist::new(["api.example.test"], [443]);
+    let info = sandbox
+        .create(&spec()?.with_network(NetworkPolicy::Allowlist(allowlist)))
+        .await?;
+
+    let commands = host.commands();
+    assert_eq!(commands[0], ["controller", "prepare"]);
+    assert_eq!(commands[1][0], "docker");
+    assert!(commands[1].contains(&"--network".to_owned()));
+    assert!(commands[1].contains(&"tinybox-allowlist-test".to_owned()));
+    assert!(commands[1].contains(&"--add-host".to_owned()));
+    assert!(commands[1].contains(&"api.example.test:203.0.113.8".to_owned()));
+    assert!(commands[1].contains(&"--dns".to_owned()));
+    assert!(commands[1].contains(&"127.0.0.1".to_owned()));
+
+    sandbox.destroy(&info.id).await?;
+    let commands = host.commands();
+    assert_eq!(commands[2][0], "docker");
+    assert_eq!(commands[3], ["controller", "cleanup"]);
+    Ok(())
+}
+
 #[test]
 fn effective_published_ports_parse_dynamic_and_fixed_bindings() -> Result<()> {
     let ports = args::parse_published_ports(
