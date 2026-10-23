@@ -466,7 +466,7 @@ async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()>
         &sandbox,
         &spec(dir.path())?.with_network(NetworkPolicy::Egress),
         &format!(
-            "/usr/bin/python3 -c 'import socket; s=socket.socket(); s.settimeout(2); print(\"CONNECTED\" if s.connect_ex((\"127.0.0.1\", {egress_port})) == 0 else \"DENIED\")'
+            r#"/usr/bin/python3 -c "import socket; s=socket.socket(); s.settimeout(2); print('CONNECTED' if s.connect_ex(('127.0.0.1', {egress_port})) == 0 else 'DENIED')""#
         ),
     )
     .await?;
@@ -488,7 +488,7 @@ async fn live_network_policy_controls_host_loopback_connectivity() -> Result<()>
         &sandbox,
         &spec(dir.path())?,
         &format!(
-            "/usr/bin/python3 -c 'import socket; s=socket.socket(); s.settimeout(2); print(\"CONNECTED\" if s.connect_ex((\"127.0.0.1\", {denied_port})) == 0 else \"DENIED\")'
+            r#"/usr/bin/python3 -c "import socket; s=socket.socket(); s.settimeout(2); print('CONNECTED' if s.connect_ex(('127.0.0.1', {denied_port})) == 0 else 'DENIED')""#
         ),
     )
     .await?;
