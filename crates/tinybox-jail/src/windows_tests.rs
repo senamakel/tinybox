@@ -156,6 +156,7 @@ fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Resu
 #[test]
 fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::Result<()> {
     use std::{
+        io::Read,
         thread,
         time::{Duration, Instant},
     };
@@ -203,9 +204,19 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
         }
         thread::sleep(Duration::from_millis(25));
     };
+    let mut parent_stdout = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("parent probe stdout missing"))?
+        .read_to_string(&mut parent_stdout)?;
+    let mut parent_stderr = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("parent probe stderr missing"))?
+        .read_to_string(&mut parent_stderr)?;
     assert!(
         parent_status.success(),
-        "parent probe failed: {parent_status:?}"
+        "parent probe failed: {parent_status:?}, stdout={parent_stdout:?}, stderr={parent_stderr:?}"
     );
 
     let pid = std::fs::read_to_string(&pid_file)?
