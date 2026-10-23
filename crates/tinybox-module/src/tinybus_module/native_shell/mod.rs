@@ -65,7 +65,7 @@ impl ShellContext {
             root,
             resolved,
             resources,
-            tinybox_jail::default_backend(),
+            tinybox_jail::default_owned_backend(),
         )
     }
     fn prepare_with_backend_and_resource_limits(

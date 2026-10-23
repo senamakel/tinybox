@@ -145,7 +145,7 @@ impl BoxService {
     /// network namespace) reports its weaker level here. Admission decisions
     /// use the per-jail form in `native_jail::prepare`.
     async fn jail_status(&self) -> TinyBusResult<tinybox_bus::JailStatus> {
-        let backend = tinybox_jail::default_backend();
+        let backend = tinybox_jail::default_owned_backend();
         let support = backend.constraint_support();
         std::future::ready(Ok(tinybox_bus::JailStatus {
             backend: backend.name().into(),
