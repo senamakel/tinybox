@@ -524,6 +524,8 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
 
+    const MEMORY_LIMIT: u64 = 128 * 1024 * 1024;
+
     if std::env::var_os("TINYBOX_REQUIRE_APPCONTAINER_RESOURCE_TESTS").as_deref()
         != Some(std::ffi::OsStr::new("1"))
     {
@@ -531,7 +533,6 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
         return Ok(());
     }
 
-    const MEMORY_LIMIT: u64 = 128 * 1024 * 1024;
     let executable = std::env::current_exe()?;
     let executable_arg = executable.to_string_lossy().into_owned();
     let executable_directory = executable.parent().ok_or_else(|| {
@@ -630,12 +631,13 @@ fn live_appcontainer_memory_limit_blocks_over_budget_allocation() -> io::Result<
 
 #[test]
 fn appcontainer_memory_limit_child_probe() -> io::Result<()> {
+    const CHUNK_BYTES: usize = 16 * 1024 * 1024;
+    const CHUNKS: usize = 16;
+
     if std::env::var_os("TINYBOX_APPCONTAINER_MEMORY_PROBE").is_none() {
         return Ok(());
     }
 
-    const CHUNK_BYTES: usize = 16 * 1024 * 1024;
-    const CHUNKS: usize = 16;
     let root = std::env::current_dir()?;
     std::fs::write(root.join("memory-probe-started.txt"), b"started")?;
     let mut allocations = Vec::new();
