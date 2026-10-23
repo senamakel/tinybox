@@ -230,14 +230,14 @@ fn appcontainer_process_limit_child_creation_is_denied() -> io::Result<()> {
     })?;
     const CHILD_PROBE: &str = "TINYBOX_APPCONTAINER_PROCESS_LIMIT_CHILD_PROBE";
     let invocation = JailInvocation::new(
-        ExecRequest::new([
-            test_executable.as_os_str(),
-            OsStr::new("--exact"),
-            OsStr::new("windows::tests::appcontainer_process_limit_child_probe"),
-            OsStr::new("--nocapture"),
+        ExecRequest::new(vec![
+            test_executable.to_string_lossy().into_owned(),
+            "--exact".to_owned(),
+            "windows::tests::appcontainer_process_limit_child_probe".to_owned(),
+            "--nocapture".to_owned(),
         ])
         .with_cwd(root.path())
-        .env(CHILD_PROBE, "1"),
+        .with_env(CHILD_PROBE, "1"),
         true,
         Some(ResourceLimitPlan {
             pids_max: Some(1),
