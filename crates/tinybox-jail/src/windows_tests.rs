@@ -304,6 +304,9 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             "-Command",
             "Start-Sleep -Seconds 300",
         ])
+        .env("LOCALAPPDATA", &root)
+        .env("APPDATA", &root)
+        .env("USERPROFILE", &root)
         .env("TEMP", &root)
         .env("TMP", &root)
         .stdin(std::process::Stdio::piped())
