@@ -41,7 +41,7 @@ impl super::DockerEgressController for RecordingEgressController {
             "tinybox-allowlist-test".to_owned(),
             vec![(
                 "api.example.test".to_owned(),
-                "203.0.113.8".parse().unwrap(),
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 8)),
             )],
         ))
     }
