@@ -287,26 +287,26 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
     let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
         io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
     })?;
-    let script = root.join("descendant-wait.vbs");
-    std::fs::write(&script, "WScript.Sleep 300000\r\n")?;
     // Windows denies launching the test executable from inside the
-    // AppContainer. Use the script host with a bounded wait script stored
-    // under the granted cwd; this does not read stdin or use host temp paths.
-    let cscript = std::env::var_os("SystemRoot")
+    // AppContainer. Use a bounded cmd.exe built-in loop to keep the descendant
+    // alive long enough for the host to inspect and terminate it. The loop
+    // touches neither stdin, network, temp paths, nor device redirections.
+    let command = std::env::var_os("SystemRoot")
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
         .join("System32")
-        .join("cscript.exe");
-    let mut descendant = Command::new(cscript)
-        .args(["//nologo", script.to_string_lossy().as_ref()])
+        .join("cmd.exe");
+    let mut descendant = Command::new(command)
+        .args([
+            "/D",
+            "/C",
+            "for /L %i in (1,1,5000000) do @set _tinybox_wait=%i",
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
         .stderr(std::process::Stdio::from(child_stderr))
         .spawn()
         .map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("spawn cscript descendant probe: {error}"),
-            )
+            io::Error::new(error.kind(), format!("spawn cmd descendant probe: {error}"))
         })?;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -314,7 +314,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
             let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
             let stderr = std::fs::read_to_string(root.join("descendant.stderr"))?;
             return Err(io::Error::other(format!(
-                "cscript descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
+                "cmd descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
             )));
         }
         if Instant::now() >= deadline {
