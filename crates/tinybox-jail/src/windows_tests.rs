@@ -154,6 +154,137 @@ fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Resu
 }
 
 #[test]
+fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::Result<()> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    use tinybox_core::ExecRequest;
+    use win_custody::{Process, ProcessAccess, WaitOutcome};
+
+    const DESCENDANT_PID_FILE: &str = "TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE";
+    const PARENT_PROBE: &str = "windows::tests::appcontainer_owned_descendant_parent_probe";
+    let root = tempfile::tempdir()?;
+    let executable = std::env::current_exe()?;
+    let executable_directory = executable.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "test executable has no parent")
+    })?;
+    let pid_file = root.path().join("descendant.pid");
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable.to_string_lossy().into_owned(),
+            "--exact".to_owned(),
+            PARENT_PROBE.to_owned(),
+            "--nocapture".to_owned(),
+        ])
+        .with_cwd(root.path())
+        .with_env(DESCENDANT_PID_FILE, pid_file.to_string_lossy().into_owned()),
+        true,
+        None,
+    );
+    let jail =
+        Jail::new(root.path(), "owned-descendant-cleanup-test").add_read_only(executable_directory);
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let parent_deadline = Instant::now() + Duration::from_secs(10);
+    let parent_status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= parent_deadline {
+            child.terminate()?;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer descendant parent did not exit within 10 seconds",
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    assert!(
+        parent_status.success(),
+        "parent probe failed: {parent_status:?}"
+    );
+
+    let pid = std::fs::read_to_string(&pid_file)?
+        .parse::<u32>()
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid child PID: {error}"),
+            )
+        })?;
+    let descendant = Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize)?;
+    assert_eq!(descendant.exit_code()?, None, "descendant exited too early");
+
+    child.terminate()?;
+
+    assert_eq!(
+        descendant.wait(Some(Duration::from_secs(5)))?,
+        WaitOutcome::Signaled,
+        "terminating an owned child must also stop its surviving Job descendants"
+    );
+    assert!(descendant.exit_code()?.is_some());
+    Ok(())
+}
+
+#[test]
+fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE") else {
+        return Ok(());
+    };
+    let executable = std::env::current_exe()?;
+    let mut descendant = Command::new(executable)
+        .args([
+            "--exact",
+            "windows::tests::appcontainer_owned_descendant_child_probe",
+            "--nocapture",
+        ])
+        .env("TINYBOX_APPCONTAINER_DESCENDANT_CHILD_PID_FILE", &pid_file)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let pid_file = PathBuf::from(pid_file);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pid_file.exists() {
+        if let Some(status) = descendant.try_wait()? {
+            return Err(io::Error::other(format!(
+                "descendant probe exited before readiness: {status:?}"
+            )));
+        }
+        if Instant::now() >= deadline {
+            let _ = descendant.kill();
+            let _ = descendant.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer descendant did not report readiness",
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Ok(())
+}
+
+#[test]
+fn appcontainer_owned_descendant_child_probe() -> io::Result<()> {
+    let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_CHILD_PID_FILE") else {
+        return Ok(());
+    };
+    std::fs::write(pid_file, std::process::id().to_string())?;
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+#[test]
 fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> io::Result<()> {
     use std::io::Read;
 
