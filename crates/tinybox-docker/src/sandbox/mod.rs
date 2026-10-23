@@ -338,7 +338,7 @@ impl DockerSandbox {
             let controller = self
                 .egress_controller
                 .as_ref()
-                .ok_or_else(|| unsupported_egress_policy())?;
+                .ok_or_else(unsupported_egress_policy)?;
             controller.validate_host(self.host.as_ref()).await
         } else {
             spec.network.refuse_allowlist(self.name())
@@ -356,7 +356,7 @@ impl DockerSandbox {
         let controller = self
             .egress_controller
             .as_ref()
-            .ok_or_else(|| unsupported_egress_policy())?;
+            .ok_or_else(unsupported_egress_policy)?;
         controller
             .prepare(self.host.as_ref(), &self.namespace, id, allowlist)
             .await
@@ -519,6 +519,7 @@ impl DockerSandbox {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Sandbox for DockerSandbox {
     fn name(&self) -> &'static str {
@@ -657,14 +658,14 @@ impl Sandbox for DockerSandbox {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .contains_key(&info.id);
-                if !has_retained_attempt {
-                    if let Err(cleanup_error) = self.cleanup_egress(&info.id).await {
-                        self.failed_create_attempts
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .insert(info.id.clone(), attempt.clone());
-                        return Err(cleanup_error);
-                    }
+                if !has_retained_attempt
+                    && let Err(cleanup_error) = self.cleanup_egress(&info.id).await
+                {
+                    self.failed_create_attempts
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(info.id.clone(), attempt.clone());
+                    return Err(cleanup_error);
                 }
             }
             return Err(error);
