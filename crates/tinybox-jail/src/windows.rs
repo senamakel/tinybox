@@ -269,7 +269,8 @@ fn spawn_captured<'a>(
             io::Error::new(
                 error.kind(),
                 format!(
-                    "create suspended AppContainer child (current_dir={environment_cwd:?}, drive_entry={drive_entry:?}): {error}"
+                    "create suspended AppContainer child (current_dir={}, drive_entry={drive_entry:?}): {error}",
+                    environment_cwd.display()
                 ),
             )
         })?;
