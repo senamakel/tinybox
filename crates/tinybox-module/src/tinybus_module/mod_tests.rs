@@ -349,6 +349,30 @@ fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness
     Ok(())
 }
 
+#[test]
+fn windows_passthrough_plan_check_reports_cpu_as_unsupported() -> tinybus::Result<()> {
+    let response = super::resources::plan_check(
+        tinybox_bus::PlanCheckRequest {
+            backend: "passthrough".into(),
+            constraints: vec![tinybox_bus::ConstraintRequest {
+                constraint: tinybox_bus::ResourceConstraint::Cpu,
+                hard: true,
+            }],
+        },
+        Platform::Windows,
+    )?;
+
+    assert_eq!(
+        response.results,
+        vec![tinybox_bus::ConstraintResult {
+            constraint: tinybox_bus::ResourceConstraint::Cpu,
+            hard: true,
+            enforcement: tinybox_bus::ConstraintEnforcement::Unsupported,
+        }]
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn plan_check_bus_member_returns_the_backend_preflight() -> tinybus::Result<()> {
     let response = BoxService::default()
