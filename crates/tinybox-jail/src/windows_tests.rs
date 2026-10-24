@@ -846,9 +846,13 @@ public static class TinyBoxShortPath {
         .trim()
         .to_owned();
     assert!(!short_path.is_empty(), "GetShortPathNameW returned an empty path");
+    let short_filename = Path::new(&short_path)
+        .file_name()
+        .map(OsStr::to_string_lossy)
+        .unwrap_or_default();
     assert!(
-        short_path.contains('~'),
-        "the Windows runner must produce a distinct 8.3 alias for the probe path; got {short_path:?}"
+        short_filename.contains('~'),
+        "the Windows runner must produce an 8.3 alias for the secret filename; got {short_path:?}"
     );
     assert_eq!(
         std::fs::read_to_string(&short_path)?,
