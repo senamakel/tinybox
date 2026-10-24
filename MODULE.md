@@ -5,7 +5,8 @@ Install only the archive matching the host operating system and architecture.
 
 The module claims `ai.tinyhumans.tinybox.Box` and serves the object at
 `/ai/tinyhumans/tinybox/Box`. `Describe` remains the original zero-argument
-discovery method; the current bus contract is version 2.5 and also exposes
+discovery method and returns this build's package version, compiled backends,
+and trust-suitability summary. The current bus contract is version 2.5 and also exposes
 `Capabilities`, typed `PlanCheck`, resource and process operations, and the
 `ProcessEvent` signal. `Capabilities` reports this build's contract version and
 available backends. `PlanCheck` reports each selected backend's declared
