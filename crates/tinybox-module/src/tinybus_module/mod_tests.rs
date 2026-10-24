@@ -314,7 +314,7 @@ fn process_event_signal_is_declared_in_the_current_contract() {
 
 #[test]
 fn install_guide_documents_the_current_bus_contract_and_observations() {
-    let guide = include_str!("../../../MODULE.md");
+    let guide = include_str!("../../../../MODULE.md");
     let (major, minor) = tinybox_bus::CONTRACT_VERSION;
 
     assert!(guide.contains(&format!("bus contract version {major}.{minor}")));
