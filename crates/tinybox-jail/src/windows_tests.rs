@@ -789,11 +789,6 @@ fn appcontainer_denies_parent_traversal_reads_outside_granted_roots() -> io::Res
 
 #[test]
 fn appcontainer_denies_short_name_alias_reads_outside_granted_roots() -> io::Result<()> {
-    use std::io::Read;
-    use std::process::Command;
-    use std::time::{Duration, Instant};
-    use tinybox_core::ExecRequest;
-
     const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_SHORT_NAME_READ_PROBE";
     const SECRET: &str = "outside-short-name-secret";
 
@@ -805,52 +800,7 @@ fn appcontainer_denies_short_name_alias_reads_outside_granted_roots() -> io::Res
     let secret = outside_root.join("outside secret with a long filename.txt");
     std::fs::write(&secret, SECRET)?;
 
-    let short_path_script = r#"
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Text;
-public static class TinyBoxShortPath {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetShortPathNameW(string longPath, StringBuilder shortPath, uint bufferLength);
-
-    public static string Get(string longPath) {
-        uint required = GetShortPathNameW(longPath, null, 0);
-        if (required == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-        var buffer = new StringBuilder(checked((int)required + 1));
-        uint written = GetShortPathNameW(longPath, buffer, (uint)buffer.Capacity);
-        if (written == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (written >= buffer.Capacity) throw new InvalidOperationException("short path buffer was too small");
-        return buffer.ToString();
-    }
-}
-'@
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::Write([TinyBoxShortPath]::Get($env:TINYBOX_SHORT_NAME_TARGET))
-"#;
-    let short_path_output = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            short_path_script,
-        ])
-        .env("TINYBOX_SHORT_NAME_TARGET", &secret)
-        .output()?;
-    if !short_path_output.status.success() {
-        return Err(io::Error::other(format!(
-            "GetShortPathNameW failed: status={:?}, stderr={}",
-            short_path_output.status,
-            String::from_utf8_lossy(&short_path_output.stderr)
-        )));
-    }
-    let short_path = String::from_utf8(short_path_output.stdout)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
-        .trim()
-        .to_owned();
+    let short_path = short_path_with_get_short_path_name(&secret)?;
     assert!(
         !short_path.is_empty(),
         "GetShortPathNameW returned an empty path"
@@ -869,6 +819,82 @@ public static class TinyBoxShortPath {
         "the host must resolve the short-name alias before testing AppContainer denial"
     );
 
+    let (status, output, error_output) =
+        appcontainer_short_name_read_probe(&granted_root, PROBE_ENV, &short_path)?;
+
+    assert!(
+        status.success(),
+        "short-name child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        output.contains("SHORT_NAME_READ_DENIED"),
+        "AppContainer must deny the short-name alias outside granted roots: stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        !output.contains(SECRET),
+        "AppContainer child read the outside secret through an 8.3 alias"
+    );
+    Ok(())
+}
+
+fn short_path_with_get_short_path_name(path: &Path) -> io::Result<String> {
+    use std::process::Command;
+
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class TinyBoxShortPath {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathNameW(string longPath, StringBuilder shortPath, uint bufferLength);
+    public static string Get(string longPath) {
+        uint required = GetShortPathNameW(longPath, null, 0);
+        if (required == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var buffer = new StringBuilder(checked((int)required + 1));
+        uint written = GetShortPathNameW(longPath, buffer, (uint)buffer.Capacity);
+        if (written == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (written >= buffer.Capacity) throw new InvalidOperationException("short path buffer was too small");
+        return buffer.ToString();
+    }
+}
+'@
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::Write([TinyBoxShortPath]::Get($env:TINYBOX_SHORT_NAME_TARGET))
+"#;
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
+        .env("TINYBOX_SHORT_NAME_TARGET", path)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "GetShortPathNameW failed: status={:?}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    String::from_utf8(output.stdout)
+        .map(|path| path.trim().to_owned())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn appcontainer_short_name_read_probe(
+    root: &Path,
+    probe_env: &str,
+    short_path: &str,
+) -> io::Result<(std::process::ExitStatus, String, String)> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
     let executable = std::env::current_exe()?;
     let executable_arg = executable.to_string_lossy().into_owned();
     let executable_directory = executable
@@ -881,12 +907,12 @@ public static class TinyBoxShortPath {
             "windows::tests::appcontainer_short_name_read_child_probe",
             "--nocapture",
         ])
-        .with_cwd(&granted_root)
-        .with_env(PROBE_ENV, short_path),
+        .with_cwd(root)
+        .with_env(probe_env, short_path),
         true,
         None,
     );
-    let jail = Jail::new(&granted_root, "short-name-path-denial-test")
+    let jail = Jail::new(root, "short-name-path-denial-test")
         .add_read_only(executable_directory)
         .deny_net();
     let mut child = crate::spawn_owned_invocation_captured_with(
@@ -936,20 +962,7 @@ public static class TinyBoxShortPath {
     let error_output = stderr_reader
         .join()
         .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
-
-    assert!(
-        status.success(),
-        "short-name child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
-    );
-    assert!(
-        output.contains("SHORT_NAME_READ_DENIED"),
-        "AppContainer must deny the short-name alias outside granted roots: stdout={output:?}, stderr={error_output:?}"
-    );
-    assert!(
-        !output.contains(SECRET),
-        "AppContainer child read the outside secret through an 8.3 alias"
-    );
-    Ok(())
+    Ok((status, output, error_output))
 }
 
 #[test]
