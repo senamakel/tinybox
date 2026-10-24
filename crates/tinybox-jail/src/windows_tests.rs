@@ -592,6 +592,11 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
     let secret = outside.path().join("secret.txt");
     std::fs::write(&secret, SECRET)?;
     let verbatim_secret = verbatim_dos_path(&secret)?;
+    assert_eq!(
+        std::fs::read_to_string(&verbatim_secret)?,
+        SECRET,
+        "the host must resolve the verbatim path before testing AppContainer denial"
+    );
     let executable = std::env::current_exe()?;
     let executable_arg = executable.to_string_lossy().into_owned();
     let executable_directory = executable
@@ -605,7 +610,7 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
             "--nocapture",
         ])
         .with_cwd(root.path())
-        .with_env(PROBE_ENV, verbatim_secret.as_os_str()),
+        .with_env(PROBE_ENV, verbatim_secret.to_string_lossy().into_owned()),
         true,
         None,
     );
