@@ -84,6 +84,7 @@ jobs:
             windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
             windows::tests::appcontainer_denies_verbatim_path_reads_outside_granted_roots
             windows::tests::appcontainer_denies_parent_traversal_reads_outside_granted_roots
+            windows::tests::appcontainer_denies_short_name_alias_reads_outside_granted_roots
             windows::tests::appcontainer_child_cannot_connect_to_host_loopback
             windows::tests::live_appcontainer_memory_limit_blocks_over_budget_allocation
           )
@@ -151,6 +152,7 @@ jobs:
             windows::tests::appcontainer_owned_termination_stops_descendants_after_parent_exit
             windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
             windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
+            windows::tests::appcontainer_denies_short_name_alias_reads_outside_granted_roots
             windows::tests::appcontainer_child_cannot_connect_to_host_loopback
             windows::tests::live_appcontainer_memory_limit_blocks_over_budget_allocation
           )
