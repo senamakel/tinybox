@@ -788,6 +788,158 @@ fn appcontainer_denies_parent_traversal_reads_outside_granted_roots() -> io::Res
 }
 
 #[test]
+fn appcontainer_denies_short_name_alias_reads_outside_granted_roots() -> io::Result<()> {
+    use std::io::Read;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_SHORT_NAME_READ_PROBE";
+    const SECRET: &str = "outside-short-name-secret";
+
+    let workspace = tempfile::tempdir()?;
+    let granted_root = workspace.path().join("granted");
+    let outside_root = workspace.path().join("sibling directory with long name");
+    std::fs::create_dir(&granted_root)?;
+    std::fs::create_dir(&outside_root)?;
+    let secret = outside_root.join("outside secret with a long filename.txt");
+    std::fs::write(&secret, SECRET)?;
+
+    let short_path_script = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class TinyBoxShortPath {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathNameW(string longPath, StringBuilder shortPath, uint bufferLength);
+
+    public static string Get(string longPath) {
+        uint required = GetShortPathNameW(longPath, null, 0);
+        if (required == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var buffer = new StringBuilder(checked((int)required + 1));
+        uint written = GetShortPathNameW(longPath, buffer, (uint)buffer.Capacity);
+        if (written == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (written >= buffer.Capacity) throw new InvalidOperationException("short path buffer was too small");
+        return buffer.ToString();
+    }
+}
+'@
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::Write([TinyBoxShortPath]::Get($env:TINYBOX_SHORT_NAME_TARGET))
+"#;
+    let short_path_output = Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", short_path_script])
+        .env("TINYBOX_SHORT_NAME_TARGET", &secret)
+        .output()?;
+    if !short_path_output.status.success() {
+        return Err(io::Error::other(format!(
+            "GetShortPathNameW failed: status={:?}, stderr={}",
+            short_path_output.status,
+            String::from_utf8_lossy(&short_path_output.stderr)
+        )));
+    }
+    let short_path = String::from_utf8(short_path_output.stdout)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        .trim()
+        .to_owned();
+    assert!(!short_path.is_empty(), "GetShortPathNameW returned an empty path");
+    assert!(
+        short_path.contains('~'),
+        "the Windows runner must produce a distinct 8.3 alias for the probe path; got {short_path:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&short_path)?,
+        SECRET,
+        "the host must resolve the short-name alias before testing AppContainer denial"
+    );
+
+    let executable = std::env::current_exe()?;
+    let executable_arg = executable.to_string_lossy().into_owned();
+    let executable_directory = executable
+        .parent()
+        .ok_or_else(|| io::Error::other("test executable has no parent directory"))?;
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable_arg.as_str(),
+            "--exact",
+            "windows::tests::appcontainer_short_name_read_child_probe",
+            "--nocapture",
+        ])
+        .with_cwd(&granted_root)
+        .with_env(PROBE_ENV, short_path),
+        true,
+        None,
+    );
+    let jail = Jail::new(&granted_root, "short-name-path-denial-test")
+        .add_read_only(executable_directory)
+        .deny_net();
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let stdout = child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?;
+    let stderr = child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stdout
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stderr
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.terminate()?;
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer short-name probe exceeded 10 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = stdout_reader
+        .join()
+        .map_err(|_| io::Error::other("stdout reader thread panicked"))??;
+    let error_output = stderr_reader
+        .join()
+        .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
+
+    assert!(
+        status.success(),
+        "short-name child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        output.contains("SHORT_NAME_READ_DENIED"),
+        "AppContainer must deny the short-name alias outside granted roots: stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        !output.contains(SECRET),
+        "AppContainer child read the outside secret through an 8.3 alias"
+    );
+    Ok(())
+}
+
+#[test]
 fn appcontainer_parent_traversal_read_child_probe() {
     const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_PARENT_READ_PROBE";
     let Some(path) = std::env::var_os(PROBE_ENV) else {
@@ -802,6 +954,22 @@ fn appcontainer_parent_traversal_read_child_probe() {
             );
         }
         Err(error) => println!("OUTSIDE_READ_DENIED:{error}"),
+    }
+}
+
+#[test]
+fn appcontainer_short_name_read_child_probe() {
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_SHORT_NAME_READ_PROBE";
+    let Some(path) = std::env::var_os(PROBE_ENV) else {
+        return;
+    };
+
+    match std::fs::read(path) {
+        Ok(contents) => println!(
+            "SHORT_NAME_READ_ALLOWED:{}",
+            String::from_utf8_lossy(&contents)
+        ),
+        Err(error) => println!("SHORT_NAME_READ_DENIED:{error}"),
     }
 }
 
