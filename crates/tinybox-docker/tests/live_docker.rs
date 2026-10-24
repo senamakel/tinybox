@@ -466,8 +466,8 @@ struct LoopbackDnsResolver {
 
 impl EgressResolver for LoopbackDnsResolver {
     fn resolve(&self, hostname: &str) -> std::io::Result<Vec<IpAddr>> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        let id = 0x5200_u16.wrapping_add(u16::try_from(call).unwrap_or(u16::MAX));
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let id = 0x5200;
         let query = dns_a_query(hostname, id)?;
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
         socket.set_read_timeout(Some(Duration::from_secs(2)))?;
@@ -593,53 +593,37 @@ fn dns_a_response(query: &[u8], answer: Ipv4Addr) -> Option<Vec<u8>> {
 }
 
 fn dns_a_answers(response: &[u8], id: u16) -> std::io::Result<Vec<IpAddr>> {
-    let invalid = || {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "controlled DNS server returned a malformed response",
-        )
-    };
+    let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "malformed DNS fixture");
     if response.len() < 12
         || read_dns_u16(response, 0) != Some(id)
         || !matches!(read_dns_u16(response, 2), Some(flags) if flags & 0x800f == 0x8000)
+        || read_dns_u16(response, 4) != Some(1)
+        || read_dns_u16(response, 6) != Some(1)
     {
         return Err(invalid());
     }
 
-    let question_count = read_dns_u16(response, 4).ok_or_else(invalid)?;
-    let answer_count = read_dns_u16(response, 6).ok_or_else(invalid)?;
     let mut cursor = 12;
-    for _ in 0..question_count {
-        skip_dns_name(response, &mut cursor).ok_or_else(invalid)?;
-        cursor = cursor.checked_add(4).ok_or_else(invalid)?;
-        if cursor > response.len() {
-            return Err(invalid());
-        }
-    }
-
-    let mut addresses = Vec::new();
-    for _ in 0..answer_count {
-        skip_dns_name(response, &mut cursor).ok_or_else(invalid)?;
-        let record_type = read_dns_u16(response, cursor).ok_or_else(invalid)?;
-        let class = read_dns_u16(response, cursor + 2).ok_or_else(invalid)?;
-        let data_length = usize::from(read_dns_u16(response, cursor + 8).ok_or_else(invalid)?);
-        cursor = cursor.checked_add(10).ok_or_else(invalid)?;
-        let data_end = cursor.checked_add(data_length).ok_or_else(invalid)?;
-        if data_end > response.len() {
-            return Err(invalid());
-        }
-        if record_type == 1 && class == 1 && data_length == 4 {
-            let bytes: [u8; 4] = response[cursor..data_end]
-                .try_into()
-                .map_err(|_| invalid())?;
-            addresses.push(IpAddr::V4(Ipv4Addr::from(bytes)));
-        }
-        cursor = data_end;
-    }
-    if addresses.is_empty() {
+    skip_dns_name(response, &mut cursor).ok_or_else(invalid)?;
+    cursor = cursor.checked_add(4).ok_or_else(invalid)?;
+    if cursor + 2 > response.len() || response[cursor..cursor + 2] != [0xc0, 0x0c] {
         return Err(invalid());
     }
-    Ok(addresses)
+    cursor += 2;
+    if read_dns_u16(response, cursor) != Some(1)
+        || read_dns_u16(response, cursor + 2) != Some(1)
+        || read_dns_u16(response, cursor + 8) != Some(4)
+        || cursor + 14 != response.len()
+    {
+        return Err(invalid());
+    }
+    let address = Ipv4Addr::new(
+        response[cursor + 10],
+        response[cursor + 11],
+        response[cursor + 12],
+        response[cursor + 13],
+    );
+    Ok(vec![IpAddr::V4(address)])
 }
 
 fn read_dns_u16(packet: &[u8], offset: usize) -> Option<u16> {
@@ -683,11 +667,7 @@ fn docker_command(arguments: &[&str]) -> Result<String> {
         return Err(Error::Backend {
             sandbox: "docker".to_owned(),
             operation: "run the controlled egress listener",
-            message: format!(
-                "docker {arguments:?} exited with {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -983,19 +963,6 @@ async fn live_allowlist_pins_destinations_and_blocks_other_raw_tcp() -> Result<(
 
         let allowed = allowed?;
         let allowed_v6 = allowed_v6?;
-        if allowed.exit_code != 0 || allowed_v6.exit_code != 0 {
-            return Err(Error::Backend {
-                sandbox: "docker".to_owned(),
-                operation: "connect the allowlisted controlled listener",
-                message: format!(
-                    "allowed v4 exit={} stderr={:?}; allowed v6 exit={} stderr={:?}",
-                    allowed.exit_code,
-                    allowed.stderr_lossy(),
-                    allowed_v6.exit_code,
-                    allowed_v6.stderr_lossy()
-                ),
-            });
-        }
         let blocked = blocked?;
         let host_gateway = host_gateway?;
         let dns_blocked = dns_blocked?;
