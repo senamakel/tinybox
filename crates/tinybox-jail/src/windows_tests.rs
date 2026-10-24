@@ -681,10 +681,10 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
 }
 
 #[test]
-fn appcontainer_verbatim_path_read_child_probe() -> io::Result<()> {
+fn appcontainer_verbatim_path_read_child_probe() {
     const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_VERBATIM_READ_PROBE";
     let Some(path) = std::env::var_os(PROBE_ENV) else {
-        return Ok(());
+        return;
     };
 
     match std::fs::read(path) {
@@ -696,7 +696,6 @@ fn appcontainer_verbatim_path_read_child_probe() -> io::Result<()> {
         }
         Err(error) => println!("OUTSIDE_READ_DENIED:{error}"),
     }
-    Ok(())
 }
 
 fn verbatim_dos_path(path: &Path) -> io::Result<std::path::PathBuf> {
