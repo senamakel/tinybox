@@ -21,9 +21,12 @@
 
 use std::{
     io::{Read, Write},
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},
+    net::{Ipv4Addr, Ipv6Addr, IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket},
     process::Command,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -452,6 +455,217 @@ struct FixedResolver(Vec<std::net::IpAddr>);
 impl EgressResolver for FixedResolver {
     fn resolve(&self, _hostname: &str) -> std::io::Result<Vec<std::net::IpAddr>> {
         Ok(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
+struct LoopbackDnsResolver {
+    server: SocketAddr,
+    calls: Arc<AtomicUsize>,
+}
+
+impl EgressResolver for LoopbackDnsResolver {
+    fn resolve(&self, hostname: &str) -> std::io::Result<Vec<IpAddr>> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        let id = 0x5200_u16.wrapping_add(u16::try_from(call).unwrap_or(u16::MAX));
+        let query = dns_a_query(hostname, id)?;
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
+        socket.set_read_timeout(Some(Duration::from_secs(2)))?;
+        socket.send_to(&query, self.server)?;
+        let mut response = [0_u8; 512];
+        let (length, _) = socket.recv_from(&mut response)?;
+        dns_a_answers(&response[..length], id)
+    }
+}
+
+#[derive(Debug)]
+struct RebindingDnsServer {
+    address: SocketAddr,
+    stop: Arc<AtomicBool>,
+    queries: Arc<AtomicUsize>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl RebindingDnsServer {
+    fn start(first: Ipv4Addr, second: Ipv4Addr) -> std::io::Result<Self> {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
+        socket.set_nonblocking(true)?;
+        let address = socket.local_addr()?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let queries = Arc::new(AtomicUsize::new(0));
+        let worker_queries = queries.clone();
+        let worker = thread::spawn(move || {
+            let mut request = [0_u8; 512];
+            while !worker_stop.load(Ordering::SeqCst) {
+                match socket.recv_from(&mut request) {
+                    Ok((length, peer)) => {
+                        let answer = if worker_queries.fetch_add(1, Ordering::SeqCst) == 0 {
+                            first
+                        } else {
+                            second
+                        };
+                        if let Some(response) = dns_a_response(&request[..length], answer) {
+                            let _ = socket.send_to(&response, peer);
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(Self {
+            address,
+            stop,
+            queries,
+            worker: Some(worker),
+        })
+    }
+
+    fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    fn query_count(&self) -> usize {
+        self.queries.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for RebindingDnsServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn dns_a_query(hostname: &str, id: u16) -> std::io::Result<Vec<u8>> {
+    let mut query = vec![0_u8; 12];
+    query[..2].copy_from_slice(&id.to_be_bytes());
+    query[2..4].copy_from_slice(&0x0100_u16.to_be_bytes()); // recursion desired
+    query[4..6].copy_from_slice(&1_u16.to_be_bytes());
+    for label in hostname.trim_end_matches('.').split('.') {
+        if label.is_empty() || label.len() > 63 || !label.is_ascii() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "DNS fixture hostname contains an invalid label",
+            ));
+        }
+        query.push(u8::try_from(label.len()).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, error)
+        })?);
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.push(0);
+    query.extend_from_slice(&1_u16.to_be_bytes()); // A
+    query.extend_from_slice(&1_u16.to_be_bytes()); // IN
+    Ok(query)
+}
+
+fn dns_a_response(query: &[u8], answer: Ipv4Addr) -> Option<Vec<u8>> {
+    if query.len() < 12 || read_dns_u16(query, 4)? != 1 {
+        return None;
+    }
+    let mut question_end = 12;
+    skip_dns_name(query, &mut question_end)?;
+    question_end = question_end.checked_add(4)?;
+    if question_end > query.len() {
+        return None;
+    }
+
+    let mut response = query[..question_end].to_vec();
+    response[2..4].copy_from_slice(&0x8180_u16.to_be_bytes()); // response, recursion available
+    response[6..8].copy_from_slice(&1_u16.to_be_bytes());
+    response[8..10].copy_from_slice(&0_u16.to_be_bytes());
+    response[10..12].copy_from_slice(&0_u16.to_be_bytes());
+    response.extend_from_slice(&[0xc0, 0x0c]); // compressed owner name points to the question
+    response.extend_from_slice(&1_u16.to_be_bytes()); // A
+    response.extend_from_slice(&1_u16.to_be_bytes()); // IN
+    response.extend_from_slice(&30_u32.to_be_bytes()); // TTL
+    response.extend_from_slice(&4_u16.to_be_bytes());
+    response.extend_from_slice(&answer.octets());
+    Some(response)
+}
+
+fn dns_a_answers(response: &[u8], id: u16) -> std::io::Result<Vec<IpAddr>> {
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "controlled DNS server returned a malformed response",
+        )
+    };
+    if response.len() < 12
+        || read_dns_u16(response, 0) != Some(id)
+        || !matches!(read_dns_u16(response, 2), Some(flags) if flags & 0x800f == 0x8000)
+    {
+        return Err(invalid());
+    }
+
+    let question_count = read_dns_u16(response, 4).ok_or_else(invalid)?;
+    let answer_count = read_dns_u16(response, 6).ok_or_else(invalid)?;
+    let mut cursor = 12;
+    for _ in 0..question_count {
+        skip_dns_name(response, &mut cursor).ok_or_else(invalid)?;
+        cursor = cursor.checked_add(4).ok_or_else(invalid)?;
+        if cursor > response.len() {
+            return Err(invalid());
+        }
+    }
+
+    let mut addresses = Vec::new();
+    for _ in 0..answer_count {
+        skip_dns_name(response, &mut cursor).ok_or_else(invalid)?;
+        let record_type = read_dns_u16(response, cursor).ok_or_else(invalid)?;
+        let class = read_dns_u16(response, cursor + 2).ok_or_else(invalid)?;
+        let data_length = usize::from(read_dns_u16(response, cursor + 8).ok_or_else(invalid)?);
+        cursor = cursor.checked_add(10).ok_or_else(invalid)?;
+        let data_end = cursor.checked_add(data_length).ok_or_else(invalid)?;
+        if data_end > response.len() {
+            return Err(invalid());
+        }
+        if record_type == 1 && class == 1 && data_length == 4 {
+            let bytes: [u8; 4] = response[cursor..data_end]
+                .try_into()
+                .map_err(|_| invalid())?;
+            addresses.push(IpAddr::V4(Ipv4Addr::from(bytes)));
+        }
+        cursor = data_end;
+    }
+    if addresses.is_empty() {
+        return Err(invalid());
+    }
+    Ok(addresses)
+}
+
+fn read_dns_u16(packet: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_be_bytes([
+        *packet.get(offset)?,
+        *packet.get(offset.checked_add(1)?)?,
+    ]))
+}
+
+fn skip_dns_name(packet: &[u8], cursor: &mut usize) -> Option<()> {
+    loop {
+        let length = *packet.get(*cursor)?;
+        if length & 0xc0 == 0xc0 {
+            *cursor = cursor.checked_add(2)?;
+            return (*cursor <= packet.len()).then_some(());
+        }
+        if length & 0xc0 != 0 {
+            return None;
+        }
+        *cursor = cursor.checked_add(1)?;
+        if length == 0 {
+            return Some(());
+        }
+        *cursor = cursor.checked_add(usize::from(length))?;
+        if *cursor > packet.len() {
+            return None;
+        }
     }
 }
 
