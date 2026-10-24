@@ -299,7 +299,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .args([
             "/D",
             "/C",
-            "for /L %i in (1,1,100000) do @set _tinybox_wait=%i",
+            "for /L %i in (1,1,1000000) do @set _tinybox_wait=%i",
         ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(child_stdout))
@@ -308,7 +308,7 @@ fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
         .map_err(|error| {
             io::Error::new(error.kind(), format!("spawn cmd descendant probe: {error}"))
         })?;
-    let deadline = Instant::now() + Duration::from_millis(100);
+    let deadline = Instant::now() + Duration::from_millis(25);
     loop {
         if let Some(status) = descendant.try_wait()? {
             let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
