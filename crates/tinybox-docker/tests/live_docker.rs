@@ -697,7 +697,7 @@ fn docker_container_ipv4(name: &str) -> Result<Ipv4Addr> {
         "{{(index .NetworkSettings.Networks \"bridge\").IPAddress}}",
         name,
     ])?
-    .parse()
+    .parse::<Ipv4Addr>()
     .map_err(|error| Error::Backend {
         sandbox: "docker".to_owned(),
         operation: "read the controlled listener address",
@@ -1116,7 +1116,6 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
                 });
             }
 
-            let container = format!("tinybox-{namespace}-{}", info.id);
             let host_mapping = output_of(
                 &sandbox,
                 &info.id,
