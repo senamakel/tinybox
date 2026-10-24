@@ -831,7 +831,13 @@ public static class TinyBoxShortPath {
 [Console]::Write([TinyBoxShortPath]::Get($env:TINYBOX_SHORT_NAME_TARGET))
 "#;
     let short_path_output = Command::new("powershell.exe")
-        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", short_path_script])
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            short_path_script,
+        ])
         .env("TINYBOX_SHORT_NAME_TARGET", &secret)
         .output()?;
     if !short_path_output.status.success() {
@@ -845,7 +851,10 @@ public static class TinyBoxShortPath {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
         .trim()
         .to_owned();
-    assert!(!short_path.is_empty(), "GetShortPathNameW returned an empty path");
+    assert!(
+        !short_path.is_empty(),
+        "GetShortPathNameW returned an empty path"
+    );
     let short_filename = Path::new(&short_path)
         .file_name()
         .map(OsStr::to_string_lossy)
