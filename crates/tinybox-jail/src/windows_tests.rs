@@ -689,7 +689,10 @@ fn appcontainer_verbatim_path_read_child_probe() -> io::Result<()> {
 
     match std::fs::read(path) {
         Ok(contents) => {
-            println!("OUTSIDE_READ_ALLOWED:{}", String::from_utf8_lossy(&contents));
+            println!(
+                "OUTSIDE_READ_ALLOWED:{}",
+                String::from_utf8_lossy(&contents)
+            );
         }
         Err(error) => println!("OUTSIDE_READ_DENIED:{error}"),
     }
