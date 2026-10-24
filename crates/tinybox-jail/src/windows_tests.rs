@@ -666,7 +666,7 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
         .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
 
     assert!(
-        status,
+        status.success(),
         "verbatim-path child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
     );
     assert!(
@@ -823,7 +823,7 @@ fn appcontainer_denies_short_name_alias_reads_outside_granted_roots() -> io::Res
         appcontainer_short_name_read_probe(&granted_root, PROBE_ENV, &short_path)?;
 
     assert!(
-        status.success(),
+        status,
         "short-name child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
     );
     assert!(
