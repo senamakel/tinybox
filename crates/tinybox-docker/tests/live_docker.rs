@@ -684,7 +684,11 @@ fn docker_command(arguments: &[&str]) -> Result<String> {
         return Err(Error::Backend {
             sandbox: "docker".to_owned(),
             operation: "run the controlled egress listener",
-            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            message: format!(
+                "docker {arguments:?} exited with {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -971,6 +975,19 @@ async fn live_allowlist_pins_destinations_and_blocks_other_raw_tcp() -> Result<(
 
         let allowed = allowed?;
         let allowed_v6 = allowed_v6?;
+        if allowed.exit_code != 0 || allowed_v6.exit_code != 0 {
+            return Err(Error::Backend {
+                sandbox: "docker".to_owned(),
+                operation: "connect the allowlisted controlled listener",
+                message: format!(
+                    "allowed v4 exit={} stderr={:?}; allowed v6 exit={} stderr={:?}",
+                    allowed.exit_code,
+                    allowed.stderr_lossy(),
+                    allowed_v6.exit_code,
+                    allowed_v6.stderr_lossy()
+                ),
+            });
+        }
         let blocked = blocked?;
         let host_gateway = host_gateway?;
         let dns_blocked = dns_blocked?;
