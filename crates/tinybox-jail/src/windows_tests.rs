@@ -666,7 +666,7 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
         .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
 
     assert!(
-        status.success(),
+        status,
         "verbatim-path child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
     );
     assert!(
@@ -890,7 +890,7 @@ fn appcontainer_short_name_read_probe(
     root: &Path,
     probe_env: &str,
     short_path: &str,
-) -> io::Result<(std::process::ExitStatus, String, String)> {
+) -> io::Result<(bool, String, String)> {
     use std::io::Read;
     use std::time::{Duration, Instant};
     use tinybox_core::ExecRequest;
@@ -962,7 +962,7 @@ fn appcontainer_short_name_read_probe(
     let error_output = stderr_reader
         .join()
         .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
-    Ok((status, output, error_output))
+    Ok((status.success(), output, error_output))
 }
 
 #[test]
