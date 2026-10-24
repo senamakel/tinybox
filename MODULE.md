@@ -6,11 +6,12 @@ Install only the archive matching the host operating system and architecture.
 The module claims `ai.tinyhumans.tinybox.Box` and serves the object at
 `/ai/tinyhumans/tinybox/Box`. `Describe` remains the original zero-argument
 discovery method; the current bus contract is version 2.5 and also exposes
-capabilities, typed plan checks, resource and process operations, and the
+`Capabilities`, typed `PlanCheck`, resource and process operations, and the
 `ProcessEvent` signal. `Capabilities` reports this build's contract version and
 available backends. `PlanCheck` reports each selected backend's declared
 enforcement without starting work. `ProcessEvent` carries process-correlated
-start, exit, timeout, and evidence-backed resource observations. See the
+start and exit lifecycle events, plus timeout, denial, and resource
+observations only where the backend has evidence. See the
 [module API](crates/tinybox-module/src/tinybus_module/README.md) and
 [contracts 2.4](docs/specs/contract-2-4.md) and
 [2.5](docs/specs/contract-2-5.md) for the wire details.
@@ -19,12 +20,6 @@ Contract 2.5 carries optional host-and-port allowlist intent on native jail
 requests. Current native jail backends refuse that field with a typed
 unsupported-constraint error; Linux Docker has the enforcing allowlist path.
 The module does not silently widen unsupported allowlists to general egress.
-
-The bus contract is version 2.2. It includes the resource-aware native shell
-member `StartNativeShellExecWithResources`, which keeps shell selection,
-environment setup, scratch, supervision, and cleanup in the module while
-accepting explicit optional hard resource limits. See
-[`docs/specs/contract-2-2.md`](docs/specs/contract-2-2.md) for the wire contract.
 
 The archive contains one `.so`, `.dylib`, or `.dll` plus `modules.toml`. Keep
 those files together when copying them into a TinyBus module directory. The
