@@ -465,9 +465,9 @@ impl OwnedProcess for AppContainerProcess {
     }
 
     fn terminate(&mut self) -> io::Result<()> {
-        if self.process.exit_code()?.is_some() {
-            return Ok(());
-        }
+        // The direct process may have exited while descendants still belong
+        // to this Job. Always terminate the Job first; the fallback only
+        // treats an error as idempotent when the direct process is known gone.
         self.job.terminate(1).or_else(|error| {
             if self.process.exit_code()?.is_some() {
                 Ok(())
