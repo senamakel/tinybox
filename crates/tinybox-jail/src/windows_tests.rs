@@ -681,6 +681,131 @@ fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result
 }
 
 #[test]
+fn appcontainer_denies_parent_traversal_reads_outside_granted_roots() -> io::Result<()> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_PARENT_READ_PROBE";
+    const SECRET: &str = "outside-parent-traversal-secret";
+
+    let workspace = tempfile::tempdir()?;
+    let granted_root = workspace.path().join("granted");
+    let outside_root = workspace.path().join("outside");
+    std::fs::create_dir(&granted_root)?;
+    std::fs::create_dir(&outside_root)?;
+    let secret = outside_root.join("secret.txt");
+    std::fs::write(&secret, SECRET)?;
+
+    let traversal_path = r"..\outside\secret.txt";
+    assert_eq!(
+        std::fs::read_to_string(granted_root.join(traversal_path))?,
+        SECRET,
+        "the host must resolve the traversal path before testing AppContainer denial"
+    );
+
+    let executable = std::env::current_exe()?;
+    let executable_arg = executable.to_string_lossy().into_owned();
+    let executable_directory = executable
+        .parent()
+        .ok_or_else(|| io::Error::other("test executable has no parent directory"))?;
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable_arg.as_str(),
+            "--exact",
+            "windows::tests::appcontainer_parent_traversal_read_child_probe",
+            "--nocapture",
+        ])
+        .with_cwd(&granted_root)
+        .with_env(PROBE_ENV, traversal_path),
+        true,
+        None,
+    );
+    let jail = Jail::new(&granted_root, "parent-traversal-denial-test")
+        .add_read_only(executable_directory)
+        .deny_net();
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let stdout = child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?;
+    let stderr = child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stdout
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stderr
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.terminate()?;
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer parent-traversal probe exceeded 10 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = stdout_reader
+        .join()
+        .map_err(|_| io::Error::other("stdout reader thread panicked"))??;
+    let error_output = stderr_reader
+        .join()
+        .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
+
+    assert!(
+        status.success(),
+        "parent-traversal child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        output.contains("OUTSIDE_READ_DENIED"),
+        "AppContainer must deny parent traversal outside granted roots: stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        !output.contains(SECRET),
+        "AppContainer child read the outside secret through parent traversal"
+    );
+    Ok(())
+}
+
+#[test]
+fn appcontainer_parent_traversal_read_child_probe() {
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_PARENT_READ_PROBE";
+    let Some(path) = std::env::var_os(PROBE_ENV) else {
+        return;
+    };
+
+    match std::fs::read(path) {
+        Ok(contents) => {
+            println!(
+                "OUTSIDE_READ_ALLOWED:{}",
+                String::from_utf8_lossy(&contents)
+            );
+        }
+        Err(error) => println!("OUTSIDE_READ_DENIED:{error}"),
+    }
+}
+
+#[test]
 fn appcontainer_verbatim_path_read_child_probe() {
     const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_VERBATIM_READ_PROBE";
     let Some(path) = std::env::var_os(PROBE_ENV) else {
