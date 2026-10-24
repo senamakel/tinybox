@@ -204,19 +204,9 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
         }
         thread::sleep(Duration::from_millis(25));
     };
-    let mut parent_stdout = String::new();
-    child
-        .take_stdout()
-        .ok_or_else(|| io::Error::other("parent probe stdout missing"))?
-        .read_to_string(&mut parent_stdout)?;
-    let mut parent_stderr = String::new();
-    child
-        .take_stderr()
-        .ok_or_else(|| io::Error::other("parent probe stderr missing"))?
-        .read_to_string(&mut parent_stderr)?;
     assert!(
         parent_status.success(),
-        "parent probe failed: {parent_status:?}, stdout={parent_stdout:?}, stderr={parent_stderr:?}"
+        "parent probe failed: {parent_status:?}"
     );
 
     let pid = std::fs::read_to_string(&pid_file)?
@@ -267,6 +257,22 @@ fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::R
             ))?
             .is_some()
     );
+    let mut _parent_stdout = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("parent probe stdout missing after descendant cleanup"))?
+        .read_to_string(&mut _parent_stdout)
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("read parent probe stdout: {error}"))
+        })?;
+    let mut _parent_stderr = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("parent probe stderr missing after descendant cleanup"))?
+        .read_to_string(&mut _parent_stderr)
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("read parent probe stderr: {error}"))
+        })?;
     Ok(())
 }
 
