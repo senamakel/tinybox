@@ -102,6 +102,26 @@ impl EgressResolver for Resolver {
 }
 
 #[derive(Debug)]
+struct RebindingResolver {
+    calls: Mutex<Vec<String>>,
+}
+
+impl EgressResolver for RebindingResolver {
+    fn resolve(&self, hostname: &str) -> std::io::Result<Vec<IpAddr>> {
+        let mut calls = self
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        calls.push(hostname.to_owned());
+        if calls.len() == 1 {
+            Ok(vec![IpAddr::from([203, 0, 113, 8])])
+        } else {
+            Ok(vec![IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)])
+        }
+    }
+}
+
+#[derive(Debug)]
 #[cfg(target_os = "linux")]
 struct MappedIpv4Resolver;
 
@@ -875,6 +895,58 @@ async fn native_controller_prepares_and_cleans_a_pinned_allowlist() -> Result<()
                     && argv.iter().any(|arg| arg == "unix:///var/run/docker.sock")
             })
     );
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn native_controller_keeps_the_first_dns_answer_across_enforcement() -> Result<()> {
+    let id = BoxId::new("box-rebinding")?;
+    let namespace = "test";
+    let names = NetworkNames::for_box(namespace, &id);
+    let host = PreparedNativeHost::new(&id, &names);
+    let resolver = Arc::new(RebindingResolver {
+        calls: Mutex::new(Vec::new()),
+    });
+    let controller = NativeLinuxDockerEgressController::new(resolver.clone());
+    let allowlist = tinybox_core::EgressAllowlist::new(["service.test"], [443]);
+
+    let prepared = controller.prepare(&host, namespace, &id, &allowlist).await;
+    assert!(
+        prepared.is_ok(),
+        "{prepared:?}; commands={:?}",
+        host.commands()
+    );
+    let network = prepared?;
+
+    assert_eq!(
+        resolver
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_slice(),
+        ["service.test"]
+    );
+    assert_eq!(
+        network.host_mappings(),
+        [("service.test".to_owned(), IpAddr::from([203, 0, 113, 8]))]
+    );
+    let commands = host.commands();
+    assert!(
+        commands.iter().any(|argv| {
+            argv.iter().any(|arg| arg == "-A")
+                && argv.iter().any(|arg| arg == "203.0.113.8")
+                && argv.iter().any(|arg| arg == "ACCEPT")
+        }),
+        "the firewall must allow the initially pinned answer: {commands:?}"
+    );
+    assert!(
+        !commands
+            .iter()
+            .any(|argv| argv.iter().any(|arg| arg == "127.0.0.1")),
+        "a later rebinding answer must not reach the firewall: {commands:?}"
+    );
+    controller.cleanup(&host, namespace, &id).await?;
     Ok(())
 }
 
