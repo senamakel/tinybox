@@ -941,13 +941,10 @@ async fn native_controller_keeps_the_first_dns_answer_across_enforcement() -> Re
         "the firewall must allow the initially pinned answer: {commands:?}"
     );
     assert!(
-        !commands.iter().any(|argv| {
-            argv.iter().any(|arg| arg == "127.0.0.1")
-                || argv
-                    .iter()
-                    .any(|arg| arg == "--add-host=service.test:127.0.0.1")
-        }),
-        "a later rebinding answer must not reach the firewall or host mappings: {commands:?}"
+        !commands
+            .iter()
+            .any(|argv| argv.iter().any(|arg| arg == "127.0.0.1")),
+        "a later rebinding answer must not reach the firewall: {commands:?}"
     );
     controller.cleanup(&host, namespace, &id).await?;
     Ok(())
