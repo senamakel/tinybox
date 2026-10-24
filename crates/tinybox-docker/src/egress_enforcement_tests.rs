@@ -943,7 +943,9 @@ async fn native_controller_keeps_the_first_dns_answer_across_enforcement() -> Re
     assert!(
         !commands.iter().any(|argv| {
             argv.iter().any(|arg| arg == "127.0.0.1")
-                || argv.iter().any(|arg| arg == "--add-host=service.test:127.0.0.1")
+                || argv
+                    .iter()
+                    .any(|arg| arg == "--add-host=service.test:127.0.0.1")
         }),
         "a later rebinding answer must not reach the firewall or host mappings: {commands:?}"
     );
