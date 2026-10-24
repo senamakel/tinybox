@@ -313,6 +313,18 @@ fn process_event_signal_is_declared_in_the_current_contract() {
 }
 
 #[test]
+fn install_guide_documents_the_current_bus_contract_and_observations() {
+    let guide = include_str!("../../../../MODULE.md");
+    let (major, minor) = tinybox_bus::CONTRACT_VERSION;
+
+    assert!(guide.contains(&format!("current bus contract is version {major}.{minor}")));
+    assert!(guide.contains("`Capabilities`"));
+    assert!(guide.contains("`PlanCheck`"));
+    assert!(guide.contains("`ProcessEvent`"));
+    assert!(!guide.contains("provides the `Describe` method"));
+}
+
+#[test]
 fn plan_check_uses_the_selected_backend_and_preserves_request_order_and_hardness()
 -> tinybus::Result<()> {
     let response = super::resources::plan_check(
