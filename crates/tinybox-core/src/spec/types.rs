@@ -1,5 +1,6 @@
 //! The parts a [`BoxSpec`](crate::spec::BoxSpec) is assembled from.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -254,6 +255,10 @@ pub enum NetworkPolicy {
 /// The cloud metadata endpoints in [`EgressAllowlist::is_metadata_host`] are
 /// refused at validation time and must also be blocked by the backend even
 /// when a hostname resolves to one of them.
+///
+/// Explicit loopback targets are refused too, including IPv4/IPv6 literals,
+/// IPv4-mapped and scoped IPv6 loopback, `localhost` names, and legacy numeric
+/// IPv4 forms such as `127.1`, `2130706433`, `0x7f000001`, and `0177.0.0.1`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EgressAllowlist {
     /// Host names or IP literals the box may connect to.
@@ -276,10 +281,15 @@ impl EgressAllowlist {
     }
 
     /// Whether `host` names a cloud instance-metadata endpoint, which no
-    /// policy may ever allow.
+    /// policy may ever allow. Matching ignores DNS case and terminal root
+    /// dots, and recognizes legacy numeric IPv4 spellings of metadata addresses.
     #[must_use]
     pub fn is_metadata_host(host: &str) -> bool {
-        let host = host.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+        let host = host
+            .trim()
+            .trim_end_matches('.')
+            .trim_matches(['[', ']'])
+            .to_ascii_lowercase();
         matches!(
             host.as_str(),
             "169.254.169.254"
@@ -289,9 +299,108 @@ impl EgressAllowlist {
                 | "metadata.google.internal"
                 | "metadata"
         ) || host.starts_with("::ffff:169.254.169.254")
+            || Self::parse_legacy_ipv4(&host).is_some_and(|address| {
+                address == Ipv4Addr::new(169, 254, 169, 254)
+                    || address == Ipv4Addr::new(169, 254, 170, 2)
+                    || address == Ipv4Addr::new(100, 100, 100, 200)
+            })
     }
 
-    /// Check the list is non-empty, well formed and names no metadata endpoint.
+    /// Whether an allowlist entry explicitly names a loopback address or alias.
+    fn is_loopback_host(host: &str) -> bool {
+        let host = host
+            .trim()
+            .trim_matches(['[', ']'])
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        if host == "localhost" || host.ends_with(".localhost") {
+            return true;
+        }
+
+        match host.parse::<IpAddr>() {
+            Ok(IpAddr::V4(address)) => address.is_loopback(),
+            Ok(IpAddr::V6(address)) => Self::is_loopback_ipv6(address),
+            Err(_) => {
+                Self::parse_scoped_ipv6(&host).is_some_and(Self::is_loopback_ipv6)
+                    || Self::parse_legacy_ipv4(&host).is_some_and(|address| address.is_loopback())
+            }
+        }
+    }
+
+    fn is_loopback_ipv6(address: Ipv6Addr) -> bool {
+        address.is_loopback()
+            || address
+                .to_ipv4_mapped()
+                .is_some_and(|mapped| mapped.is_loopback())
+    }
+
+    /// Parse an IPv6 address with a non-empty zone identifier, if present.
+    fn parse_scoped_ipv6(host: &str) -> Option<Ipv6Addr> {
+        let (address, scope_id) = host.split_once('%')?;
+        if scope_id.is_empty() || scope_id.contains('%') {
+            return None;
+        }
+        address.parse().ok()
+    }
+
+    /// Parse the legacy numeric IPv4 formats accepted by common resolvers.
+    ///
+    /// These formats are checked because a system resolver may interpret them
+    /// as IP addresses instead of DNS names.
+    fn parse_legacy_ipv4(host: &str) -> Option<Ipv4Addr> {
+        let components: Vec<_> = host.split('.').collect();
+        if !(1..=4).contains(&components.len()) || components.iter().any(|part| part.is_empty()) {
+            return None;
+        }
+
+        let numbers: Vec<u32> = components
+            .iter()
+            .map(|part| {
+                let number = if let Some(hex) =
+                    part.strip_prefix("0x").or_else(|| part.strip_prefix("0X"))
+                {
+                    u64::from_str_radix(hex, 16).ok()
+                } else if part.len() > 1 && part.starts_with('0') {
+                    u64::from_str_radix(&part[1..], 8).ok()
+                } else {
+                    part.parse().ok()
+                }?;
+                u32::try_from(number).ok()
+            })
+            .collect::<Option<_>>()?;
+
+        if numbers[..numbers.len() - 1]
+            .iter()
+            .any(|number| *number > u8::MAX.into())
+        {
+            return None;
+        }
+        let last = *numbers.last()?;
+        let last_max = match numbers.len() {
+            1 => u32::MAX,
+            2 => 0x00ff_ffff,
+            3 => 0x0000_ffff,
+            4 => u8::MAX.into(),
+            _ => return None,
+        };
+        if last > last_max {
+            return None;
+        }
+
+        let address = match numbers.as_slice() {
+            [whole] => *whole,
+            [first, last] => (*first << 24) | *last,
+            [first, second, last] => (*first << 24) | (*second << 16) | *last,
+            [first, second, third, last] => {
+                (*first << 24) | (*second << 16) | (*third << 8) | *last
+            }
+            _ => return None,
+        };
+        Some(Ipv4Addr::from(address))
+    }
+
+    /// Check the list is non-empty, well formed, and names no metadata or
+    /// explicit loopback endpoint.
     ///
     /// # Errors
     ///
@@ -321,6 +430,11 @@ impl EgressAllowlist {
             if Self::is_metadata_host(trimmed) {
                 return Err(Error::InvalidNetworkPolicy {
                     reason: "allowlist names a cloud metadata endpoint",
+                });
+            }
+            if Self::is_loopback_host(trimmed) {
+                return Err(Error::InvalidNetworkPolicy {
+                    reason: "allowlist names a loopback endpoint",
                 });
             }
         }

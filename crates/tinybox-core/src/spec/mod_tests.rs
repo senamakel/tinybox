@@ -228,8 +228,40 @@ fn allowlist_validation_rejects_malformed_and_metadata_hosts() {
     );
     for host in [
         "169.254.169.254",
+        "0251.0376.0251.0376",
+        "0xa9fea9fe",
+        "0xa9feaa02",
+        "0x646464c8",
         "[fd00:ec2::254]",
         "Metadata.Google.Internal",
+        "metadata.google.internal.",
+        "Metadata.Google.Internal.",
+        "metadata.",
+    ] {
+        assert!(
+            EgressAllowlist::new([host], [80]).validate().is_err(),
+            "{host} must be refused"
+        );
+    }
+}
+
+#[test]
+fn allowlist_validation_rejects_loopback_targets() {
+    use super::EgressAllowlist;
+
+    for host in [
+        "127.0.0.1",
+        "[::1]",
+        "[::ffff:127.0.0.1]",
+        "localhost",
+        "LOCALHOST.",
+        "service.localhost",
+        "::1%1",
+        "[::1%1]",
+        "127.1",
+        "2130706433",
+        "0x7f000001",
+        "0177.0.0.1",
     ] {
         assert!(
             EgressAllowlist::new([host], [80]).validate().is_err(),
