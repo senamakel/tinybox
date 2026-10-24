@@ -446,7 +446,6 @@ async fn live_network_policy_controls_host_listener_connectivity() -> Result<()>
         "default-Denied container established a connection to the controlled listener"
     );
     live_allowlist_pins_destinations_and_blocks_other_raw_tcp().await?;
-    live_allowlist_dns_rebinding_stays_pinned().await?;
     Ok(())
 }
 
@@ -718,6 +717,7 @@ fn allowlist_probe_ports() -> tinybox_core::EgressAllowlist {
 }
 
 const TARGET_LISTENER_SCRIPT: &str = "(while true; do nc -l -p 18373 >/dev/null; echo hit >> /tmp/allowed; done) & (while true; do nc -l -p 18374 >/dev/null; echo hit >> /tmp/blocked; done) & (while true; do nc -l -p 18376 >/dev/null; echo hit >> /tmp/allowed-v6; done) & (while true; do nc -u -l -p 53 >/dev/null; echo hit >> /tmp/dns; done) & wait";
+const REBIND_TARGET_LISTENER_SCRIPT: &str = "touch /tmp/listener-ready; while true; do nc -l -p 18373 >/dev/null; echo hit >> /tmp/allowed; done";
 fn ipv6_listener_probe(address: Ipv6Addr) -> String {
     format!(
         "unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; nc -z -w 3 {address} 18376"
@@ -764,6 +764,14 @@ fn loopback_dns_resolver_observes_first_and_rebound_addresses() -> std::io::Resu
     assert_eq!(resolver.resolve("rebinding.test")?, [IpAddr::V4(second)]);
     assert_eq!(server.query_count(), 2);
     Ok(())
+}
+
+#[tokio::test]
+async fn live_native_docker_dns_rebinding_stays_pinned() -> Result<()> {
+    if !live_docker_enabled()? {
+        return Ok(());
+    }
+    live_allowlist_dns_rebinding_stays_pinned().await
 }
 
 /// A disposable Linux Engine proof for the native firewall controller.
@@ -1064,7 +1072,7 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
     let first_target = format!("tinybox-rebind-first-{}", &suffix[..12]);
     let second_target = format!("tinybox-rebind-second-{}", &suffix[..12]);
     for name in [&first_target, &second_target] {
-        docker_command(&[
+        if let Err(error) = docker_command(&[
             "run",
             "-d",
             "--name",
@@ -1072,8 +1080,21 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
             IMAGE,
             "sh",
             "-c",
-            TARGET_LISTENER_SCRIPT,
-        ])?;
+            REBIND_TARGET_LISTENER_SCRIPT,
+        ]) {
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &first_target, &second_target])
+                .status();
+            return Err(error);
+        }
+    }
+    for name in [&first_target, &second_target] {
+        if let Err(error) = wait_for_container_listener(name) {
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &first_target, &second_target])
+                .status();
+            return Err(error);
+        }
     }
 
     let result = async {
@@ -1173,6 +1194,19 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
                     ]),
                 )
                 .await?;
+            if allowed.exit_code != 0 || rebound.exit_code == 0 {
+                return Err(Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "verify DNS rebinding egress remains pinned",
+                    message: format!(
+                        "hostname exit={} stderr={:?}, direct rebound address exit={} stderr={:?}",
+                        allowed.exit_code,
+                        allowed.stderr_lossy(),
+                        rebound.exit_code,
+                        rebound.stderr_lossy()
+                    ),
+                });
+            }
             docker_command(&[
                 "exec",
                 &first_target,
@@ -1187,16 +1221,6 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
                 "-c",
                 "test ! -s /tmp/allowed",
             ])?;
-            if allowed.exit_code != 0 || rebound.exit_code == 0 {
-                return Err(Error::Backend {
-                    sandbox: "docker".to_owned(),
-                    operation: "verify DNS rebinding egress remains pinned",
-                    message: format!(
-                        "hostname exit={}, direct rebound address exit={}",
-                        allowed.exit_code, rebound.exit_code
-                    ),
-                });
-            }
             Ok(())
         }
         .await;
@@ -1226,6 +1250,30 @@ async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn wait_for_container_listener(name: &str) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = Command::new("docker")
+            .args(["exec", name, "sh", "-c", "test -f /tmp/listener-ready"])
+            .output()
+            .map_err(|error| Error::io("probe controlled listener readiness", &error))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Backend {
+                sandbox: "docker".to_owned(),
+                operation: "wait for controlled listener readiness",
+                message: format!(
+                    "{name} did not open TCP port 18373: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[tokio::test]

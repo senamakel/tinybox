@@ -171,7 +171,7 @@ jobs:
         env:
           TINYBOX_LIVE_DOCKER: "1"
           TINYBOX_REQUIRE_LIVE_DOCKER: "1"
-        run: >-
-          cargo test --locked -p tinybox-docker --test live_docker
-          live_network_policy_controls_host_listener_connectivity --
-          --nocapture --test-threads=1
+        run: |
+          set -euo pipefail
+          cargo test --locked -p tinybox-docker --test live_docker live_network_policy_controls_host_listener_connectivity -- --exact --nocapture --test-threads=1
+          cargo test --locked -p tinybox-docker --test live_docker live_native_docker_dns_rebinding_stays_pinned -- --exact --nocapture --test-threads=1
