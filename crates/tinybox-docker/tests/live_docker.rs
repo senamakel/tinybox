@@ -21,7 +21,7 @@
 
 use std::{
     io::{Read, Write},
-    net::{Ipv4Addr, Ipv6Addr, IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, UdpSocket},
     process::Command,
     sync::{
         Arc,
@@ -446,6 +446,7 @@ async fn live_network_policy_controls_host_listener_connectivity() -> Result<()>
         "default-Denied container established a connection to the controlled listener"
     );
     live_allowlist_pins_destinations_and_blocks_other_raw_tcp().await?;
+    live_allowlist_dns_rebinding_stays_pinned().await?;
     Ok(())
 }
 
@@ -555,9 +556,10 @@ fn dns_a_query(hostname: &str, id: u16) -> std::io::Result<Vec<u8>> {
                 "DNS fixture hostname contains an invalid label",
             ));
         }
-        query.push(u8::try_from(label.len()).map_err(|error| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, error)
-        })?);
+        query.push(
+            u8::try_from(label.len())
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?,
+        );
         query.extend_from_slice(label.as_bytes());
     }
     query.push(0);
@@ -688,6 +690,21 @@ fn docker_command(arguments: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+fn docker_container_ipv4(name: &str) -> Result<Ipv4Addr> {
+    docker_command(&[
+        "inspect",
+        "--format",
+        "{{(index .NetworkSettings.Networks \"bridge\").IPAddress}}",
+        name,
+    ])?
+    .parse()
+    .map_err(|error| Error::Backend {
+        sandbox: "docker".to_owned(),
+        operation: "read the controlled listener address",
+        message: error.to_string(),
+    })
+}
+
 fn ipv6_address_inspect_template(network: &str) -> String {
     format!("{{{{(index .NetworkSettings.Networks \"{network}\").GlobalIPv6Address}}}}")
 }
@@ -727,6 +744,22 @@ fn ipv6_address_inspect_template_quotes_the_network_name() {
         ipv6_address_inspect_template("controlled-v6"),
         r#"{{(index .NetworkSettings.Networks "controlled-v6").GlobalIPv6Address}}"#
     );
+}
+
+#[test]
+fn loopback_dns_resolver_observes_first_and_rebound_addresses() -> std::io::Result<()> {
+    let first = Ipv4Addr::new(192, 0, 2, 10);
+    let second = Ipv4Addr::new(192, 0, 2, 20);
+    let server = RebindingDnsServer::start(first, second)?;
+    let resolver = LoopbackDnsResolver {
+        server: server.address(),
+        calls: Arc::new(AtomicUsize::new(0)),
+    };
+
+    assert_eq!(resolver.resolve("rebinding.test")?, [IpAddr::V4(first)]);
+    assert_eq!(resolver.resolve("rebinding.test")?, [IpAddr::V4(second)]);
+    assert_eq!(server.query_count(), 2);
+    Ok(())
 }
 
 /// A disposable Linux Engine proof for the native firewall controller.
@@ -999,6 +1032,181 @@ async fn live_allowlist_pins_destinations_and_blocks_other_raw_tcp() -> Result<(
             sandbox: "docker".to_owned(),
             operation: "remove controlled listeners",
             message: "docker rm or docker network rm returned a failure status".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// A loopback DNS server rebinds after prepare; the container stays pinned to
+/// the first answer and cannot connect to the later answer's listener.
+#[allow(clippy::too_many_lines)]
+async fn live_allowlist_dns_rebinding_stays_pinned() -> Result<()> {
+    const ALLOWED_PORT: &str = "18373";
+
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let first_target = format!("tinybox-rebind-first-{}", &suffix[..12]);
+    let second_target = format!("tinybox-rebind-second-{}", &suffix[..12]);
+    for name in [&first_target, &second_target] {
+        docker_command(&[
+            "run",
+            "-d",
+            "--name",
+            name,
+            IMAGE,
+            "sh",
+            "-c",
+            TARGET_LISTENER_SCRIPT,
+        ])?;
+    }
+
+    let result = async {
+        let first_address = docker_container_ipv4(&first_target)?;
+        let second_address = docker_container_ipv4(&second_target)?;
+        let dns = RebindingDnsServer::start(first_address, second_address).map_err(|error| {
+            Error::Backend {
+                sandbox: "docker".to_owned(),
+                operation: "start controlled loopback DNS server",
+                message: error.to_string(),
+            }
+        })?;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resolver = Arc::new(LoopbackDnsResolver {
+            server: dns.address(),
+            calls: calls.clone(),
+        });
+        let namespace = format!("ns-rebind-{}", &suffix[..8]);
+        let sandbox = sandbox(&namespace)?.with_egress_controller(Arc::new(
+            NativeLinuxDockerEgressController::new(resolver.clone()),
+        ));
+        let allowlist = tinybox_core::EgressAllowlist::new(["rebinding.test"], [18373]);
+        let info = sandbox
+            .create(&spec()?.with_network(NetworkPolicy::Allowlist(allowlist)))
+            .await?;
+
+        let probes = async {
+            if calls.load(Ordering::SeqCst) != 1 || dns.query_count() != 1 {
+                return Err(Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "verify initial DNS pinning lookup",
+                    message: format!(
+                        "controller made {} resolver calls and DNS server saw {} queries",
+                        calls.load(Ordering::SeqCst),
+                        dns.query_count()
+                    ),
+                });
+            }
+
+            // Demonstrate that the controlled DNS source has changed its
+            // answer after the controller prepared the box.
+            let rebound_address = resolver
+                .resolve("rebinding.test")
+                .map_err(|error| Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "query rebound DNS answer",
+                    message: error.to_string(),
+                })?;
+            if rebound_address != [IpAddr::V4(second_address)]
+                || dns.query_count() != 2
+                || calls.load(Ordering::SeqCst) != 2
+            {
+                return Err(Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "verify controlled DNS rebinding",
+                    message: format!("unexpected rebound answers: {rebound_address:?}"),
+                });
+            }
+
+            let container = format!("tinybox-{namespace}-{}", info.id);
+            let host_mapping = output_of(
+                &sandbox,
+                &info.id,
+                &[
+                    "sh",
+                    "-c",
+                    "awk '$2 == \"rebinding.test\" { print $1 }' /etc/hosts",
+                ],
+            )
+            .await?;
+            if host_mapping != first_address.to_string() {
+                return Err(Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "verify pinned container host mapping",
+                    message: format!(
+                        "rebinding.test mapped to {host_mapping}, expected {first_address}"
+                    ),
+                });
+            }
+
+            let allowed = sandbox
+                .exec(
+                    &info.id,
+                    &ExecRequest::new([
+                        "sh",
+                        "-c",
+                        &format!("unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; nc -z -w 3 rebinding.test {ALLOWED_PORT}"),
+                    ]),
+                )
+                .await?;
+            let rebound = sandbox
+                .exec(
+                    &info.id,
+                    &ExecRequest::new([
+                        "sh",
+                        "-c",
+                        &format!("unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; nc -z -w 2 {second_address} {ALLOWED_PORT}"),
+                    ]),
+                )
+                .await?;
+            docker_command(&[
+                "exec",
+                &first_target,
+                "sh",
+                "-c",
+                "test -s /tmp/allowed",
+            ])?;
+            docker_command(&[
+                "exec",
+                &second_target,
+                "sh",
+                "-c",
+                "test ! -s /tmp/allowed",
+            ])?;
+            if allowed.exit_code != 0 || rebound.exit_code == 0 {
+                return Err(Error::Backend {
+                    sandbox: "docker".to_owned(),
+                    operation: "verify DNS rebinding egress remains pinned",
+                    message: format!(
+                        "hostname exit={}, direct rebound address exit={}",
+                        allowed.exit_code, rebound.exit_code
+                    ),
+                });
+            }
+            Ok(())
+        }
+        .await;
+        let destroy = sandbox.destroy(&info.id).await;
+        probes?;
+        destroy?;
+        Ok(())
+    }
+    .await;
+
+    let first_cleanup = Command::new("docker")
+        .args(["rm", "-f", &first_target])
+        .status()
+        .map_err(|error| Error::io("remove first rebinding listener", &error));
+    let second_cleanup = Command::new("docker")
+        .args(["rm", "-f", &second_target])
+        .status()
+        .map_err(|error| Error::io("remove second rebinding listener", &error));
+    result?;
+    let first_cleanup = first_cleanup?;
+    let second_cleanup = second_cleanup?;
+    if !first_cleanup.success() || !second_cleanup.success() {
+        return Err(Error::Backend {
+            sandbox: "docker".to_owned(),
+            operation: "remove DNS rebinding listeners",
+            message: "docker rm returned a failure status".to_owned(),
         });
     }
     Ok(())
