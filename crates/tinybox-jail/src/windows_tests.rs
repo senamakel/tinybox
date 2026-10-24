@@ -154,6 +154,185 @@ fn appcontainer_owned_launch_captures_output_from_a_confined_child() -> io::Resu
 }
 
 #[test]
+fn appcontainer_owned_termination_stops_descendants_after_parent_exit() -> io::Result<()> {
+    use std::{
+        io::Read,
+        thread,
+        time::{Duration, Instant},
+    };
+    use tinybox_core::ExecRequest;
+    use win_custody::{Process, ProcessAccess, WaitOutcome};
+
+    const DESCENDANT_PID_FILE: &str = "TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE";
+    const PARENT_PROBE: &str = "windows::tests::appcontainer_owned_descendant_parent_probe";
+    let root = tempfile::tempdir()?;
+    let executable = std::env::current_exe()?;
+    let executable_directory = executable.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "test executable has no parent")
+    })?;
+    let pid_file = root.path().join("descendant.pid");
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable.to_string_lossy().into_owned(),
+            "--exact".to_owned(),
+            PARENT_PROBE.to_owned(),
+            "--nocapture".to_owned(),
+        ])
+        .with_cwd(root.path())
+        .with_env(DESCENDANT_PID_FILE, pid_file.to_string_lossy().into_owned()),
+        true,
+        None,
+    );
+    let jail =
+        Jail::new(root.path(), "owned-descendant-cleanup-test").add_read_only(executable_directory);
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let parent_deadline = Instant::now() + Duration::from_secs(10);
+    let parent_status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= parent_deadline {
+            child.terminate()?;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer descendant parent did not exit within 10 seconds",
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    assert!(
+        parent_status.success(),
+        "parent probe failed: {parent_status:?}"
+    );
+
+    let pid = std::fs::read_to_string(&pid_file)?
+        .parse::<u32>()
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid child PID: {error}"),
+            )
+        })?;
+    let descendant =
+        Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("open descendant process {pid}: {error}"),
+            )
+        })?;
+    let descendant_exit_code = descendant
+        .exit_code()
+        .map_err(|error| io::Error::new(error.kind(), format!("query descendant: {error}")))?;
+    let descendant_stdout = std::fs::read_to_string(root.path().join("descendant.stdout"))?;
+    let descendant_stderr = std::fs::read_to_string(root.path().join("descendant.stderr"))?;
+    assert_eq!(
+        descendant_exit_code, None,
+        "descendant exited too early: stdout={descendant_stdout:?}, stderr={descendant_stderr:?}"
+    );
+
+    child
+        .terminate()
+        .map_err(|error| io::Error::new(error.kind(), format!("terminate owned Job: {error}")))?;
+
+    assert_eq!(
+        descendant
+            .wait(Some(Duration::from_secs(5)))
+            .map_err(|error| io::Error::new(
+                error.kind(),
+                format!("wait for descendant: {error}")
+            ))?,
+        WaitOutcome::Signaled,
+        "terminating an owned child must also stop its surviving Job descendants"
+    );
+    assert!(
+        descendant
+            .exit_code()
+            .map_err(|error| io::Error::new(
+                error.kind(),
+                format!("query terminated descendant: {error}")
+            ))?
+            .is_some()
+    );
+    let mut _parent_stdout = String::new();
+    child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("parent probe stdout missing after descendant cleanup"))?
+        .read_to_string(&mut _parent_stdout)
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("read parent probe stdout: {error}"))
+        })?;
+    let mut _parent_stderr = String::new();
+    child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("parent probe stderr missing after descendant cleanup"))?
+        .read_to_string(&mut _parent_stderr)
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("read parent probe stderr: {error}"))
+        })?;
+    Ok(())
+}
+
+#[test]
+fn appcontainer_owned_descendant_parent_probe() -> io::Result<()> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let Some(pid_file) = std::env::var_os("TINYBOX_APPCONTAINER_DESCENDANT_PID_FILE") else {
+        return Ok(());
+    };
+    let root = std::env::current_dir()?;
+    let child_stdout = std::fs::File::create(root.join("descendant.stdout")).map_err(|error| {
+        io::Error::new(error.kind(), format!("create descendant stdout: {error}"))
+    })?;
+    let child_stderr = std::fs::File::create(root.join("descendant.stderr")).map_err(|error| {
+        io::Error::new(error.kind(), format!("create descendant stderr: {error}"))
+    })?;
+    // Windows denies launching the test executable from inside the
+    // AppContainer. Use a bounded cmd.exe built-in loop to keep the descendant
+    // alive long enough for the host to inspect and terminate it. The loop
+    // touches neither stdin, network, temp paths, nor device redirections.
+    let command = std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+        .join("System32")
+        .join("cmd.exe");
+    let mut descendant = Command::new(command)
+        .args([
+            "/D",
+            "/C",
+            "for /L %i in (1,1,1000000) do @set _tinybox_wait=%i",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(child_stdout))
+        .stderr(std::process::Stdio::from(child_stderr))
+        .spawn()
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("spawn cmd descendant probe: {error}"))
+        })?;
+    let deadline = Instant::now() + Duration::from_millis(25);
+    loop {
+        if let Some(status) = descendant.try_wait()? {
+            let stdout = std::fs::read_to_string(root.join("descendant.stdout"))?;
+            let stderr = std::fs::read_to_string(root.join("descendant.stderr"))?;
+            return Err(io::Error::other(format!(
+                "cmd descendant exited before readiness: {status:?}, stdout={stdout:?}, stderr={stderr:?}"
+            )));
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    std::fs::write(pid_file, descendant.id().to_string())?;
+    Ok(())
+}
+
+#[test]
 fn appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment() -> io::Result<()> {
     use std::io::Read;
 

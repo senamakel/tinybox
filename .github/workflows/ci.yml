@@ -119,6 +119,7 @@ jobs:
             windows::tests::appcontainer_local_app_data_must_be_present_and_absolute
             windows::tests::appcontainer_job_limits_map_memory_and_process_count_without_cpu_claims
             windows::tests::appcontainer_owned_launch_captures_output_from_a_confined_child
+            windows::tests::appcontainer_owned_termination_stops_descendants_after_parent_exit
             windows::tests::appcontainer_untyped_owned_launch_does_not_inherit_the_host_environment
             windows::tests::appcontainer_denies_reads_and_writes_outside_granted_roots
             windows::tests::appcontainer_child_cannot_connect_to_host_loopback
