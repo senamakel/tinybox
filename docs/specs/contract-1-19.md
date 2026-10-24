@@ -21,8 +21,16 @@ least 19, which `tinybox_bus::is_compatible` already enforces.
   so a later DNS answer cannot widen the list.
 - Cloud metadata endpoints (`169.254.169.254`, `169.254.170.2`,
   `100.100.100.200`, `fd00:ec2::254`, `metadata.google.internal`) are refused
-  when the spec is validated, and a backend must also block them when a name
-  resolves to one.
+  when the spec is validated, including DNS case and a terminal root dot
+  (`Metadata.Google.Internal.`). Legacy numeric IPv4 spellings for these
+  endpoints are refused too, including `0251.0376.0251.0376`, `0xa9fea9fe`,
+  `0xa9feaa02`, and `0x646464c8`. A backend must also block a metadata address
+  when an allowlisted hostname resolves to one.
+- Explicit loopback destinations are refused during validation, including
+  IPv4/IPv6 literals, IPv4-mapped loopback, scoped IPv6 loopback such as
+  `::1%1`, `localhost` names, and legacy numeric IPv4 forms accepted by common
+  resolvers (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`). Enforcing
+  backends must also reject resolved loopback addresses.
 - A backend that cannot enforce the list refuses the box with
   `ConstraintNotEnforced { constraint: Network, enforcement: Unsupported }`.
   It never widens the list to `Egress`. A backend that enforces only part of it
@@ -33,10 +41,11 @@ least 19, which `tinybox_bus::is_compatible` already enforces.
 
 ## Status per backend
 
-No shipped backend enforces `Allowlist` yet: `passthrough`, `docker`,
-`namespace` and `microvm` all refuse it. Enforcement (netns + nftables or an
-egress proxy, Seatbelt or proxy, AppContainer or WFP) is tracked under
-tinybox#27 phase 3.
+The native Docker Linux controller enforces pinned allowlist addresses with
+firewall rules and container host mappings. `passthrough`, native jail,
+`namespace`, and `microvm` refuse allowlists until they have an enforcing path.
+Other OS Docker hosts remain unsupported unless their controller reports a
+verified enforcement capability.
 
 ## Deprecated
 

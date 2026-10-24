@@ -255,6 +255,10 @@ pub enum NetworkPolicy {
 /// The cloud metadata endpoints in [`EgressAllowlist::is_metadata_host`] are
 /// refused at validation time and must also be blocked by the backend even
 /// when a hostname resolves to one of them.
+///
+/// Explicit loopback targets are refused too, including IPv4/IPv6 literals,
+/// IPv4-mapped and scoped IPv6 loopback, `localhost` names, and legacy numeric
+/// IPv4 forms such as `127.1`, `2130706433`, `0x7f000001`, and `0177.0.0.1`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EgressAllowlist {
     /// Host names or IP literals the box may connect to.
@@ -318,8 +322,7 @@ impl EgressAllowlist {
             Ok(IpAddr::V6(address)) => Self::is_loopback_ipv6(address),
             Err(_) => {
                 Self::parse_scoped_ipv6(&host).is_some_and(Self::is_loopback_ipv6)
-                    || Self::parse_legacy_ipv4(&host)
-                        .is_some_and(|address| address.is_loopback())
+                    || Self::parse_legacy_ipv4(&host).is_some_and(|address| address.is_loopback())
             }
         }
     }
