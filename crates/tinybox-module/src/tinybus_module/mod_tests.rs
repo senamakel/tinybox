@@ -317,7 +317,7 @@ fn install_guide_documents_the_current_bus_contract_and_observations() {
     let guide = include_str!("../../../../MODULE.md");
     let (major, minor) = tinybox_bus::CONTRACT_VERSION;
 
-    assert!(guide.contains(&format!("bus contract version {major}.{minor}")));
+    assert!(guide.contains(&format!("current bus contract is version {major}.{minor}")));
     assert!(guide.contains("`Capabilities`"));
     assert!(guide.contains("`PlanCheck`"));
     assert!(guide.contains("`ProcessEvent`"));
