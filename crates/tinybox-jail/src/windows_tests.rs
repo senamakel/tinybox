@@ -579,6 +579,138 @@ fn appcontainer_denies_reads_and_writes_outside_granted_roots() -> io::Result<()
 }
 
 #[test]
+fn appcontainer_denies_verbatim_path_reads_outside_granted_roots() -> io::Result<()> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    use tinybox_core::ExecRequest;
+
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_VERBATIM_READ_PROBE";
+    const SECRET: &str = "outside-verbatim-secret";
+
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, SECRET)?;
+    let verbatim_secret = verbatim_dos_path(&secret)?;
+    assert_eq!(
+        std::fs::read_to_string(&verbatim_secret)?,
+        SECRET,
+        "the host must resolve the verbatim path before testing AppContainer denial"
+    );
+    let executable = std::env::current_exe()?;
+    let executable_arg = executable.to_string_lossy().into_owned();
+    let executable_directory = executable
+        .parent()
+        .ok_or_else(|| io::Error::other("test executable has no parent directory"))?;
+    let invocation = JailInvocation::new(
+        ExecRequest::new([
+            executable_arg.as_str(),
+            "--exact",
+            "windows::tests::appcontainer_verbatim_path_read_child_probe",
+            "--nocapture",
+        ])
+        .with_cwd(root.path())
+        .with_env(PROBE_ENV, verbatim_secret.to_string_lossy().into_owned()),
+        true,
+        None,
+    );
+    let jail = Jail::new(root.path(), "verbatim-path-denial-test")
+        .add_read_only(executable_directory)
+        .deny_net();
+    let mut child = crate::spawn_owned_invocation_captured_with(
+        &AppContainerBackend::new(),
+        &jail,
+        &invocation,
+    )?;
+    let stdout = child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("captured stdout missing"))?;
+    let stderr = child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("captured stderr missing"))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stdout
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut output = String::new();
+        stderr
+            .take(64 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.terminate()?;
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "AppContainer verbatim-path probe exceeded 10 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = stdout_reader
+        .join()
+        .map_err(|_| io::Error::other("stdout reader thread panicked"))??;
+    let error_output = stderr_reader
+        .join()
+        .map_err(|_| io::Error::other("stderr reader thread panicked"))??;
+
+    assert!(
+        status.success(),
+        "verbatim-path child failed: status={status:?}, stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        output.contains("OUTSIDE_READ_DENIED"),
+        "AppContainer must deny the verbatim path outside granted roots: stdout={output:?}, stderr={error_output:?}"
+    );
+    assert!(
+        !output.contains(SECRET),
+        "AppContainer child read the outside secret through a verbatim path"
+    );
+    Ok(())
+}
+
+#[test]
+fn appcontainer_verbatim_path_read_child_probe() {
+    const PROBE_ENV: &str = "TINYBOX_APPCONTAINER_VERBATIM_READ_PROBE";
+    let Some(path) = std::env::var_os(PROBE_ENV) else {
+        return;
+    };
+
+    match std::fs::read(path) {
+        Ok(contents) => {
+            println!(
+                "OUTSIDE_READ_ALLOWED:{}",
+                String::from_utf8_lossy(&contents)
+            );
+        }
+        Err(error) => println!("OUTSIDE_READ_DENIED:{error}"),
+    }
+}
+
+fn verbatim_dos_path(path: &Path) -> io::Result<std::path::PathBuf> {
+    let canonical = path.canonicalize()?;
+    let path = canonical.as_os_str().to_string_lossy();
+    if path.starts_with(r"\\?\") {
+        return Ok(canonical);
+    }
+    if let Some(unc_path) = path.strip_prefix(r"\\") {
+        return Ok(std::path::PathBuf::from(format!(r"\\?\UNC\{unc_path}")));
+    }
+    Ok(std::path::PathBuf::from(format!(r"\\?\{path}")))
+}
+
+#[test]
 fn appcontainer_child_cannot_connect_to_host_loopback() -> io::Result<()> {
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
