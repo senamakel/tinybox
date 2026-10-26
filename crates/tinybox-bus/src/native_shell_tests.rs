@@ -1,7 +1,8 @@
 //! Tests for runtime-neutral native shell orchestration.
 use super::*;
 use crate::{
-    HostConfig, NetworkPolicy, OutputStream, ResourceLimits, SelectShellRequest, Workspace,
+    ExecutionFailure, HostConfig, NetworkPolicy, OutputStream, ResourceLimits, SelectShellRequest,
+    Workspace,
 };
 use std::{collections::BTreeMap, sync::Mutex};
 
