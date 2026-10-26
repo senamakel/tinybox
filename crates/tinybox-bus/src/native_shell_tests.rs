@@ -377,7 +377,8 @@ fn reserve_start_and_read_failures_are_reported_and_cleaned_up() -> Result<(), &
                     matches!(error, NativeShellError::Transport { operation: actual, .. } if actual == operation)
                 );
             }
-        });
+            Ok::<(), &'static str>(())
+        })?;
     }
     Ok(())
 }
@@ -390,14 +391,16 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() -> Result<()
             run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::Execution(ExecutionFailure::OutputLimit))
         ));
-    });
+        Ok::<(), &'static str>(())
+    })?;
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailClose);
         assert!(matches!(
             run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::ResourceClose("close failed"))
         ));
-    });
+        Ok::<(), &'static str>(())
+    })?;
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailedExecutionCloseFail);
         let err = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
@@ -500,7 +503,7 @@ fn running_poll_without_yield_accumulates_stderr_until_timeout() -> Result<(), &
         };
         assert!(output.timed_out);
         assert_eq!(output.stderr, b"done");
-        assert_eq!(output.stdout, []);
+        assert_eq!(output.stdout.len(), 0);
         Ok(())
     })
 }
