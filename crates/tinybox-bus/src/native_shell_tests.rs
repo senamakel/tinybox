@@ -242,7 +242,7 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
             reads: Mutex::new(0),
             behavior: MockBehavior::Cancelled,
         };
-        let output = run_native_shell(&client, request(), std::future::ready(()), |_| {})
+        let output = run_native_shell(&client, request(), cancel_now(), ignore_chunk)
             .await
             .map_err(|_| "run failed")?;
         let NativeShellRunOutcome::Finished(output) = output else {
@@ -269,7 +269,7 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
             reads: Mutex::new(0),
             behavior: MockBehavior::FailCreate,
         };
-        let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
+        let error = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
             .await
             .err()
             .ok_or("expected failure")?;
@@ -296,7 +296,7 @@ fn module_timeout_returns_collected_output_as_a_result() -> Result<(), &'static 
             reads: Mutex::new(0),
             behavior: MockBehavior::ModuleTimeout,
         };
-        let outcome = run_native_shell(&client, request(), std::future::pending(), |_| {})
+        let outcome = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
             .await
             .map_err(|_| "run failed")?;
         let NativeShellRunOutcome::Finished(output) = outcome else {
@@ -319,7 +319,7 @@ fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'
         };
         let mut request = request();
         request.yield_after = Some(std::time::Duration::ZERO);
-        let outcome = run_native_shell(&client, request, std::future::pending(), |_| {})
+        let outcome = run_native_shell(&client, request, never_cancel(), ignore_chunk)
             .await
             .map_err(|_| "run failed")?;
         let NativeShellRunOutcome::Running(running) = outcome else {
@@ -347,7 +347,7 @@ fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
     ] {
         futures_executor::block_on(async {
             let client = mock(behavior);
-            let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
+            let error = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
                 .await
                 .expect_err("operation should fail");
             if operation == "read output" {
@@ -374,20 +374,20 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailedExecution);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::Execution(ExecutionFailure::OutputLimit))
         ));
     });
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailClose);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::ResourceClose("close failed"))
         ));
     });
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailedExecutionCloseFail);
-        let err = run_native_shell(&client, request(), std::future::pending(), |_| {})
+        let err = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
             .await
             .unwrap_err();
         assert!(matches!(
@@ -405,28 +405,28 @@ fn invalid_cursor_and_cancel_cleanup_errors_are_reported() {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::InvalidCursor);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::InvalidOutputCursor)
         ));
     });
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailCancel);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::ready(()), |_| {}).await,
+            run_native_shell(&client, request(), cancel_now(), ignore_chunk).await,
             Err(NativeShellError::Cancellation("cancel failed"))
         ));
     });
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailRelease);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::OutputRelease("release failed"))
         ));
     });
     futures_executor::block_on(async {
         let client = mock(MockBehavior::InvalidCursorCancelFail);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::Cleanup {
                 operation: "cancel after invalid output cursor",
                 ..
@@ -436,7 +436,7 @@ fn invalid_cursor_and_cancel_cleanup_errors_are_reported() {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::InvalidCursorReleaseFail);
         assert!(matches!(
-            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            run_native_shell(&client, request(), never_cancel(), ignore_chunk).await,
             Err(NativeShellError::Cleanup {
                 operation: "release output after invalid cursor",
                 ..
@@ -451,7 +451,7 @@ fn timeout_cancels_and_returns_collected_output() {
         let client = mock(MockBehavior::TimedOut);
         let mut req = request();
         req.shell.timeout_ms = 1;
-        let outcome = run_native_shell(&client, req, std::future::pending(), |_| {})
+        let outcome = run_native_shell(&client, req, never_cancel(), ignore_chunk)
             .await
             .unwrap();
         let NativeShellRunOutcome::Finished(output) = outcome else {
@@ -470,7 +470,7 @@ fn running_poll_without_yield_accumulates_stderr_until_timeout() {
         let mut req = request();
         req.shell.timeout_ms = 1;
         req.yield_after = Some(std::time::Duration::from_secs(5));
-        let outcome = run_native_shell(&client, req, std::future::pending(), |_| {})
+        let outcome = run_native_shell(&client, req, never_cancel(), ignore_chunk)
             .await
             .unwrap();
         let NativeShellRunOutcome::Finished(output) = outcome else {
