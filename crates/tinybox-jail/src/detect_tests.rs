@@ -17,6 +17,22 @@ fn unavailable_backend_rejects_spawning() {
 #[test]
 fn backend_detection_returns_a_backend() {
     assert_ne!(pick_backend().name().len(), 0);
+    assert_eq!(backend_name(), pick_backend().name());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_detection_matches_the_landlock_backend() {
+    assert_eq!(
+        landlock_available(),
+        crate::linux::LandlockBackend::new().is_available()
+    );
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn landlock_is_unavailable_off_linux() {
+    assert!(!landlock_available());
 }
 
 #[test]

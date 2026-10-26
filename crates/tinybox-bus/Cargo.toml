@@ -10,6 +10,12 @@ repository.workspace = true
 [dependencies]
 # The bus boundary contains data only; serialization is its sole dependency.
 serde.workspace = true
+# OpenHuman config operations share this contract type for schema generation.
+schemars = "1"
+# Runtime-neutral future combinators for the optional native-shell client helper.
+futures-util = { version = "0.3", features = ["async-await"] }
+# Runtime-neutral delay used between bounded output polls.
+futures-timer = "3"
 # Only the `storage` feature: pure collection and legacy-body vocabulary.
 serde_json = { workspace = true, optional = true }
 tinystoragedrivers-types = { workspace = true, optional = true }
@@ -22,6 +28,7 @@ storage = ["dep:serde_json", "dep:tinystoragedrivers-types"]
 
 [dev-dependencies]
 serde_json.workspace = true
+futures-executor = "0.3"
 
 [lints]
 workspace = true
