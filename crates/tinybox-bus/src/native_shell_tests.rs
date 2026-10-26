@@ -29,6 +29,9 @@ enum MockBehavior {
     FailedExecution,
     InvalidCursor,
     FailedExecutionCloseFail,
+    TimedOut,
+    InvalidCursorCancelFail,
+    InvalidCursorReleaseFail,
 }
 
 impl NativeShellClient for MockClient {
@@ -80,11 +83,23 @@ impl NativeShellClient for MockClient {
     async fn read_output(&self, _: ProcessRef, cursor: u64) -> Result<OutputBatch, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
+        let cancelled = self
+            .calls
+            .lock()
+            .map_err(|_| "poisoned")?
+            .contains(&"cancel");
+        if matches!(self.behavior, MockBehavior::TimedOut) && !cancelled {
+            std::future::pending::<()>().await;
+        }
         if matches!(self.behavior, MockBehavior::FailRead) {
             return Err("read failed");
         }
         *self.reads.lock().map_err(|_| "poisoned")? += 1;
-        let state = if matches!(self.behavior, MockBehavior::Cancelled) {
+        let state = if matches!(
+            self.behavior,
+            MockBehavior::Cancelled | MockBehavior::TimedOut
+        ) && cancelled
+        {
             ExecutionState::Cancelled
         } else if matches!(self.behavior, MockBehavior::ModuleTimeout) {
             ExecutionState::Failed {
@@ -106,7 +121,12 @@ impl NativeShellClient for MockClient {
             chunks: if cursor == 0 {
                 vec![OutputChunk {
                     sequence: 0,
-                    stream: if matches!(self.behavior, MockBehavior::InvalidCursor) {
+                    stream: if matches!(
+                        self.behavior,
+                        MockBehavior::InvalidCursor
+                            | MockBehavior::InvalidCursorCancelFail
+                            | MockBehavior::InvalidCursorReleaseFail
+                    ) {
                         OutputStream::Stderr
                     } else {
                         OutputStream::Stdout
@@ -116,7 +136,12 @@ impl NativeShellClient for MockClient {
             } else {
                 Vec::new()
             },
-            next_sequence: if matches!(self.behavior, MockBehavior::InvalidCursor) {
+            next_sequence: if matches!(
+                self.behavior,
+                MockBehavior::InvalidCursor
+                    | MockBehavior::InvalidCursorCancelFail
+                    | MockBehavior::InvalidCursorReleaseFail
+            ) {
                 0
             } else if cursor == 0 {
                 1
@@ -130,7 +155,10 @@ impl NativeShellClient for MockClient {
     async fn cancel(&self, _: ProcessRef) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("cancel");
-        if matches!(self.behavior, MockBehavior::FailCancel) {
+        if matches!(
+            self.behavior,
+            MockBehavior::FailCancel | MockBehavior::InvalidCursorCancelFail
+        ) {
             return Err("cancel failed");
         }
         Ok(())
@@ -139,7 +167,10 @@ impl NativeShellClient for MockClient {
     async fn release_output(&self, _: ProcessRef) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("release");
-        if matches!(self.behavior, MockBehavior::FailRelease) {
+        if matches!(
+            self.behavior,
+            MockBehavior::FailRelease | MockBehavior::InvalidCursorReleaseFail
+        ) {
             return Err("release failed");
         }
         Ok(())
@@ -379,6 +410,44 @@ fn invalid_cursor_and_cancel_cleanup_errors_are_reported() {
             run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
             Err(NativeShellError::OutputRelease("release failed"))
         ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::InvalidCursorCancelFail);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::Cleanup {
+                operation: "cancel after invalid output cursor",
+                ..
+            })
+        ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::InvalidCursorReleaseFail);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::Cleanup {
+                operation: "release output after invalid cursor",
+                ..
+            })
+        ));
+    });
+}
+
+#[test]
+fn timeout_cancels_and_returns_collected_output() {
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::TimedOut);
+        let mut req = request();
+        req.shell.timeout_ms = 1;
+        let outcome = run_native_shell(&client, req, std::future::pending(), |_| {})
+            .await
+            .unwrap();
+        let NativeShellRunOutcome::Finished(output) = outcome else {
+            panic!("expected completion")
+        };
+        assert!(output.timed_out);
+        assert_eq!(output.exit_code, -1);
+        assert!(client.calls.lock().unwrap().contains(&"cancel"));
     });
 }
 
