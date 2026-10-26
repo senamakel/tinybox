@@ -17,6 +17,12 @@ fn command_optional_fields_default_when_absent() -> Result<(), serde_json::Error
 }
 
 #[test]
+fn local_grant_config_exposes_a_json_schema() {
+    let schema = schemars::schema_for!(LocalGrantConfig);
+    assert!(schema.schema.object.is_some());
+}
+
+#[test]
 fn create_environment_defaults_and_workspace_round_trips() -> Result<(), serde_json::Error> {
     let request: CreateRequest = serde_json::from_str(
         r#"{"resource":"create-1","backend":"docker","workspace":{"Image":"alpine"}}"#,

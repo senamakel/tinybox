@@ -62,6 +62,27 @@ pub fn pick_backend() -> Arc<dyn JailBackend> {
     pick_from(candidates())
 }
 
+/// Returns the stable name of the backend selected by platform detection.
+#[must_use]
+pub fn backend_name() -> &'static str {
+    pick_backend().name()
+}
+
+/// Reports whether this build and running Linux kernel support Landlock.
+///
+/// This is always false off Linux and when the `landlock` feature is disabled.
+#[must_use]
+pub fn landlock_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::LandlockBackend::new().is_available()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// Select an available backend from the ordered platform candidates.
 fn pick_from(backends: Vec<Arc<dyn JailBackend>>) -> Arc<dyn JailBackend> {
     for backend in backends {
