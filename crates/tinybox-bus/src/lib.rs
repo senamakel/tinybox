@@ -1,4 +1,5 @@
-//! Serialized requests and results for the `TinyBox` module.
+//! Serialized requests and results for the `TinyBox` module, plus runtime-neutral
+//! native-shell lifecycle orchestration over a caller-supplied client.
 //!
 //! This crate has no bus connection, executor, native backend, or policy.
 //! A caller applies its own authorization before sending these requests.
