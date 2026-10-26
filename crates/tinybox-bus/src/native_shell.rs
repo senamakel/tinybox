@@ -15,31 +15,40 @@ use crate::{
 /// Transport operations required to supervise a native shell.
 ///
 /// Adapters implement these methods with their own bus connection and runtime.
-pub trait NativeShellClient {
+pub trait NativeShellClient: Sync {
     /// Transport error returned by one bus operation.
     type Error;
 
     /// Reserve a resource or process identifier.
-    async fn reserve(&self, request: ReserveRequest) -> Result<ResourceId, Self::Error>;
+    fn reserve(
+        &self,
+        request: ReserveRequest,
+    ) -> impl Future<Output = Result<ResourceId, Self::Error>> + Send;
     /// Create the resource with the module-issued reservation.
-    async fn create(&self, request: CreateRequest) -> Result<(), Self::Error>;
+    fn create(
+        &self,
+        request: CreateRequest,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
     /// Start the requested native shell and return its owned process reference.
-    async fn start_native_shell_exec(
+    fn start_native_shell_exec(
         &self,
         request: ShellExecRequest,
-    ) -> Result<ProcessRef, Self::Error>;
+    ) -> impl Future<Output = Result<ProcessRef, Self::Error>> + Send;
     /// Read output starting at the supplied sequence cursor.
-    async fn read_output(
+    fn read_output(
         &self,
         process: ProcessRef,
         cursor: u64,
-    ) -> Result<OutputBatch, Self::Error>;
+    ) -> impl Future<Output = Result<OutputBatch, Self::Error>> + Send;
     /// Cancel and reap a running native process.
-    async fn cancel(&self, process: ProcessRef) -> Result<(), Self::Error>;
+    fn cancel(&self, process: ProcessRef) -> impl Future<Output = Result<(), Self::Error>> + Send;
     /// Release retained output after the process reaches a terminal state.
-    async fn release_output(&self, process: ProcessRef) -> Result<(), Self::Error>;
+    fn release_output(
+        &self,
+        process: ProcessRef,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
     /// Close the resource after process cleanup.
-    async fn close(&self, resource: ResourceId) -> Result<(), Self::Error>;
+    fn close(&self, resource: ResourceId) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// Inputs for resource creation and native shell execution.
@@ -71,7 +80,12 @@ pub struct NativeShellOutput {
 #[derive(Debug)]
 pub enum NativeShellError<E> {
     /// A bus operation failed.
-    Transport { operation: &'static str, source: E },
+    Transport {
+        /// Human-readable operation that failed.
+        operation: &'static str,
+        /// Underlying adapter error.
+        source: E,
+    },
     /// The module reported a terminal failed state.
     Execution(crate::ExecutionFailure),
     /// Cancellation failed, so native cleanup is not acknowledged.
@@ -147,12 +161,12 @@ where
                     _ = cancelled => {
                         client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
                         cancellation_requested = true;
-                        timed_out = true;
                         continue;
                     },
                     _ = delay => {
                         client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
                         cancellation_requested = true;
+                        timed_out = true;
                         continue;
                     }
                 }
@@ -190,3 +204,7 @@ where
         (Err(error), Err(_)) => Err(error),
     }
 }
+
+#[cfg(test)]
+#[path = "native_shell_tests.rs"]
+mod tests;
