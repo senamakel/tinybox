@@ -95,7 +95,8 @@ impl NativeShellClient for MockClient {
         if matches!(self.behavior, MockBehavior::FailRead) {
             return Err("read failed");
         }
-        *self.reads.lock().map_err(|_| "poisoned")? += 1;
+        let mut reads = self.reads.lock().map_err(|_| "poisoned")?;
+        *reads = reads.wrapping_add(1);
         let state = if matches!(
             self.behavior,
             MockBehavior::Cancelled | MockBehavior::TimedOut
