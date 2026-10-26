@@ -61,6 +61,8 @@ pub struct NativeShellRunRequest {
     pub create: CreateRequest,
     /// Shell settings; its resource and process identifiers are ignored.
     pub shell: ShellExecRequest,
+    /// Return a running process after this duration, preserving cursor and output.
+    pub yield_after: Option<Duration>,
 }
 
 /// Collected native shell output after the module acknowledges process cleanup.
@@ -74,6 +76,30 @@ pub struct NativeShellOutput {
     pub stderr: Vec<u8>,
     /// Whether the shell exceeded its request timeout.
     pub timed_out: bool,
+}
+
+/// Outcome of running a shell through TinyBox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeShellRunOutcome {
+    /// The process exited or timed out and its output was released.
+    Finished(NativeShellOutput),
+    /// The process is still running; the caller now owns its cleanup lifecycle.
+    Running(NativeShellRunning),
+}
+
+/// A running process handed back at the configured yield point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeShellRunning {
+    /// Resource that must be closed after the process is finished.
+    pub resource: ResourceId,
+    /// Owned process reference for polling, cancellation, or release.
+    pub process: ProcessRef,
+    /// Cursor for the next output read.
+    pub cursor: u64,
+    /// Stdout collected before yielding.
+    pub stdout: Vec<u8>,
+    /// Stderr collected before yielding.
+    pub stderr: Vec<u8>,
 }
 
 /// Failure during one phase of native shell orchestration.
@@ -122,7 +148,7 @@ pub async fn run_native_shell<C, F, Fut>(
     request: NativeShellRunRequest,
     cancelled: Fut,
     mut on_chunk: F,
-) -> Result<NativeShellOutput, NativeShellError<C::Error>>
+) -> Result<NativeShellRunOutcome, NativeShellError<C::Error>>
 where
     C: NativeShellClient,
     F: FnMut(&OutputChunk),
