@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 struct MockClient {
     calls: Mutex<Vec<&'static str>>,
+    reads: Mutex<u8>,
     behavior: MockBehavior,
 }
 
@@ -56,9 +57,10 @@ impl NativeShellClient for MockClient {
         })
     }
 
-    async fn read_output(&self, _: ProcessRef, _: u64) -> Result<OutputBatch, Self::Error> {
+    async fn read_output(&self, _: ProcessRef, cursor: u64) -> Result<OutputBatch, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
+        *self.reads.lock().map_err(|_| "poisoned")? += 1;
         let state = if matches!(self.behavior, MockBehavior::Cancelled)
             && self
                 .calls
@@ -77,12 +79,16 @@ impl NativeShellClient for MockClient {
             ExecutionState::Exited { exit_code: 7 }
         };
         Ok(OutputBatch {
-            chunks: vec![OutputChunk {
-                sequence: 0,
-                stream: OutputStream::Stdout,
-                bytes: b"done".to_vec(),
-            }],
-            next_sequence: 1,
+            chunks: if cursor == 0 {
+                vec![OutputChunk {
+                    sequence: 0,
+                    stream: OutputStream::Stdout,
+                    bytes: b"done".to_vec(),
+                }]
+            } else {
+                Vec::new()
+            },
+            next_sequence: if cursor == 0 { 1 } else { cursor },
             state,
         })
     }
@@ -114,6 +120,7 @@ fn runs_and_cleans_up_a_shell_while_streaming_chunks() -> Result<(), &'static st
 async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     let client = MockClient {
         calls: Mutex::new(Vec::new()),
+        reads: Mutex::new(0),
         behavior: MockBehavior::Normal,
     };
     let mut chunks = Vec::new();
@@ -132,7 +139,7 @@ async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     assert_eq!(
         *client.calls.lock().map_err(|_| "poisoned")?,
         [
-            "reserve", "create", "reserve", "start", "read", "release", "close"
+            "reserve", "create", "reserve", "start", "read", "read", "release", "close"
         ]
     );
     Ok(())
@@ -143,6 +150,7 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
+            reads: Mutex::new(0),
             behavior: MockBehavior::Cancelled,
         };
         let output = run_native_shell(&client, request(), std::future::ready(()), |_| {})
@@ -156,7 +164,8 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
         assert_eq!(
             *client.calls.lock().map_err(|_| "poisoned")?,
             [
-                "reserve", "create", "reserve", "start", "cancel", "read", "release", "close"
+                "reserve", "create", "reserve", "start", "cancel", "read", "read", "release",
+                "close"
             ]
         );
         Ok(())
@@ -168,6 +177,7 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
+            reads: Mutex::new(0),
             behavior: MockBehavior::FailCreate,
         };
         let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
@@ -194,6 +204,7 @@ fn module_timeout_returns_collected_output_as_a_result() -> Result<(), &'static 
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
+            reads: Mutex::new(0),
             behavior: MockBehavior::ModuleTimeout,
         };
         let outcome = run_native_shell(&client, request(), std::future::pending(), |_| {})
@@ -214,6 +225,7 @@ fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
+            reads: Mutex::new(0),
             behavior: MockBehavior::Running,
         };
         let mut request = request();

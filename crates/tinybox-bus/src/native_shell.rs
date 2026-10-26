@@ -61,7 +61,7 @@ pub struct NativeShellRunRequest {
     pub create: CreateRequest,
     /// Shell settings; its resource and process identifiers are ignored.
     pub shell: ShellExecRequest,
-    /// Return a running process after this duration, preserving cursor and output.
+    /// Return a running process after this duration if it is shorter than the timeout.
     pub yield_after: Option<Duration>,
 }
 
@@ -158,7 +158,10 @@ where
 {
     let mut create = request.create;
     let timeout_ms = request.shell.timeout_ms.max(1);
-    let yield_after = request.yield_after;
+    let yield_after = request
+        .yield_after
+        .filter(|after| *after < Duration::from_millis(timeout_ms));
+    let yield_started = Instant::now();
     let mut shell = request.shell;
     let resource = client
         .reserve(ReserveRequest::Resource)
@@ -178,7 +181,6 @@ where
         let mut cursor = 0;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let started = Instant::now();
         let cancelled = cancelled.fuse();
         pin_mut!(cancelled);
         let mut cancellation_requested = false;
@@ -239,9 +241,16 @@ where
                 }
             }
             cursor = batch.next_sequence;
+            if !batch.chunks.is_empty()
+                && !matches!(&batch.state, ExecutionState::Running)
+            {
+                continue;
+            }
             match batch.state {
                 ExecutionState::Running => {
-                    if yield_after.is_some_and(|after| started.elapsed() >= after) {
+                    if !cancellation_requested
+                        && yield_after.is_some_and(|after| yield_started.elapsed() >= after)
+                    {
                         return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
                             resource: resource.clone(),
                             process,
