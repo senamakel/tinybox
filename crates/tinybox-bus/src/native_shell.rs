@@ -221,6 +221,20 @@ where
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
                     return Ok(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out });
                 }
+                ExecutionState::Failed {
+                    code: crate::ExecutionFailure::TimedOut,
+                } => {
+                    client
+                        .release_output(process.clone())
+                        .await
+                        .map_err(NativeShellError::OutputRelease)?;
+                    return Ok(NativeShellOutput {
+                        exit_code: -1,
+                        stdout,
+                        stderr,
+                        timed_out: true,
+                    });
+                }
                 ExecutionState::Failed { code } => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
                     return Err(NativeShellError::Execution(code));
