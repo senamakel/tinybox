@@ -18,6 +18,11 @@ use std::collections::BTreeMap;
 mod grants;
 pub use grants::{LocalGrantConfig, LocalGrants, ProtectedPaths, ResolveLocalGrantsRequest};
 
+mod native_shell;
+pub use native_shell::{
+    NativeShellClient, NativeShellError, NativeShellOutput, NativeShellRunRequest, run_native_shell,
+};
+
 mod jail;
 pub use jail::{JailEnforcement, NativeJailConfig, NativeJailRequest, NativeJailResourceRequest};
 

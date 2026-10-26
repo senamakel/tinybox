@@ -23,7 +23,10 @@ fn backend_detection_returns_a_backend() {
 #[cfg(target_os = "linux")]
 #[test]
 fn landlock_detection_matches_the_landlock_backend() {
-    assert_eq!(landlock_available(), crate::linux::LandlockBackend::new().is_available());
+    assert_eq!(
+        landlock_available(),
+        crate::linux::LandlockBackend::new().is_available()
+    );
 }
 
 #[cfg(not(target_os = "linux"))]

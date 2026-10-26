@@ -1,6 +1,6 @@
 //! Host-configured filesystem grant discovery and protected-path vocabulary.
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Configuration used to discover toolchain and explicit filesystem grants.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
