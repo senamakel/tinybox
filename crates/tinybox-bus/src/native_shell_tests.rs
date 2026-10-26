@@ -7,6 +7,8 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 struct MockClient {
     calls: Mutex<Vec<&'static str>>,
+    fail_create: bool,
+    cancel_changes_state: bool,
 }
 
 impl NativeShellClient for MockClient {
@@ -26,6 +28,9 @@ impl NativeShellClient for MockClient {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("create");
         assert_eq!(request.resource, ResourceId("resource-1".into()));
+        if self.fail_create {
+            return Err("create failed");
+        }
         Ok(())
     }
 
@@ -45,6 +50,13 @@ impl NativeShellClient for MockClient {
     async fn read_output(&self, _: ProcessRef, _: u64) -> Result<OutputBatch, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
+        let state = if self.cancel_changes_state
+            && self.calls.lock().map_err(|_| "poisoned")?.contains(&"cancel")
+        {
+            ExecutionState::Cancelled
+        } else {
+            ExecutionState::Exited { exit_code: 7 }
+        };
         Ok(OutputBatch {
             chunks: vec![OutputChunk {
                 sequence: 0,
@@ -52,7 +64,7 @@ impl NativeShellClient for MockClient {
                 bytes: b"done".to_vec(),
             }],
             next_sequence: 1,
-            state: ExecutionState::Exited { exit_code: 7 },
+            state,
         })
     }
 
@@ -83,6 +95,8 @@ fn runs_and_cleans_up_a_shell_while_streaming_chunks() -> Result<(), &'static st
 async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     let client = MockClient {
         calls: Mutex::new(Vec::new()),
+        fail_create: false,
+        cancel_changes_state: false,
     };
     let mut chunks = Vec::new();
     let output = run_native_shell(&client, request(), std::future::pending(), |chunk| {
@@ -101,6 +115,50 @@ async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
         ]
     );
     Ok(())
+}
+
+#[test]
+fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &'static str> {
+    futures_executor::block_on(async {
+        let client = MockClient {
+            calls: Mutex::new(Vec::new()),
+            fail_create: false,
+            cancel_changes_state: true,
+        };
+        let output = run_native_shell(&client, request(), std::future::ready(()), |_| {})
+            .await
+            .map_err(|_| "run failed")?;
+        assert_eq!(output.exit_code, -1);
+        assert!(!output.timed_out);
+        assert_eq!(
+            *client.calls.lock().map_err(|_| "poisoned")?,
+            [
+                "reserve", "create", "reserve", "start", "cancel", "read", "release", "close"
+            ]
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'static str> {
+    futures_executor::block_on(async {
+        let client = MockClient {
+            calls: Mutex::new(Vec::new()),
+            fail_create: true,
+            cancel_changes_state: false,
+        };
+        let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
+            .await
+            .err()
+            .ok_or("expected failure")?;
+        assert!(matches!(error, NativeShellError::Transport { operation: "create resource", .. }));
+        assert_eq!(
+            *client.calls.lock().map_err(|_| "poisoned")?,
+            ["reserve", "create", "close"]
+        );
+        Ok(())
+    })
 }
 
 fn request() -> NativeShellRunRequest {
