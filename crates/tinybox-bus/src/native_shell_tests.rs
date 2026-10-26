@@ -28,6 +28,7 @@ enum MockBehavior {
     FailClose,
     FailedExecution,
     InvalidCursor,
+    FailedExecutionCloseFail,
 }
 
 impl NativeShellClient for MockClient {
@@ -83,13 +84,7 @@ impl NativeShellClient for MockClient {
             return Err("read failed");
         }
         *self.reads.lock().map_err(|_| "poisoned")? += 1;
-        let state = if matches!(self.behavior, MockBehavior::Cancelled)
-            && self
-                .calls
-                .lock()
-                .map_err(|_| "poisoned")?
-                .contains(&"cancel")
-        {
+        let state = if matches!(self.behavior, MockBehavior::Cancelled) {
             ExecutionState::Cancelled
         } else if matches!(self.behavior, MockBehavior::ModuleTimeout) {
             ExecutionState::Failed {
@@ -97,7 +92,10 @@ impl NativeShellClient for MockClient {
             }
         } else if matches!(self.behavior, MockBehavior::Running) {
             ExecutionState::Running
-        } else if matches!(self.behavior, MockBehavior::FailedExecution) {
+        } else if matches!(
+            self.behavior,
+            MockBehavior::FailedExecution | MockBehavior::FailedExecutionCloseFail
+        ) {
             ExecutionState::Failed {
                 code: ExecutionFailure::OutputLimit,
             }
@@ -150,7 +148,10 @@ impl NativeShellClient for MockClient {
     async fn close(&self, _: ResourceId) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("close");
-        if matches!(self.behavior, MockBehavior::FailClose) {
+        if matches!(
+            self.behavior,
+            MockBehavior::FailClose | MockBehavior::FailedExecutionCloseFail
+        ) {
             return Err("close failed");
         }
         Ok(())
@@ -342,10 +343,8 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
         ));
     });
     futures_executor::block_on(async {
-        let client = mock(MockBehavior::FailClose);
-        let mut req = request();
-        req.shell.timeout_ms = 0;
-        let err = run_native_shell(&client, req, std::future::pending(), |_| {})
+        let client = mock(MockBehavior::FailedExecutionCloseFail);
+        let err = run_native_shell(&client, request(), std::future::pending(), |_| {})
             .await
             .unwrap_err();
         assert!(matches!(
