@@ -8,10 +8,16 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 struct MockClient {
     calls: Mutex<Vec<&'static str>>,
-    fail_create: bool,
-    cancel_changes_state: bool,
-    timed_out_state: bool,
-    stays_running: bool,
+    behavior: MockBehavior,
+}
+
+#[derive(Clone, Copy)]
+enum MockBehavior {
+    Normal,
+    FailCreate,
+    Cancelled,
+    ModuleTimeout,
+    Running,
 }
 
 impl NativeShellClient for MockClient {
@@ -31,7 +37,7 @@ impl NativeShellClient for MockClient {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("create");
         assert_eq!(request.resource, ResourceId("resource-1".into()));
-        if self.fail_create {
+        if matches!(self.behavior, MockBehavior::FailCreate) {
             return Err("create failed");
         }
         Ok(())
@@ -53,7 +59,7 @@ impl NativeShellClient for MockClient {
     async fn read_output(&self, _: ProcessRef, _: u64) -> Result<OutputBatch, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
-        let state = if self.cancel_changes_state
+        let state = if matches!(self.behavior, MockBehavior::Cancelled)
             && self
                 .calls
                 .lock()
@@ -61,11 +67,11 @@ impl NativeShellClient for MockClient {
                 .contains(&"cancel")
         {
             ExecutionState::Cancelled
-        } else if self.timed_out_state {
+        } else if matches!(self.behavior, MockBehavior::ModuleTimeout) {
             ExecutionState::Failed {
                 code: ExecutionFailure::TimedOut,
             }
-        } else if self.stays_running {
+        } else if matches!(self.behavior, MockBehavior::Running) {
             ExecutionState::Running
         } else {
             ExecutionState::Exited { exit_code: 7 }
@@ -108,10 +114,7 @@ fn runs_and_cleans_up_a_shell_while_streaming_chunks() -> Result<(), &'static st
 async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     let client = MockClient {
         calls: Mutex::new(Vec::new()),
-        fail_create: false,
-        cancel_changes_state: false,
-        timed_out_state: false,
-        stays_running: false,
+        behavior: MockBehavior::Normal,
     };
     let mut chunks = Vec::new();
     let output = run_native_shell(&client, request(), std::future::pending(), |chunk| {
@@ -140,10 +143,7 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
-            fail_create: false,
-            cancel_changes_state: true,
-            timed_out_state: false,
-            stays_running: false,
+            behavior: MockBehavior::Cancelled,
         };
         let output = run_native_shell(&client, request(), std::future::ready(()), |_| {})
             .await
@@ -168,10 +168,7 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
-            fail_create: true,
-            cancel_changes_state: false,
-            timed_out_state: false,
-            stays_running: false,
+            behavior: MockBehavior::FailCreate,
         };
         let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
             .await
@@ -197,10 +194,7 @@ fn module_timeout_returns_collected_output_as_a_result() -> Result<(), &'static 
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
-            fail_create: false,
-            cancel_changes_state: false,
-            timed_out_state: true,
-            stays_running: false,
+            behavior: MockBehavior::ModuleTimeout,
         };
         let outcome = run_native_shell(&client, request(), std::future::pending(), |_| {})
             .await
@@ -220,10 +214,7 @@ fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'
     futures_executor::block_on(async {
         let client = MockClient {
             calls: Mutex::new(Vec::new()),
-            fail_create: false,
-            cancel_changes_state: false,
-            timed_out_state: false,
-            stays_running: true,
+            behavior: MockBehavior::Running,
         };
         let mut request = request();
         request.yield_after = Some(std::time::Duration::ZERO);
