@@ -490,6 +490,14 @@ fn mock(behavior: MockBehavior) -> MockClient {
     }
 }
 
+async fn never_cancel() {
+    std::future::pending::<()>().await;
+}
+
+async fn cancel_now() {}
+
+fn ignore_chunk(_: &OutputChunk) {}
+
 fn request() -> NativeShellRunRequest {
     NativeShellRunRequest {
         create: CreateRequest {
