@@ -126,6 +126,7 @@ where
         let cancelled = cancelled.fuse();
         pin_mut!(cancelled);
         let mut cancellation_requested = false;
+        let mut timed_out = false;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let poll = client.read_output(process.clone(), cursor).fuse();
@@ -135,10 +136,18 @@ where
                 select! { result = poll => result.map_err(|source| NativeShellError::Transport { operation: "read output", source })? }
             } else {
                 select! {
-                    result = poll => result.map_err(|source| NativeShellError::Transport { operation: "read output", source })?,
+                    result = poll => match result {
+                        Ok(batch) => batch,
+                        Err(source) => {
+                            client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
+                            client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
+                            return Err(NativeShellError::Transport { operation: "read output", source });
+                        }
+                    },
                     _ = cancelled => {
                         client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
                         cancellation_requested = true;
+                        timed_out = true;
                         continue;
                     },
                     _ = delay => {
@@ -160,13 +169,16 @@ where
                 ExecutionState::Running => continue,
                 ExecutionState::Exited { exit_code } => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellOutput { exit_code, stdout, stderr, timed_out: cancellation_requested });
+                    return Ok(NativeShellOutput { exit_code, stdout, stderr, timed_out });
                 }
                 ExecutionState::Cancelled => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out: cancellation_requested });
+                    return Ok(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out });
                 }
-                ExecutionState::Failed { code } => return Err(NativeShellError::Execution(code)),
+                ExecutionState::Failed { code } => {
+                    client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
+                    return Err(NativeShellError::Execution(code));
+                }
             }
         }
     }.await;
