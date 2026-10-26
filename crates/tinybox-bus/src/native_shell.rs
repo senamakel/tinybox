@@ -2,6 +2,7 @@
 
 use std::{
     future::Future,
+    pin::Pin,
     time::{Duration, Instant},
 };
 
@@ -155,13 +156,11 @@ where
     F: Send,
     C::Error: Send,
 {
-    let mut create = request.create;
     let timeout_ms = request.shell.timeout_ms.max(1);
     let yield_after = request
         .yield_after
         .filter(|after| *after < Duration::from_millis(timeout_ms));
     let yield_started = Instant::now();
-    let mut shell = request.shell;
     let resource = client
         .reserve(ReserveRequest::Resource)
         .await
@@ -169,125 +168,23 @@ where
             operation: "reserve resource",
             source,
         })?;
-    create.resource = resource.clone();
     let result = async {
-        client.create(create).await.map_err(|source| NativeShellError::Transport { operation: "create resource", source })?;
-        let process_id = client.reserve(ReserveRequest::Process(resource.clone())).await.map_err(|source| NativeShellError::Transport { operation: "reserve process", source })?;
-        shell.resource = resource.clone();
-        shell.process = process_id;
-        let process = client.start_native_shell_exec(shell).await.map_err(|source| NativeShellError::Transport { operation: "start native shell", source })?;
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let mut cursor = 0;
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let cancelled = cancelled.fuse();
-        pin_mut!(cancelled);
-        let mut cancellation_requested = false;
-        let mut timed_out = false;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let poll = client.read_output(process.clone(), cursor).fuse();
-            let delay = futures_timer::Delay::new(if cancellation_requested { Duration::from_millis(20) } else { remaining.min(Duration::from_millis(20)) }).fuse();
-            pin_mut!(poll, delay);
-            let batch = if cancellation_requested {
-                select! { result = poll => result.map_err(|source| NativeShellError::Transport { operation: "read output", source })? }
-            } else {
-                select! {
-                    result = poll => match result {
-                        Ok(batch) => batch,
-                        Err(source) => {
-                            client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
-                            client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                            return Err(NativeShellError::Transport { operation: "read output", source });
-                        }
-                    },
-                    () = cancelled => {
-                        client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
-                        cancellation_requested = true;
-                        continue;
-                    },
-                    () = delay => {
-                        client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
-                        cancellation_requested = true;
-                        timed_out = true;
-                        continue;
-                    }
-                }
-            };
-            if !batch.chunks.is_empty() && batch.next_sequence <= cursor {
-                let primary = NativeShellError::InvalidOutputCursor;
-                if let Err(source) = client.cancel(process.clone()).await {
-                    return Err(NativeShellError::Cleanup {
-                        operation: "cancel after invalid output cursor",
-                        source,
-                        during: Box::new(primary),
-                    });
-                }
-                if let Err(source) = client.release_output(process.clone()).await {
-                    return Err(NativeShellError::Cleanup {
-                        operation: "release output after invalid cursor",
-                        source,
-                        during: Box::new(primary),
-                    });
-                }
-                return Err(primary);
-            }
-            for chunk in &batch.chunks {
-                on_chunk(chunk);
-                match chunk.stream {
-                    crate::OutputStream::Stdout => stdout.extend_from_slice(&chunk.bytes),
-                    crate::OutputStream::Stderr => stderr.extend_from_slice(&chunk.bytes),
-                }
-            }
-            cursor = batch.next_sequence;
-            if !batch.chunks.is_empty()
-                && !matches!(&batch.state, ExecutionState::Running)
-            {
-                continue;
-            }
-            match batch.state {
-                ExecutionState::Running => {
-                    if !cancellation_requested
-                        && yield_after.is_some_and(|after| yield_started.elapsed() >= after)
-                    {
-                        return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
-                            resource: resource.clone(),
-                            process,
-                            cursor,
-                            stdout,
-                            stderr,
-                        }));
-                    }
-                }
-                ExecutionState::Exited { exit_code } => {
-                    client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput { exit_code, stdout, stderr, timed_out }));
-                }
-                ExecutionState::Cancelled => {
-                    client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out }));
-                }
-                ExecutionState::Failed {
-                    code: crate::ExecutionFailure::TimedOut,
-                } => {
-                    client
-                        .release_output(process.clone())
-                        .await
-                        .map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput {
-                        exit_code: -1,
-                        stdout,
-                        stderr,
-                        timed_out: true,
-                    }));
-                }
-                ExecutionState::Failed { code } => {
-                    client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Err(NativeShellError::Execution(code));
-                }
-            }
-        }
-    }.await;
+        start_native_shell(client, resource.clone(), request.create, request.shell).await?;
+        collect_native_shell(
+            client,
+            process,
+            NativeShellCollectionConfig {
+                resource: resource.clone(),
+                timeout_ms,
+                yield_after,
+                yield_started,
+            },
+            cancelled,
+            &mut on_chunk,
+        )
+        .await
+    }
+    .await;
     let result = match result {
         Ok(NativeShellRunOutcome::Running(running)) => {
             return Ok(NativeShellRunOutcome::Running(running));
@@ -304,6 +201,256 @@ where
             source,
             during: Box::new(error),
         }),
+    }
+}
+
+async fn start_native_shell<C: NativeShellClient>(
+    client: &C,
+    resource: ResourceId,
+    mut create: CreateRequest,
+    mut shell: ShellExecRequest,
+) -> Result<ProcessRef, NativeShellError<C::Error>> {
+    create.resource = resource.clone();
+    client
+        .create(create)
+        .await
+        .map_err(|source| NativeShellError::Transport {
+            operation: "create resource",
+            source,
+        })?;
+    let process_id = client
+        .reserve(ReserveRequest::Process(resource.clone()))
+        .await
+        .map_err(|source| NativeShellError::Transport {
+            operation: "reserve process",
+            source,
+        })?;
+    shell.resource = resource;
+    shell.process = process_id;
+    client
+        .start_native_shell_exec(shell)
+        .await
+        .map_err(|source| NativeShellError::Transport {
+            operation: "start native shell",
+            source,
+        })
+}
+
+async fn collect_native_shell<C, F, Fut>(
+    client: &C,
+    process: ProcessRef,
+    config: NativeShellCollectionConfig,
+    cancelled: Fut,
+    on_chunk: &mut F,
+) -> Result<NativeShellRunOutcome, NativeShellError<C::Error>>
+where
+    C: NativeShellClient,
+    F: FnMut(&OutputChunk),
+    Fut: Future<Output = ()> + Send,
+    F: Send,
+    C::Error: Send,
+{
+    let deadline = Instant::now() + Duration::from_millis(config.timeout_ms);
+    let mut capture = NativeShellCapture::default();
+    let mut cancelled = cancelled.fuse();
+    pin_mut!(cancelled);
+    let mut cancellation_requested = false;
+    let mut timed_out = false;
+    loop {
+        let poll = next_native_shell_batch(
+            client,
+            &process,
+            capture.cursor,
+            deadline,
+            cancellation_requested,
+            cancelled.as_mut(),
+        )
+        .await?;
+        match poll {
+            NativeShellPoll::Cancelled => {
+                cancellation_requested = true;
+                continue;
+            }
+            NativeShellPoll::TimedOut => {
+                cancellation_requested = true;
+                timed_out = true;
+                continue;
+            }
+            NativeShellPoll::Batch(batch) => {
+                let has_chunks = !batch.chunks.is_empty();
+                if !capture.append(&batch, on_chunk) {
+                    let primary = NativeShellError::InvalidOutputCursor;
+                    if let Err(source) = client.cancel(process.clone()).await {
+                        return Err(NativeShellError::Cleanup {
+                            operation: "cancel after invalid output cursor",
+                            source,
+                            during: Box::new(primary),
+                        });
+                    }
+                    if let Err(source) = client.release_output(process.clone()).await {
+                        return Err(NativeShellError::Cleanup {
+                            operation: "release output after invalid cursor",
+                            source,
+                            during: Box::new(primary),
+                        });
+                    }
+                    return Err(primary);
+                }
+                if has_chunks && !matches!(&batch.state, ExecutionState::Running) {
+                    continue;
+                }
+                match batch.state {
+                    ExecutionState::Running => {
+                        if !cancellation_requested
+                            && config
+                                .yield_after
+                                .is_some_and(|after| config.yield_started.elapsed() >= after)
+                        {
+                            return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
+                                resource: config.resource,
+                                process,
+                                cursor: capture.cursor,
+                                stdout: capture.stdout,
+                                stderr: capture.stderr,
+                            }));
+                        }
+                    }
+                    ExecutionState::Exited { exit_code } => {
+                        client
+                            .release_output(process.clone())
+                            .await
+                            .map_err(NativeShellError::OutputRelease)?;
+                        return Ok(NativeShellRunOutcome::Finished(
+                            capture.finish(exit_code, timed_out),
+                        ));
+                    }
+                    ExecutionState::Cancelled => {
+                        client
+                            .release_output(process.clone())
+                            .await
+                            .map_err(NativeShellError::OutputRelease)?;
+                        return Ok(NativeShellRunOutcome::Finished(
+                            capture.finish(-1, timed_out),
+                        ));
+                    }
+                    ExecutionState::Failed {
+                        code: crate::ExecutionFailure::TimedOut,
+                    } => {
+                        client
+                            .release_output(process.clone())
+                            .await
+                            .map_err(NativeShellError::OutputRelease)?;
+                        return Ok(NativeShellRunOutcome::Finished(capture.finish(-1, true)));
+                    }
+                    ExecutionState::Failed { code } => {
+                        client
+                            .release_output(process.clone())
+                            .await
+                            .map_err(NativeShellError::OutputRelease)?;
+                        return Err(NativeShellError::Execution(code));
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct NativeShellCollectionConfig {
+    resource: ResourceId,
+    timeout_ms: u64,
+    yield_after: Option<Duration>,
+    yield_started: Instant,
+}
+
+#[derive(Default)]
+struct NativeShellCapture {
+    cursor: u64,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl NativeShellCapture {
+    fn append<F>(&mut self, batch: &OutputBatch, on_chunk: &mut F) -> bool
+    where
+        F: FnMut(&OutputChunk),
+    {
+        if !batch.chunks.is_empty() && batch.next_sequence <= self.cursor {
+            return false;
+        }
+        for chunk in &batch.chunks {
+            on_chunk(chunk);
+            match chunk.stream {
+                crate::OutputStream::Stdout => self.stdout.extend_from_slice(&chunk.bytes),
+                crate::OutputStream::Stderr => self.stderr.extend_from_slice(&chunk.bytes),
+            }
+        }
+        self.cursor = batch.next_sequence;
+        true
+    }
+
+    fn finish(&mut self, exit_code: i32, timed_out: bool) -> NativeShellOutput {
+        NativeShellOutput {
+            exit_code,
+            stdout: std::mem::take(&mut self.stdout),
+            stderr: std::mem::take(&mut self.stderr),
+            timed_out,
+        }
+    }
+}
+
+enum NativeShellPoll {
+    Batch(OutputBatch),
+    Cancelled,
+    TimedOut,
+}
+
+async fn next_native_shell_batch<C, Fut>(
+    client: &C,
+    process: &ProcessRef,
+    cursor: u64,
+    deadline: Instant,
+    cancellation_requested: bool,
+    cancelled: Pin<&mut futures_util::future::Fuse<Fut>>,
+) -> Result<NativeShellPoll, NativeShellError<C::Error>>
+where
+    C: NativeShellClient,
+    C::Error: Send,
+    Fut: Future<Output = ()> + Send,
+{
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let poll = client.read_output(process.clone(), cursor).fuse();
+    let delay = futures_timer::Delay::new(if cancellation_requested {
+        Duration::from_millis(20)
+    } else {
+        remaining.min(Duration::from_millis(20))
+    })
+    .fuse();
+    pin_mut!(poll, delay);
+    if cancellation_requested {
+        select! {
+            result = poll => result
+                .map(NativeShellPoll::Batch)
+                .map_err(|source| NativeShellError::Transport { operation: "read output", source }),
+        }
+    } else {
+        select! {
+            result = poll => match result {
+                Ok(batch) => Ok(NativeShellPoll::Batch(batch)),
+                Err(source) => {
+                    client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
+                    client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
+                    Err(NativeShellError::Transport { operation: "read output", source })
+                }
+            },
+            () = cancelled => {
+                client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
+                Ok(NativeShellPoll::Cancelled)
+            },
+            () = delay => {
+                client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
+                Ok(NativeShellPoll::TimedOut)
+            }
+        }
     }
 }
 
