@@ -158,6 +158,7 @@ where
 {
     let mut create = request.create;
     let timeout_ms = request.shell.timeout_ms.max(1);
+    let yield_after = request.yield_after;
     let mut shell = request.shell;
     let resource = client
         .reserve(ReserveRequest::Resource)
@@ -177,6 +178,7 @@ where
         let mut cursor = 0;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
+        let started = Instant::now();
         let cancelled = cancelled.fuse();
         pin_mut!(cancelled);
         let mut cancellation_requested = false;
@@ -238,14 +240,24 @@ where
             }
             cursor = batch.next_sequence;
             match batch.state {
-                ExecutionState::Running => {}
+                ExecutionState::Running => {
+                    if yield_after.is_some_and(|after| started.elapsed() >= after) {
+                        return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
+                            resource: resource.clone(),
+                            process,
+                            cursor,
+                            stdout,
+                            stderr,
+                        }));
+                    }
+                }
                 ExecutionState::Exited { exit_code } => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellOutput { exit_code, stdout, stderr, timed_out });
+                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput { exit_code, stdout, stderr, timed_out }));
                 }
                 ExecutionState::Cancelled => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out });
+                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput { exit_code: -1, stdout, stderr, timed_out }));
                 }
                 ExecutionState::Failed {
                     code: crate::ExecutionFailure::TimedOut,
@@ -254,12 +266,12 @@ where
                         .release_output(process.clone())
                         .await
                         .map_err(NativeShellError::OutputRelease)?;
-                    return Ok(NativeShellOutput {
+                    return Ok(NativeShellRunOutcome::Finished(NativeShellOutput {
                         exit_code: -1,
                         stdout,
                         stderr,
                         timed_out: true,
-                    });
+                    }));
                 }
                 ExecutionState::Failed { code } => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
@@ -268,6 +280,12 @@ where
             }
         }
     }.await;
+    let result = match result {
+        Ok(NativeShellRunOutcome::Running(running)) => {
+            return Ok(NativeShellRunOutcome::Running(running));
+        }
+        result => result,
+    };
     let close_result = client.close(resource).await;
     match (result, close_result) {
         (Ok(output), Ok(())) => Ok(output),
