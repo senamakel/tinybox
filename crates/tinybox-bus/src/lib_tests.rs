@@ -17,9 +17,11 @@ fn command_optional_fields_default_when_absent() -> Result<(), serde_json::Error
 }
 
 #[test]
-fn local_grant_config_exposes_a_json_schema() {
+fn local_grant_config_exposes_a_json_schema() -> Result<(), serde_json::Error> {
     let schema = schemars::schema_for!(LocalGrantConfig);
-    assert!(schema.schema.object.is_some());
+    let schema = serde_json::to_value(schema)?;
+    assert!(schema.get("properties").is_some());
+    Ok(())
 }
 
 #[test]
