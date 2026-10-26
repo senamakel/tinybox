@@ -19,6 +19,15 @@ enum MockBehavior {
     Cancelled,
     ModuleTimeout,
     Running,
+    FailResourceReserve,
+    FailProcessReserve,
+    FailStart,
+    FailRead,
+    FailCancel,
+    FailRelease,
+    FailClose,
+    FailedExecution,
+    InvalidCursor,
 }
 
 impl NativeShellClient for MockClient {
@@ -27,6 +36,13 @@ impl NativeShellClient for MockClient {
     async fn reserve(&self, request: ReserveRequest) -> Result<ResourceId, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("reserve");
+        if matches!(self.behavior, MockBehavior::FailResourceReserve)
+            && matches!(request, ReserveRequest::Resource)
+            || matches!(self.behavior, MockBehavior::FailProcessReserve)
+                && matches!(request, ReserveRequest::Process(_))
+        {
+            return Err("reserve failed");
+        }
         Ok(match request {
             ReserveRequest::Resource => ResourceId("resource-1".into()),
             ReserveRequest::Process(_) => ResourceId("process-1".into()),
@@ -51,6 +67,9 @@ impl NativeShellClient for MockClient {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("start");
         assert_eq!(request.process, ResourceId("process-1".into()));
+        if matches!(self.behavior, MockBehavior::FailStart) {
+            return Err("start failed");
+        }
         Ok(ProcessRef {
             resource: request.resource,
             process: request.process,
@@ -60,6 +79,9 @@ impl NativeShellClient for MockClient {
     async fn read_output(&self, _: ProcessRef, cursor: u64) -> Result<OutputBatch, Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
+        if matches!(self.behavior, MockBehavior::FailRead) {
+            return Err("read failed");
+        }
         *self.reads.lock().map_err(|_| "poisoned")? += 1;
         let state = if matches!(self.behavior, MockBehavior::Cancelled)
             && self
@@ -75,6 +97,10 @@ impl NativeShellClient for MockClient {
             }
         } else if matches!(self.behavior, MockBehavior::Running) {
             ExecutionState::Running
+        } else if matches!(self.behavior, MockBehavior::FailedExecution) {
+            ExecutionState::Failed {
+                code: ExecutionFailure::OutputLimit,
+            }
         } else {
             ExecutionState::Exited { exit_code: 7 }
         };
@@ -82,13 +108,23 @@ impl NativeShellClient for MockClient {
             chunks: if cursor == 0 {
                 vec![OutputChunk {
                     sequence: 0,
-                    stream: OutputStream::Stdout,
+                    stream: if matches!(self.behavior, MockBehavior::InvalidCursor) {
+                        OutputStream::Stderr
+                    } else {
+                        OutputStream::Stdout
+                    },
                     bytes: b"done".to_vec(),
                 }]
             } else {
                 Vec::new()
             },
-            next_sequence: if cursor == 0 { 1 } else { cursor },
+            next_sequence: if matches!(self.behavior, MockBehavior::InvalidCursor) {
+                0
+            } else if cursor == 0 {
+                1
+            } else {
+                cursor
+            },
             state,
         })
     }
@@ -96,18 +132,27 @@ impl NativeShellClient for MockClient {
     async fn cancel(&self, _: ProcessRef) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("cancel");
+        if matches!(self.behavior, MockBehavior::FailCancel) {
+            return Err("cancel failed");
+        }
         Ok(())
     }
 
     async fn release_output(&self, _: ProcessRef) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("release");
+        if matches!(self.behavior, MockBehavior::FailRelease) {
+            return Err("release failed");
+        }
         Ok(())
     }
 
     async fn close(&self, _: ResourceId) -> Result<(), Self::Error> {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("close");
+        if matches!(self.behavior, MockBehavior::FailClose) {
+            return Err("close failed");
+        }
         Ok(())
     }
 }
@@ -246,6 +291,104 @@ fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'
         );
         Ok(())
     })
+}
+
+#[test]
+fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
+    for (behavior, operation) in [
+        (MockBehavior::FailResourceReserve, "reserve resource"),
+        (MockBehavior::FailProcessReserve, "reserve process"),
+        (MockBehavior::FailStart, "start native shell"),
+        (MockBehavior::FailRead, "read output"),
+    ] {
+        futures_executor::block_on(async {
+            let client = mock(behavior);
+            let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
+                .await
+                .expect_err("operation should fail");
+            if operation == "read output" {
+                assert!(matches!(
+                    error,
+                    NativeShellError::Transport {
+                        operation: "read output",
+                        ..
+                    }
+                ));
+                assert!(client.calls.lock().expect("calls").contains(&"cancel"));
+                assert!(client.calls.lock().expect("calls").contains(&"release"));
+            } else {
+                assert!(
+                    matches!(error, NativeShellError::Transport { operation: actual, .. } if actual == operation)
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::FailedExecution);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::Execution(ExecutionFailure::OutputLimit))
+        ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::FailClose);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::ResourceClose("close failed"))
+        ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::FailClose);
+        let mut req = request();
+        req.shell.timeout_ms = 0;
+        let err = run_native_shell(&client, req, std::future::pending(), |_| {})
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            NativeShellError::Cleanup {
+                operation: "close resource",
+                ..
+            }
+        ));
+    });
+}
+
+#[test]
+fn invalid_cursor_and_cancel_cleanup_errors_are_reported() {
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::InvalidCursor);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::InvalidOutputCursor)
+        ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::FailCancel);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::ready(()), |_| {}).await,
+            Err(NativeShellError::Cancellation("cancel failed"))
+        ));
+    });
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::FailRelease);
+        assert!(matches!(
+            run_native_shell(&client, request(), std::future::pending(), |_| {}).await,
+            Err(NativeShellError::OutputRelease("release failed"))
+        ));
+    });
+}
+
+fn mock(behavior: MockBehavior) -> MockClient {
+    MockClient {
+        calls: Mutex::new(Vec::new()),
+        reads: Mutex::new(0),
+        behavior,
+    }
 }
 
 fn request() -> NativeShellRunRequest {
