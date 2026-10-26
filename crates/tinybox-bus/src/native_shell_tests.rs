@@ -98,9 +98,12 @@ impl NativeShellClient for MockClient {
         let state = if matches!(
             self.behavior,
             MockBehavior::Cancelled | MockBehavior::TimedOut
-        ) && cancelled
-        {
-            ExecutionState::Cancelled
+        ) {
+            if cancelled {
+                ExecutionState::Cancelled
+            } else {
+                ExecutionState::Running
+            }
         } else if matches!(self.behavior, MockBehavior::ModuleTimeout) {
             ExecutionState::Failed {
                 code: ExecutionFailure::TimedOut,
