@@ -32,6 +32,7 @@ enum MockBehavior {
     TimedOut,
     InvalidCursorCancelFail,
     InvalidCursorReleaseFail,
+    RunningStderr,
 }
 
 impl NativeShellClient for MockClient {
@@ -108,7 +109,12 @@ impl NativeShellClient for MockClient {
             ExecutionState::Failed {
                 code: ExecutionFailure::TimedOut,
             }
-        } else if matches!(self.behavior, MockBehavior::Running) {
+        } else if matches!(self.behavior, MockBehavior::RunningStderr) && cancelled {
+            ExecutionState::Cancelled
+        } else if matches!(
+            self.behavior,
+            MockBehavior::Running | MockBehavior::RunningStderr
+        ) {
             ExecutionState::Running
         } else if matches!(
             self.behavior,
@@ -124,7 +130,9 @@ impl NativeShellClient for MockClient {
             chunks: if cursor == 0 {
                 vec![OutputChunk {
                     sequence: 0,
-                    stream: if matches!(
+                    stream: if matches!(self.behavior, MockBehavior::RunningStderr) {
+                        OutputStream::Stderr
+                    } else if matches!(
                         self.behavior,
                         MockBehavior::InvalidCursor
                             | MockBehavior::InvalidCursorCancelFail
@@ -451,6 +459,25 @@ fn timeout_cancels_and_returns_collected_output() {
         assert!(output.timed_out);
         assert_eq!(output.exit_code, -1);
         assert!(client.calls.lock().unwrap().contains(&"cancel"));
+    });
+}
+
+#[test]
+fn running_poll_without_yield_accumulates_stderr_until_timeout() {
+    futures_executor::block_on(async {
+        let client = mock(MockBehavior::RunningStderr);
+        let mut req = request();
+        req.shell.timeout_ms = 1;
+        req.yield_after = Some(std::time::Duration::from_secs(5));
+        let outcome = run_native_shell(&client, req, std::future::pending(), |_| {})
+            .await
+            .unwrap();
+        let NativeShellRunOutcome::Finished(output) = outcome else {
+            panic!("expected completion")
+        };
+        assert!(output.timed_out);
+        assert_eq!(output.stderr, b"done");
+        assert!(output.stdout.is_empty());
     });
 }
 
