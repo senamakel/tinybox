@@ -169,7 +169,8 @@ where
             source,
         })?;
     let result = async {
-        start_native_shell(client, resource.clone(), request.create, request.shell).await?;
+        let process =
+            start_native_shell(client, resource.clone(), request.create, request.shell).await?;
         collect_native_shell(
             client,
             process,
@@ -252,7 +253,7 @@ where
 {
     let deadline = Instant::now() + Duration::from_millis(config.timeout_ms);
     let mut capture = NativeShellCapture::default();
-    let mut cancelled = cancelled.fuse();
+    let cancelled = cancelled.fuse();
     pin_mut!(cancelled);
     let mut cancellation_requested = false;
     let mut timed_out = false;
@@ -410,7 +411,7 @@ async fn next_native_shell_batch<C, Fut>(
     cursor: u64,
     deadline: Instant,
     cancellation_requested: bool,
-    cancelled: Pin<&mut futures_util::future::Fuse<Fut>>,
+    mut cancelled: Pin<&mut futures_util::future::Fuse<Fut>>,
 ) -> Result<NativeShellPoll, NativeShellError<C::Error>>
 where
     C: NativeShellClient,
