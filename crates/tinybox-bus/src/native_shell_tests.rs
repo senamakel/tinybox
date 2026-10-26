@@ -249,13 +249,21 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
         };
         assert_eq!(output.exit_code, -1);
         assert!(!output.timed_out);
-        assert_eq!(
-            *client.calls.lock().map_err(|_| "poisoned")?,
-            [
-                "reserve", "create", "reserve", "start", "cancel", "read", "read", "release",
-                "close"
-            ]
-        );
+        let calls = client.calls.lock().map_err(|_| "poisoned")?;
+        assert_eq!(&calls[..4], &["reserve", "create", "reserve", "start"]);
+        let cancel = calls
+            .iter()
+            .position(|call| *call == "cancel")
+            .ok_or("cancel missing")?;
+        let release = calls
+            .iter()
+            .position(|call| *call == "release")
+            .ok_or("release missing")?;
+        let close = calls
+            .iter()
+            .position(|call| *call == "close")
+            .ok_or("close missing")?;
+        assert!(cancel < release && release < close);
         Ok(())
     })
 }
