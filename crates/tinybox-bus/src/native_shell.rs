@@ -103,6 +103,7 @@ where
     Fut: Future<Output = ()>,
 {
     let mut create = request.create;
+    let timeout_ms = request.shell.timeout_ms.max(1);
     let mut shell = request.shell;
     let resource = client
         .reserve(ReserveRequest::Resource)
@@ -118,7 +119,7 @@ where
         shell.resource = resource.clone();
         shell.process = process_id;
         let process = client.start_native_shell_exec(shell).await.map_err(|source| NativeShellError::Transport { operation: "start native shell", source })?;
-        let deadline = Instant::now() + Duration::from_millis(request.shell.timeout_ms.max(1));
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut cursor = 0;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
