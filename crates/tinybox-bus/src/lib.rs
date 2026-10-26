@@ -20,7 +20,8 @@ pub use grants::{LocalGrantConfig, LocalGrants, ProtectedPaths, ResolveLocalGran
 
 mod native_shell;
 pub use native_shell::{
-    NativeShellClient, NativeShellError, NativeShellOutput, NativeShellRunRequest, run_native_shell,
+    NativeShellClient, NativeShellError, NativeShellOutput, NativeShellRunOutcome,
+    NativeShellRunRequest, NativeShellRunning, run_native_shell,
 };
 
 mod jail;

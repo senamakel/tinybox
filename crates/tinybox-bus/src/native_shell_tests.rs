@@ -9,6 +9,8 @@ struct MockClient {
     calls: Mutex<Vec<&'static str>>,
     fail_create: bool,
     cancel_changes_state: bool,
+    timed_out_state: bool,
+    stays_running: bool,
 }
 
 impl NativeShellClient for MockClient {
@@ -58,6 +60,12 @@ impl NativeShellClient for MockClient {
                 .contains(&"cancel")
         {
             ExecutionState::Cancelled
+        } else if self.timed_out_state {
+            ExecutionState::Failed {
+                code: ExecutionFailure::TimedOut,
+            }
+        } else if self.stays_running {
+            ExecutionState::Running
         } else {
             ExecutionState::Exited { exit_code: 7 }
         };
@@ -101,6 +109,8 @@ async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
         calls: Mutex::new(Vec::new()),
         fail_create: false,
         cancel_changes_state: false,
+        timed_out_state: false,
+        stays_running: false,
     };
     let mut chunks = Vec::new();
     let output = run_native_shell(&client, request(), std::future::pending(), |chunk| {
@@ -108,6 +118,9 @@ async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     })
     .await
     .map_err(|_| "run failed")?;
+    let NativeShellRunOutcome::Finished(output) = output else {
+        return Err("expected a finished outcome");
+    };
     assert_eq!(output.exit_code, 7);
     assert_eq!(output.stdout, b"done");
     assert!(!output.timed_out);
@@ -128,10 +141,15 @@ fn cancellation_reaps_the_process_before_releasing_and_closing() -> Result<(), &
             calls: Mutex::new(Vec::new()),
             fail_create: false,
             cancel_changes_state: true,
+            timed_out_state: false,
+            stays_running: false,
         };
         let output = run_native_shell(&client, request(), std::future::ready(()), |_| {})
             .await
             .map_err(|_| "run failed")?;
+        let NativeShellRunOutcome::Finished(output) = output else {
+            return Err("expected a finished outcome");
+        };
         assert_eq!(output.exit_code, -1);
         assert!(!output.timed_out);
         assert_eq!(
@@ -151,6 +169,8 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
             calls: Mutex::new(Vec::new()),
             fail_create: true,
             cancel_changes_state: false,
+            timed_out_state: false,
+            stays_running: false,
         };
         let error = run_native_shell(&client, request(), std::future::pending(), |_| {})
             .await
@@ -166,6 +186,59 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
         assert_eq!(
             *client.calls.lock().map_err(|_| "poisoned")?,
             ["reserve", "create", "close"]
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn module_timeout_returns_collected_output_as_a_result() -> Result<(), &'static str> {
+    futures_executor::block_on(async {
+        let client = MockClient {
+            calls: Mutex::new(Vec::new()),
+            fail_create: false,
+            cancel_changes_state: false,
+            timed_out_state: true,
+            stays_running: false,
+        };
+        let outcome = run_native_shell(&client, request(), std::future::pending(), |_| {})
+            .await
+            .map_err(|_| "run failed")?;
+        let NativeShellRunOutcome::Finished(output) = outcome else {
+            return Err("expected a finished outcome");
+        };
+        assert!(output.timed_out);
+        assert_eq!(output.stdout, b"done");
+        assert_eq!(output.exit_code, -1);
+        Ok(())
+    })
+}
+
+#[test]
+fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'static str> {
+    futures_executor::block_on(async {
+        let client = MockClient {
+            calls: Mutex::new(Vec::new()),
+            fail_create: false,
+            cancel_changes_state: false,
+            timed_out_state: false,
+            stays_running: true,
+        };
+        let mut request = request();
+        request.yield_after = Some(std::time::Duration::ZERO);
+        let outcome = run_native_shell(&client, request, std::future::pending(), |_| {})
+            .await
+            .map_err(|_| "run failed")?;
+        let NativeShellRunOutcome::Running(running) = outcome else {
+            return Err("expected a running outcome");
+        };
+        assert_eq!(running.resource, ResourceId("resource-1".into()));
+        assert_eq!(running.process.process, ResourceId("process-1".into()));
+        assert_eq!(running.cursor, 1);
+        assert_eq!(running.stdout, b"done");
+        assert_eq!(
+            *client.calls.lock().map_err(|_| "poisoned")?,
+            ["reserve", "create", "reserve", "start", "read"]
         );
         Ok(())
     })
@@ -200,5 +273,6 @@ fn request() -> NativeShellRunRequest {
             jail: None,
             hide_window: false,
         },
+        yield_after: None,
     }
 }
