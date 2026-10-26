@@ -270,12 +270,10 @@ where
         match poll {
             NativeShellPoll::Cancelled => {
                 cancellation_requested = true;
-                continue;
             }
             NativeShellPoll::TimedOut => {
                 cancellation_requested = true;
                 timed_out = true;
-                continue;
             }
             NativeShellPoll::Batch(batch) => {
                 let has_chunks = !batch.chunks.is_empty();
@@ -300,60 +298,57 @@ where
                 if has_chunks && !matches!(&batch.state, ExecutionState::Running) {
                     continue;
                 }
-                match batch.state {
-                    ExecutionState::Running => {
-                        if !cancellation_requested
-                            && config
-                                .yield_after
-                                .is_some_and(|after| config.yield_started.elapsed() >= after)
-                        {
-                            return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
-                                resource: config.resource,
-                                process,
-                                cursor: capture.cursor,
-                                stdout: capture.stdout,
-                                stderr: capture.stderr,
-                            }));
-                        }
-                    }
-                    ExecutionState::Exited { exit_code } => {
-                        client
-                            .release_output(process.clone())
-                            .await
-                            .map_err(NativeShellError::OutputRelease)?;
-                        return Ok(NativeShellRunOutcome::Finished(
-                            capture.finish(exit_code, timed_out),
-                        ));
-                    }
-                    ExecutionState::Cancelled => {
-                        client
-                            .release_output(process.clone())
-                            .await
-                            .map_err(NativeShellError::OutputRelease)?;
-                        return Ok(NativeShellRunOutcome::Finished(
-                            capture.finish(-1, timed_out),
-                        ));
-                    }
-                    ExecutionState::Failed {
-                        code: crate::ExecutionFailure::TimedOut,
-                    } => {
-                        client
-                            .release_output(process.clone())
-                            .await
-                            .map_err(NativeShellError::OutputRelease)?;
-                        return Ok(NativeShellRunOutcome::Finished(capture.finish(-1, true)));
-                    }
-                    ExecutionState::Failed { code } => {
-                        client
-                            .release_output(process.clone())
-                            .await
-                            .map_err(NativeShellError::OutputRelease)?;
-                        return Err(NativeShellError::Execution(code));
-                    }
+                if let Some(output) =
+                    finish_native_shell(client, &process, &mut capture, batch.state, timed_out)
+                        .await?
+                {
+                    return Ok(NativeShellRunOutcome::Finished(output));
+                }
+                if !cancellation_requested
+                    && config
+                        .yield_after
+                        .is_some_and(|after| config.yield_started.elapsed() >= after)
+                {
+                    return Ok(NativeShellRunOutcome::Running(NativeShellRunning {
+                        resource: config.resource,
+                        process,
+                        cursor: capture.cursor,
+                        stdout: capture.stdout,
+                        stderr: capture.stderr,
+                    }));
                 }
             }
         }
     }
+}
+
+async fn finish_native_shell<C: NativeShellClient>(
+    client: &C,
+    process: &ProcessRef,
+    capture: &mut NativeShellCapture,
+    state: ExecutionState,
+    timed_out: bool,
+) -> Result<Option<NativeShellOutput>, NativeShellError<C::Error>> {
+    let output = match state {
+        ExecutionState::Running => return Ok(None),
+        ExecutionState::Exited { exit_code } => capture.finish(exit_code, timed_out),
+        ExecutionState::Cancelled => capture.finish(-1, timed_out),
+        ExecutionState::Failed {
+            code: crate::ExecutionFailure::TimedOut,
+        } => capture.finish(-1, true),
+        ExecutionState::Failed { code } => {
+            client
+                .release_output(process.clone())
+                .await
+                .map_err(NativeShellError::OutputRelease)?;
+            return Err(NativeShellError::Execution(code));
+        }
+    };
+    client
+        .release_output(process.clone())
+        .await
+        .map_err(NativeShellError::OutputRelease)?;
+    Ok(Some(output))
 }
 
 struct NativeShellCollectionConfig {
