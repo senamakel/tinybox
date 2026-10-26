@@ -28,6 +28,7 @@ storage = ["dep:serde_json", "dep:tinystoragedrivers-types"]
 
 [dev-dependencies]
 serde_json.workspace = true
+futures-executor = "0.3"
 
 [lints]
 workspace = true

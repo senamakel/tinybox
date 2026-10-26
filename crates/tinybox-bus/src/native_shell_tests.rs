@@ -68,8 +68,12 @@ impl NativeShellClient for MockClient {
     }
 }
 
-#[tokio::test]
-async fn runs_and_cleans_up_a_shell_while_streaming_chunks() -> Result<(), &'static str> {
+#[test]
+fn runs_and_cleans_up_a_shell_while_streaming_chunks() -> Result<(), &'static str> {
+    futures_executor::block_on(runs_and_cleans_up_a_shell())
+}
+
+async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     let client = MockClient {
         calls: Mutex::new(Vec::new()),
     };
