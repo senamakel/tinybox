@@ -51,7 +51,11 @@ impl NativeShellClient for MockClient {
         std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
         let state = if self.cancel_changes_state
-            && self.calls.lock().map_err(|_| "poisoned")?.contains(&"cancel")
+            && self
+                .calls
+                .lock()
+                .map_err(|_| "poisoned")?
+                .contains(&"cancel")
         {
             ExecutionState::Cancelled
         } else {
@@ -152,7 +156,13 @@ fn create_failure_still_releases_the_resource_reservation() -> Result<(), &'stat
             .await
             .err()
             .ok_or("expected failure")?;
-        assert!(matches!(error, NativeShellError::Transport { operation: "create resource", .. }));
+        assert!(matches!(
+            error,
+            NativeShellError::Transport {
+                operation: "create resource",
+                ..
+            }
+        ));
         assert_eq!(
             *client.calls.lock().map_err(|_| "poisoned")?,
             ["reserve", "create", "close"]
