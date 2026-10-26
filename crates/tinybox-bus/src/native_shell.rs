@@ -142,7 +142,6 @@ pub enum NativeShellError<E> {
 ///
 /// # Errors
 /// Returns the transport failure, module execution failure, or cleanup failure.
-#[allow(clippy::too_many_lines)] // This function keeps the owned process lifecycle in one auditable scope.
 pub async fn run_native_shell<C, F, Fut>(
     client: &C,
     request: NativeShellRunRequest,
