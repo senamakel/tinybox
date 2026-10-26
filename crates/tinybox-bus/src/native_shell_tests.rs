@@ -414,7 +414,8 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() -> Result<()
                 ..
             }
         ));
-    });
+        Ok::<(), &'static str>(())
+    })?;
     Ok(())
 }
 
