@@ -13,6 +13,7 @@ impl NativeShellClient for MockClient {
     type Error = &'static str;
 
     async fn reserve(&self, request: ReserveRequest) -> Result<ResourceId, Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("reserve");
         Ok(match request {
             ReserveRequest::Resource => ResourceId("resource-1".into()),
@@ -22,6 +23,7 @@ impl NativeShellClient for MockClient {
     }
 
     async fn create(&self, request: CreateRequest) -> Result<(), Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("create");
         assert_eq!(request.resource, ResourceId("resource-1".into()));
         Ok(())
@@ -31,6 +33,7 @@ impl NativeShellClient for MockClient {
         &self,
         request: ShellExecRequest,
     ) -> Result<ProcessRef, Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("start");
         assert_eq!(request.process, ResourceId("process-1".into()));
         Ok(ProcessRef {
@@ -40,6 +43,7 @@ impl NativeShellClient for MockClient {
     }
 
     async fn read_output(&self, _: ProcessRef, _: u64) -> Result<OutputBatch, Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("read");
         Ok(OutputBatch {
             chunks: vec![OutputChunk {
@@ -53,16 +57,19 @@ impl NativeShellClient for MockClient {
     }
 
     async fn cancel(&self, _: ProcessRef) -> Result<(), Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("cancel");
         Ok(())
     }
 
     async fn release_output(&self, _: ProcessRef) -> Result<(), Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("release");
         Ok(())
     }
 
     async fn close(&self, _: ResourceId) -> Result<(), Self::Error> {
+        std::future::ready(()).await;
         self.calls.lock().map_err(|_| "poisoned")?.push("close");
         Ok(())
     }
@@ -79,7 +86,7 @@ async fn runs_and_cleans_up_a_shell() -> Result<(), &'static str> {
     };
     let mut chunks = Vec::new();
     let output = run_native_shell(&client, request(), std::future::pending(), |chunk| {
-        chunks.push(chunk.clone())
+        chunks.push(chunk.clone());
     })
     .await
     .map_err(|_| "run failed")?;

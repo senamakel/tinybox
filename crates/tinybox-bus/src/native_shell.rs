@@ -116,6 +116,7 @@ pub enum NativeShellError<E> {
 ///
 /// # Errors
 /// Returns the transport failure, module execution failure, or cleanup failure.
+#[allow(clippy::too_many_lines)] // This function keeps the owned process lifecycle in one auditable scope.
 pub async fn run_native_shell<C, F, Fut>(
     client: &C,
     request: NativeShellRunRequest,
@@ -171,12 +172,12 @@ where
                             return Err(NativeShellError::Transport { operation: "read output", source });
                         }
                     },
-                    _ = cancelled => {
+                    () = cancelled => {
                         client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
                         cancellation_requested = true;
                         continue;
                     },
-                    _ = delay => {
+                    () = delay => {
                         client.cancel(process.clone()).await.map_err(NativeShellError::Cancellation)?;
                         cancellation_requested = true;
                         timed_out = true;
@@ -211,7 +212,7 @@ where
             }
             cursor = batch.next_sequence;
             match batch.state {
-                ExecutionState::Running => continue,
+                ExecutionState::Running => {}
                 ExecutionState::Exited { exit_code } => {
                     client.release_output(process.clone()).await.map_err(NativeShellError::OutputRelease)?;
                     return Ok(NativeShellOutput { exit_code, stdout, stderr, timed_out });
