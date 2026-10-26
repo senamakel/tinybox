@@ -88,12 +88,23 @@ pub enum NativeShellError<E> {
     },
     /// The module reported a terminal failed state.
     Execution(crate::ExecutionFailure),
+    /// An output batch did not advance its cursor despite containing chunks.
+    InvalidOutputCursor,
     /// Cancellation failed, so native cleanup is not acknowledged.
     Cancellation(E),
     /// Output release failed after the process had stopped.
     OutputRelease(E),
     /// Resource close failed after process cleanup.
     ResourceClose(E),
+    /// Cleanup failed while another operation was already failing.
+    Cleanup {
+        /// Cleanup operation that failed.
+        operation: &'static str,
+        /// Cleanup adapter error.
+        source: E,
+        /// Earlier failure that led to cleanup.
+        during: Box<Self>,
+    },
 }
 
 /// Run one native shell and stream every output chunk to `on_chunk`.
@@ -114,7 +125,9 @@ pub async fn run_native_shell<C, F, Fut>(
 where
     C: NativeShellClient,
     F: FnMut(&OutputChunk),
-    Fut: Future<Output = ()>,
+    Fut: Future<Output = ()> + Send,
+    F: Send,
+    C::Error: Send,
 {
     let mut create = request.create;
     let timeout_ms = request.shell.timeout_ms.max(1);
@@ -171,6 +184,24 @@ where
                     }
                 }
             };
+            if !batch.chunks.is_empty() && batch.next_sequence <= cursor {
+                let primary = NativeShellError::InvalidOutputCursor;
+                if let Err(source) = client.cancel(process.clone()).await {
+                    return Err(NativeShellError::Cleanup {
+                        operation: "cancel after invalid output cursor",
+                        source,
+                        during: Box::new(primary),
+                    });
+                }
+                if let Err(source) = client.release_output(process.clone()).await {
+                    return Err(NativeShellError::Cleanup {
+                        operation: "release output after invalid cursor",
+                        source,
+                        during: Box::new(primary),
+                    });
+                }
+                return Err(primary);
+            }
             for chunk in &batch.chunks {
                 on_chunk(chunk);
                 match chunk.stream {
@@ -201,7 +232,11 @@ where
         (Ok(output), Ok(())) => Ok(output),
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(source)) => Err(NativeShellError::ResourceClose(source)),
-        (Err(error), Err(_)) => Err(error),
+        (Err(error), Err(source)) => Err(NativeShellError::Cleanup {
+            operation: "close resource",
+            source,
+            during: Box::new(error),
+        }),
     }
 }
 
