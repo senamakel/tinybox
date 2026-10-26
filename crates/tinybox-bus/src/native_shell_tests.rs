@@ -131,11 +131,10 @@ impl NativeShellClient for MockClient {
             chunks: if cursor == 0 {
                 vec![OutputChunk {
                     sequence: 0,
-                    stream: if matches!(self.behavior, MockBehavior::RunningStderr) {
-                        OutputStream::Stderr
-                    } else if matches!(
+                    stream: if matches!(
                         self.behavior,
-                        MockBehavior::InvalidCursor
+                        MockBehavior::RunningStderr
+                            | MockBehavior::InvalidCursor
                             | MockBehavior::InvalidCursorCancelFail
                             | MockBehavior::InvalidCursorReleaseFail
                     ) {
@@ -338,7 +337,7 @@ fn yield_preserves_process_resource_cursor_and_partial_output() -> Result<(), &'
 }
 
 #[test]
-fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
+fn reserve_start_and_read_failures_are_reported_and_cleaned_up() -> Result<(), &'static str> {
     for (behavior, operation) in [
         (MockBehavior::FailResourceReserve, "reserve resource"),
         (MockBehavior::FailProcessReserve, "reserve process"),
@@ -349,7 +348,8 @@ fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
             let client = mock(behavior);
             let error = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
                 .await
-                .expect_err("operation should fail");
+                .err()
+                .ok_or("operation should fail")?;
             if operation == "read output" {
                 assert!(matches!(
                     error,
@@ -358,8 +358,20 @@ fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
                         ..
                     }
                 ));
-                assert!(client.calls.lock().expect("calls").contains(&"cancel"));
-                assert!(client.calls.lock().expect("calls").contains(&"release"));
+                assert!(
+                    client
+                        .calls
+                        .lock()
+                        .map_err(|_| "poisoned")?
+                        .contains(&"cancel")
+                );
+                assert!(
+                    client
+                        .calls
+                        .lock()
+                        .map_err(|_| "poisoned")?
+                        .contains(&"release")
+                );
             } else {
                 assert!(
                     matches!(error, NativeShellError::Transport { operation: actual, .. } if actual == operation)
@@ -367,10 +379,11 @@ fn reserve_start_and_read_failures_are_reported_and_cleaned_up() {
             }
         });
     }
+    Ok(())
 }
 
 #[test]
-fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
+fn terminal_execution_and_cleanup_failures_keep_the_primary_error() -> Result<(), &'static str> {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::FailedExecution);
         assert!(matches!(
@@ -389,7 +402,8 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
         let client = mock(MockBehavior::FailedExecutionCloseFail);
         let err = run_native_shell(&client, request(), never_cancel(), ignore_chunk)
             .await
-            .unwrap_err();
+            .err()
+            .ok_or("expected cleanup failure")?;
         assert!(matches!(
             err,
             NativeShellError::Cleanup {
@@ -398,6 +412,7 @@ fn terminal_execution_and_cleanup_failures_keep_the_primary_error() {
             }
         ));
     });
+    Ok(())
 }
 
 #[test]
@@ -446,25 +461,32 @@ fn invalid_cursor_and_cancel_cleanup_errors_are_reported() {
 }
 
 #[test]
-fn timeout_cancels_and_returns_collected_output() {
+fn timeout_cancels_and_returns_collected_output() -> Result<(), &'static str> {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::TimedOut);
         let mut req = request();
         req.shell.timeout_ms = 1;
         let outcome = run_native_shell(&client, req, never_cancel(), ignore_chunk)
             .await
-            .unwrap();
+            .map_err(|_| "run failed")?;
         let NativeShellRunOutcome::Finished(output) = outcome else {
-            panic!("expected completion")
+            return Err("expected completion");
         };
         assert!(output.timed_out);
         assert_eq!(output.exit_code, -1);
-        assert!(client.calls.lock().unwrap().contains(&"cancel"));
-    });
+        assert!(
+            client
+                .calls
+                .lock()
+                .map_err(|_| "poisoned")?
+                .contains(&"cancel")
+        );
+        Ok(())
+    })
 }
 
 #[test]
-fn running_poll_without_yield_accumulates_stderr_until_timeout() {
+fn running_poll_without_yield_accumulates_stderr_until_timeout() -> Result<(), &'static str> {
     futures_executor::block_on(async {
         let client = mock(MockBehavior::RunningStderr);
         let mut req = request();
@@ -472,14 +494,15 @@ fn running_poll_without_yield_accumulates_stderr_until_timeout() {
         req.yield_after = Some(std::time::Duration::from_secs(5));
         let outcome = run_native_shell(&client, req, never_cancel(), ignore_chunk)
             .await
-            .unwrap();
+            .map_err(|_| "run failed")?;
         let NativeShellRunOutcome::Finished(output) = outcome else {
-            panic!("expected completion")
+            return Err("expected completion");
         };
         assert!(output.timed_out);
         assert_eq!(output.stderr, b"done");
-        assert!(output.stdout.is_empty());
-    });
+        assert_eq!(output.stdout, []);
+        Ok(())
+    })
 }
 
 fn mock(behavior: MockBehavior) -> MockClient {
@@ -490,11 +513,13 @@ fn mock(behavior: MockBehavior) -> MockClient {
     }
 }
 
-async fn never_cancel() {
-    std::future::pending::<()>().await;
+fn never_cancel() -> impl std::future::Future<Output = ()> {
+    std::future::pending::<()>()
 }
 
-async fn cancel_now() {}
+fn cancel_now() -> impl std::future::Future<Output = ()> {
+    std::future::ready(())
+}
 
 fn ignore_chunk(_: &OutputChunk) {}
 
