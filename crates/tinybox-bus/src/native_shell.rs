@@ -78,7 +78,7 @@ pub struct NativeShellOutput {
     pub timed_out: bool,
 }
 
-/// Outcome of running a shell through TinyBox.
+/// Outcome of running a shell through `TinyBox`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeShellRunOutcome {
     /// The process exited or timed out and its output was released.
