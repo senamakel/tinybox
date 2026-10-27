@@ -33,6 +33,7 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "/sys",
         "--clearenv",
     ]);
+    eprintln!("args={:?} runtime={:?} metadata={:?}", command.get_args().collect::<Vec<_>>(), runtime.path(), std::fs::metadata(runtime.path())?);
     let mut env = BTreeMap::new();
     let report = CpuEventReport::prepare_in(&command, &mut env, runtime.path())
         .ok_or("eligible scope did not get a report")?;
