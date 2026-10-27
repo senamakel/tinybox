@@ -322,24 +322,38 @@ fn size_as_u32(value: usize) -> io::Result<u32> {
     })
 }
 
-fn environment_block(env: &BTreeMap<String, String>) -> io::Result<Vec<u16>> {
-    let mut entries: Vec<_> = env.iter().collect();
-    entries.sort_by_key(|(key, _)| key.to_ascii_lowercase());
+fn environment_block(
+    env: &BTreeMap<String, String>,
+    local_app_data: &OsStr,
+) -> io::Result<Vec<u16>> {
+    let mut entries: Vec<(OsString, OsString)> = env
+        .iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case("LOCALAPPDATA"))
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect();
+    // CreateProcessW needs the profile root to resolve the AppContainer
+    // profile. Forward this single OS-required value even when the requested
+    // child environment is otherwise empty; do not inherit the parent block.
+    entries.push((OsString::from("LOCALAPPDATA"), local_app_data.to_owned()));
+    entries.sort_by_key(|(key, _)| key.to_string_lossy().to_ascii_lowercase());
     let mut block = Vec::new();
     for (key, value) in entries {
-        if key.is_empty() || key.contains('=') || key.contains('\0') || value.contains('\0') {
+        if key.is_empty()
+            || key.to_string_lossy().contains('=')
+            || key.to_string_lossy().contains('\0')
+            || value.to_string_lossy().contains('\0')
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Windows environment entries must have valid names and no NUL bytes",
             ));
         }
-        block.extend(format!("{key}={value}").encode_utf16());
+        block.extend(key.encode_wide());
+        block.push(b'=' as u16);
+        block.extend(value.encode_wide());
         block.push(0);
     }
     block.push(0);
-    if env.is_empty() {
-        block.push(0);
-    }
     Ok(block)
 }
 
@@ -500,7 +514,13 @@ unsafe fn spawn_in_container(
     let cmdline = build_command_line(cmd);
     let mut cmdline_w = to_wide(&cmdline);
     let cwd_w = cmd.get_current_dir().map(|p| to_wide(&p.to_string_lossy()));
-    let mut environment = environment_block(env)?;
+    let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "LOCALAPPDATA is required to launch an AppContainer process",
+        )
+    })?;
+    let mut environment = environment_block(env, &local_app_data)?;
 
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
     let ok = CreateProcessW(
