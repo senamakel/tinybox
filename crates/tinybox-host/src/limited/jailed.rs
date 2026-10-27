@@ -16,8 +16,8 @@ use tokio::sync::{oneshot, watch};
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
-// Native jail supervision is Unix-only today; retain a compile-time adapter for
-// other targets so this module stays buildable if that capability is added.
+// The Windows backend also exposes owned captured pipes; retain the portable
+// Tokio file adapter for that path.
 #[cfg(not(unix))]
 type AsyncPipe = tokio::fs::File;
 
@@ -196,19 +196,19 @@ impl std::fmt::Debug for JailLocalHost {
 impl JailLocalHost {
     /// Use the detected backend without weakening unavailable confinement.
     /// # Errors
-    /// Rejects unavailable backends and platforms without supervised standard children.
+    /// Rejects unavailable backends without owned-child supervision.
     pub fn new(jail: Jail, limit: usize) -> std::io::Result<Self> {
-        Self::with_backend(jail, tinybox_jail::default_backend(), limit)
+        Self::with_backend(jail, tinybox_jail::default_owned_backend(), limit)
     }
     /// Use an explicitly selected provider; hosts apply policy to its enforcement facts.
     /// # Errors
-    /// Rejects unavailable providers and unsupported native ownership platforms.
+    /// Rejects providers that cannot return an owned child.
     pub fn with_backend(
         jail: Jail,
         backend: Arc<dyn JailBackend>,
         limit: usize,
     ) -> std::io::Result<Self> {
-        if !cfg!(unix) || !backend.is_available() {
+        if !backend.is_owned_available() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "native jail supervision is unavailable",
@@ -320,7 +320,12 @@ impl JailLocalHost {
         let mut command = crate::LocalHost::command(request)?.into_std();
         // The host explicitly supplies the approved environment for jailed code.
         command.env_clear().envs(&request.env);
-        self.collect_command(command, request.stdin.clone(), observer)
+        self.collect_command(
+            command,
+            request.stdin.clone(),
+            observer,
+            request.env.clone(),
+        )
             .await
     }
 
@@ -330,16 +335,30 @@ impl JailLocalHost {
     /// Reports unavailable spawn, output bounds and retained kill/reap failures.
     pub async fn run_command_observed(
         &self,
+        command: std::process::Command,
+        payload: Option<Vec<u8>>,
+        observer: Arc<dyn ExecutionObserver>,
+    ) -> Result<ExecOutput> {
+        self.run_command_observed_with_env(command, payload, observer, BTreeMap::new())
+            .await
+    }
+
+    /// Collect a prepared command with the exact environment approved by its caller.
+    /// # Errors
+    /// Reports unavailable spawn, output bounds and retained kill/reap failures.
+    pub async fn run_command_observed_with_env(
+        &self,
         mut command: std::process::Command,
         payload: Option<Vec<u8>>,
         observer: Arc<dyn ExecutionObserver>,
+        env: BTreeMap<String, String>,
     ) -> Result<ExecOutput> {
         command.stdin(if payload.is_some() {
             std::process::Stdio::piped()
         } else {
             std::process::Stdio::null()
         });
-        self.collect_command(command, payload, Some(observer)).await
+        self.collect_command(command, payload, Some(observer), env).await
     }
 
     async fn collect_command(
@@ -347,6 +366,7 @@ impl JailLocalHost {
         mut command: std::process::Command,
         payload: Option<Vec<u8>>,
         observer: Option<Arc<dyn ExecutionObserver>>,
+        env: BTreeMap<String, String>,
     ) -> Result<ExecOutput> {
         #[cfg(unix)]
         {
@@ -356,6 +376,7 @@ impl JailLocalHost {
         command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        command.env_clear().envs(&env);
         let jail = self.jail.clone();
         let backend = self.backend.clone();
         let state = self.state.clone();
@@ -370,8 +391,14 @@ impl JailLocalHost {
             if !matches!(cancelled.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
                 return Err(failure("start native jail", "execution cancelled".into()));
             }
+            let approved_env = env.clone();
             let child = tokio::task::spawn_blocking(move || {
-                tinybox_jail::spawn_owned_captured_with(backend.as_ref(), &jail, command)
+                tinybox_jail::spawn_owned_captured_with_env(
+                    backend.as_ref(),
+                    &jail,
+                    command,
+                    &approved_env,
+                )
             })
             .await
             .map_err(|error| failure("start native jail", error.to_string()))?
