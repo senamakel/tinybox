@@ -77,10 +77,16 @@ pub fn pick_backend() -> Arc<dyn JailBackend> {
 pub fn pick_owned_backend() -> Arc<dyn JailBackend> {
     for backend in owned_candidates() {
         if backend.is_owned_available() {
-            log::debug!("[cwd_jail] selected owned-process sandbox {}", backend.name());
+            log::debug!(
+                "[cwd_jail] selected owned-process sandbox {}",
+                backend.name()
+            );
             return backend;
         }
-        log::debug!("[cwd_jail] owned-process sandbox {} is unavailable", backend.name());
+        log::debug!(
+            "[cwd_jail] owned-process sandbox {} is unavailable",
+            backend.name()
+        );
     }
     log::warn!("[cwd_jail] no owned-process sandbox available; jailed spawns are unsupported");
     Arc::new(UnsupportedBackend)

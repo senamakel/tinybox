@@ -134,9 +134,15 @@ fn windows_capabilities_report_only_job_object_resource_limits() {
 
     let support = windows_constraint_support(true);
     assert_eq!(support.enforcement(Constraint::Cpu), Enforcement::Enforced);
-    assert_eq!(support.enforcement(Constraint::Memory), Enforcement::Enforced);
+    assert_eq!(
+        support.enforcement(Constraint::Memory),
+        Enforcement::Enforced
+    );
     assert_eq!(support.enforcement(Constraint::Pids), Enforcement::Enforced);
-    assert_eq!(support.enforcement(Constraint::Disk), Enforcement::Unsupported);
+    assert_eq!(
+        support.enforcement(Constraint::Disk),
+        Enforcement::Unsupported
+    );
 }
 
 #[test]
@@ -157,13 +163,27 @@ fn unsupported_windows_disk_limit_is_a_typed_preflight_refusal() {
 }
 
 #[test]
-fn unavailable_appcontainer_reports_no_enforcement() {
-    use tinybox_core::{Constraint, Enforcement};
-
+fn owned_backend_selection_uses_appcontainer_without_changing_legacy_selection() {
+    let backend = crate::detect::pick_owned_backend();
+    assert_eq!(backend.name(), "appcontainer");
+    assert!(!backend.is_available());
+    assert!(backend.is_owned_available());
     assert_eq!(
-        AppContainerBackend::new()
+        backend
             .constraint_support()
-            .enforcement(Constraint::Memory),
-        Enforcement::Unsupported
+            .enforcement(tinybox_core::Constraint::Memory),
+        tinybox_core::Enforcement::Enforced
     );
+}
+
+#[test]
+fn supported_job_object_requirements_pass_hard_preflight() {
+    use tinybox_core::Constraint;
+
+    windows_constraint_support(true)
+        .require(
+            "appcontainer",
+            &[Constraint::Cpu, Constraint::Memory, Constraint::Pids],
+        )
+        .expect("Job Objects enforce the selected hard limits");
 }

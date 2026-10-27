@@ -55,8 +55,7 @@ use windows_sys::Win32::Security::Isolation::{
 };
 use windows_sys::Win32::Security::{
     ACL, DACL_SECURITY_INFORMATION, DeriveCapabilitySidsFromName, FreeSid, PSID,
-    SECURITY_ATTRIBUTES,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
 };
 use windows_sys::core::PWSTR;
 
@@ -100,25 +99,24 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 /// dedicated `Jail` flag (e.g. `allow_private_lan_server`) and extend
 /// this list conditionally — do NOT silently expand `allow_net`.
 const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
-use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
+    JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
     JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
-    JobObjectExtendedLimitInformation, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
-    JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY, SetInformationJobObject,
-    TerminateJobObject,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
+use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
+use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute, ResumeThread, GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
-    STARTF_USESTDHANDLES,
+    CREATE_SUSPENDED, CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
-use windows_sys::Win32::System::Pipes::CreatePipe;
 
 use super::jail::{Jail, JailBackend};
 
@@ -154,7 +152,11 @@ impl JailBackend for AppContainerBackend {
         true
     }
 
-    fn spawn_owned_captured(&self, jail: &Jail, cmd: Command) -> io::Result<super::jail::OwnedChild> {
+    fn spawn_owned_captured(
+        &self,
+        jail: &Jail,
+        cmd: Command,
+    ) -> io::Result<super::jail::OwnedChild> {
         unsafe { spawn_in_container(jail, cmd) }
     }
 
@@ -188,10 +190,13 @@ fn job_object_limit_plan(
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let processor_count = processor_count.max(1) as u64;
     let total_cpu_millis = processor_count * 1_000;
-    let cpu_rate = ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis)
-        .clamp(1, 10_000) as u32;
+    let cpu_rate =
+        ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis).clamp(1, 10_000) as u32;
     let process_memory_bytes = usize::try_from(resources.memory_bytes).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput, "memory limit exceeds Windows address size")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "memory limit exceeds Windows address size",
+        )
     })?;
     Ok(JobObjectLimitPlan {
         process_memory_bytes,
@@ -454,7 +459,10 @@ unsafe fn create_pipe_pair() -> io::Result<(OwnedHandle, OwnedHandle)> {
     if CreatePipe(&mut read, &mut write, &mut security, 0) == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok((OwnedHandle::from_raw_handle(read as _), OwnedHandle::from_raw_handle(write as _)))
+    Ok((
+        OwnedHandle::from_raw_handle(read as _),
+        OwnedHandle::from_raw_handle(write as _),
+    ))
 }
 
 unsafe fn set_noninheritable(handle: &OwnedHandle) -> io::Result<()> {
@@ -471,7 +479,9 @@ struct AppContainerOwnedProcess {
 
 impl super::jail::OwnedProcess for AppContainerOwnedProcess {
     fn id(&self) -> Option<u32> {
-        Some(unsafe { windows_sys::Win32::System::Threading::GetProcessId(self.process.as_raw_handle() as _) })
+        Some(unsafe {
+            windows_sys::Win32::System::Threading::GetProcessId(self.process.as_raw_handle() as _)
+        })
     }
 
     fn try_wait(&mut self) -> io::Result<Option<super::jail::ChildStatus>> {
@@ -486,7 +496,9 @@ impl super::jail::OwnedProcess for AppContainerOwnedProcess {
         if unsafe { GetExitCodeProcess(self.process.as_raw_handle() as _, &mut exit_code) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(Some(super::jail::ChildStatus::from_code(Some(exit_code as i32))))
+        Ok(Some(super::jail::ChildStatus::from_code(Some(
+            exit_code as i32,
+        ))))
     }
 
     fn terminate(&mut self) -> io::Result<()> {
@@ -757,7 +769,6 @@ unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
         group_sids_ptr: group_sids,
     })
 }
-
 
 #[cfg(test)]
 #[path = "windows_tests.rs"]
