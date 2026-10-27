@@ -44,7 +44,7 @@ use std::process::{Child, Command};
 use std::ptr;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE_FLAG_INHERIT, HLOCAL, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    HANDLE_FLAG_INHERIT, HLOCAL, LocalFree, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
@@ -102,7 +102,7 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
 use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOBOBJECT_BASIC_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW,
     JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
     JobObjectExtendedLimitInformation, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
@@ -119,7 +119,6 @@ use windows_sys::Win32::System::Threading::{
     STARTF_USESTDHANDLES,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
-use windows_sys::Win32::System::Threading::SetHandleInformation;
 
 use super::jail::{Jail, JailBackend};
 
