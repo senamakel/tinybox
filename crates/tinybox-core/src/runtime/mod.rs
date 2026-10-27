@@ -30,7 +30,7 @@ use crate::identity::{BoxId, ProcessId, SnapshotId};
 use crate::spec::BoxSpec;
 
 mod output;
-pub use output::{ExecutionObserver, OutputStream, TerminationCause};
+pub use output::{OutputStream, TerminationCause};
 
 mod forward;
 #[cfg(test)]
@@ -39,7 +39,7 @@ mod forward_test;
 mod types;
 
 pub use forward::{Forward, ForwardGuard};
-pub use types::{BoxInfo, BoxState, ExecOutput, ExecRequest};
+pub use types::{BoxInfo, BoxState, ExecOutput, ExecRequest, ExecutionObserver};
 
 /// Where a host executes commands relative to the tinybox process.
 ///
