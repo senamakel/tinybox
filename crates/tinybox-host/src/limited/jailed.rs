@@ -128,6 +128,18 @@ fn report_cpu_termination(
     }
 }
 
+fn configure_jail_command(command: &mut std::process::Command, env: &BTreeMap<String, String>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command.env_clear().envs(env);
+}
+
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
@@ -490,15 +502,7 @@ impl JailLocalHost {
         let cpu_event_report = prepare_cpu_event_report(&command, &mut env, observer.is_some());
         #[cfg(target_os = "linux")]
         let event_observer = observer.clone();
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        command
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        command.env_clear().envs(&env);
+        configure_jail_command(&mut command, &env);
         let jail = self.jail.clone();
         let backend = self.backend.clone();
         let state = self.state.clone();
