@@ -62,17 +62,8 @@ pub(super) fn prepare(
         pids_max: limits.pids_max,
         disk_bytes: limits.disk_bytes,
     });
-    if jail.resources.is_some() {
-        // An explicitly supplied native jail budget is a hard request. The
-        // default values in a BoxSpec remain soft unless its own
-        // `hard_requirements` lists a constraint.
-        jail.hard_requirements.extend([
-            tinybox_core::Constraint::Cpu,
-            tinybox_core::Constraint::Memory,
-            tinybox_core::Constraint::Pids,
-            tinybox_core::Constraint::Disk,
-        ]);
-    }
+    jail.hard_requirements
+        .extend(required_resource_constraints(config.resources));
     if jail
         .resources
         .is_some_and(|limits| limits.validate().is_err())
@@ -135,6 +126,25 @@ pub(super) fn prepare(
     }
     Ok(jail)
 }
+
+fn required_resource_constraints(
+    resources: Option<tinybox_bus::ResourceLimits>,
+) -> Vec<tinybox_core::Constraint> {
+    if resources.is_some() {
+        // An explicitly supplied native jail budget is a hard request. The
+        // default values in a BoxSpec remain soft unless its own
+        // `hard_requirements` lists a constraint.
+        vec![
+            tinybox_core::Constraint::Cpu,
+            tinybox_core::Constraint::Memory,
+            tinybox_core::Constraint::Pids,
+            tinybox_core::Constraint::Disk,
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Validate and canonicalize each existing absolute grant path.
 fn grants(paths: &[String]) -> Result<Vec<std::path::PathBuf>> {
     paths
