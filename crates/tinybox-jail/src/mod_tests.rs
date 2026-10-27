@@ -18,6 +18,65 @@ fn noop_backend_spawns_unrestricted() {
     assert!(status.success() || cfg!(windows));
 }
 
+#[cfg(unix)]
+#[test]
+fn default_owned_spawn_wrappers_preserve_owned_child_and_approved_environment()
+-> std::io::Result<()> {
+    use std::io::Read;
+
+    let backend = default_owned_backend();
+    let root = tempfile::tempdir()?;
+    let jail = Jail::new(root.path(), "default-owned-wrapper");
+    if !backend.is_owned_available() {
+        assert_eq!(
+            spawn_owned_captured(&jail, Command::new("/bin/true"))
+                .err()
+                .map(|error| error.kind()),
+            Some(std::io::ErrorKind::Unsupported)
+        );
+        return Ok(());
+    }
+
+    let mut child = spawn_owned_captured(&jail, Command::new("/bin/true"))?;
+    assert!(wait_owned_child(&mut child)?.success());
+
+    let env = std::collections::BTreeMap::from([(
+        "TINYBOX_APPROVED_CHILD_ENV".to_owned(),
+        "visible-to-child".to_owned(),
+    )]);
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "printf '%s' \"$TINYBOX_APPROVED_CHILD_ENV\""])
+        .env_clear()
+        .envs(&env);
+    let mut child = spawn_owned_captured_with_env(&jail, command, &env)?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .expect("captured stdout")
+        .read_to_string(&mut output)?;
+    assert!(wait_owned_child(&mut child)?.success());
+    assert_eq!(output, "visible-to-child");
+    Ok(())
+}
+
+#[cfg(unix)]
+fn wait_owned_child(child: &mut OwnedChild) -> std::io::Result<ChildStatus> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "owned child did not exit",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn jail_builder_chains() {
     let j = Jail::new("/tmp", "x")
