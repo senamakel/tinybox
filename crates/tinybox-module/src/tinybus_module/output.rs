@@ -97,7 +97,7 @@ impl OutputJournal {
                 }
             )
         {
-            state.state = if state.cancelled && code != ExecutionFailure::CleanupFailed {
+            state.state = if state.cancelled && code == ExecutionFailure::BackendFailed {
                 ExecutionState::Cancelled
             } else {
                 ExecutionState::Failed { code }
