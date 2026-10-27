@@ -44,7 +44,8 @@ use std::process::{Child, Command};
 use std::ptr;
 
 use windows_sys::Win32::Foundation::{
-    HANDLE_FLAG_INHERIT, HLOCAL, LocalFree, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    HANDLE, HANDLE_FLAG_INHERIT, HLOCAL, LocalFree, SetHandleInformation, WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
@@ -397,7 +398,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     si.StartupInfo.hStdInput = stdin_read.as_raw_handle() as _;
     si.StartupInfo.hStdOutput = stdout_write.as_raw_handle() as _;
     si.StartupInfo.hStdError = stderr_write.as_raw_handle() as _;
-    let inherited_handles = [
+    let inherited_handles: [HANDLE; 3] = [
         stdin_read.as_raw_handle() as _,
         stdout_write.as_raw_handle() as _,
         stderr_write.as_raw_handle() as _,
