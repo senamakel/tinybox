@@ -889,9 +889,11 @@ async fn cancelled_native_shell_retains_scratch_until_output_release()
     })
     .await??;
     resources.cancel(&process).await?;
+    let output = resources.read_output(&process, 0).await?;
     assert_eq!(
-        resources.read_output(&process, 0).await?.state,
-        ExecutionState::Cancelled
+        output.state,
+        ExecutionState::Cancelled,
+        "cancellation failed after captured output: {output:?}"
     );
     let scratch = state.path().join("artifacts/sandbox-scratch");
     assert_eq!(std::fs::read_dir(&scratch)?.count(), 1);
@@ -1415,6 +1417,18 @@ fn native_resource_bus_available() -> bool {
 }
 
 #[cfg(target_os = "linux")]
+fn native_resource_test_environment() -> std::collections::BTreeMap<String, String> {
+    ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"]
+        .into_iter()
+        .filter_map(|name| {
+            std::env::var(name)
+                .ok()
+                .map(|value| (name.to_owned(), value))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
 fn detached_descendant_script() -> String {
     "import os,time,sys\nfirst=os.fork()\nif first == 0:\n os.setsid()\n second=os.fork()\n if second == 0:\n  with open(sys.argv[1],'w') as f: f.write(f'{os.getpid()} {os.stat(\"/proc/self/ns/pid\").st_ino}')\n  while True: time.sleep(1)\n os._exit(0)\nos.waitpid(first,0)\nwhile not os.path.exists(sys.argv[1]) or os.path.getsize(sys.argv[1]) == 0: time.sleep(0.01)\nprint('stdout-ready',flush=True)\nprint('stderr-ready',file=sys.stderr,flush=True)\ntime.sleep(600)".into()
 }
@@ -1447,7 +1461,7 @@ async fn start_resource_descendant(
                         pid_file.display().to_string(),
                     ],
                     cwd: Some(root.display().to_string()),
-                    env: std::collections::BTreeMap::default(),
+                    env: native_resource_test_environment(),
                     stdin: None,
                 },
             },
@@ -1496,7 +1510,7 @@ async fn wait_for_resource_descendant(
         let streams_ready = !check_streams
             || (stream_has(tinybox_bus::OutputStream::Stdout, b"stdout-ready")
                 && stream_has(tinybox_bus::OutputStream::Stderr, b"stderr-ready"));
-        if streams_ready && std::fs::metadata(pid_file).is_ok() {
+        if streams_ready && std::fs::metadata(pid_file).is_ok_and(|metadata| metadata.len() > 0) {
             let identity = std::fs::read_to_string(pid_file)?;
             let mut parts = identity.split_whitespace();
             return Ok((

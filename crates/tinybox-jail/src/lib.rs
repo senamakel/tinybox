@@ -15,11 +15,11 @@
 //! | Linux   | bubblewrap    | `bwrap` namespaces; process isolation      |
 //! | Linux   | landlock      | Fallback: kernel 5.13+ LSM, spawn thread   |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | (not compiled)| `AppContainer`, pending a `Child` bridge   |
+//! | Windows | `AppContainer`| `AppContainer` ACLs + Job Object limits     |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
-//! The Windows backend is not compiled yet (see `windows.rs`); on Windows the
-//! default backend is `unsupported` and a host must opt into `NoopBackend`.
+//! Windows exposes `AppContainer` through the owned-child API because
+//! `std::process::Child` cannot be constructed from Win32 process handles.
 //!
 //! ## Quick start
 //!
@@ -66,6 +66,8 @@ pub mod bwrap;
 #[cfg(target_os = "linux")]
 pub mod linux;
 pub mod macos;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::{BWRAP_BACKEND_NAME, BubblewrapBackend};
@@ -76,16 +78,26 @@ pub use linux::LandlockBackend;
 pub use macos::SeatbeltBackend;
 pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
 pub use registry::{IndexStore, JailRecord, JailRegistry};
+#[cfg(target_os = "windows")]
+pub use windows::AppContainerBackend;
 
 use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
 
 /// Cached default backend for the current platform.
 static DEFAULT_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
+static DEFAULT_OWNED_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
 
 /// Returns the process-wide default backend, lazily auto-detected.
 pub fn default_backend() -> Arc<dyn JailBackend> {
     DEFAULT_BACKEND.get_or_init(detect::pick_backend).clone()
+}
+
+/// Cached default backend for the process-owned child API.
+pub fn default_owned_backend() -> Arc<dyn JailBackend> {
+    DEFAULT_OWNED_BACKEND
+        .get_or_init(detect::pick_owned_backend)
+        .clone()
 }
 
 /// Spawn `cmd` inside the jail described by `jail`, using the default backend.
@@ -158,11 +170,55 @@ pub fn spawn_owned_captured_with(
     jail: &Jail,
     cmd: Command,
 ) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with_backend_and_env(
+        backend,
+        jail,
+        cmd,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Spawn captured work through an explicit backend and approved environment.
+/// Native launchers must pass `env` as the child environment rather than
+/// inheriting values from the host process.
+/// # Errors
+/// Returns canonicalization, hard-preflight, confinement, or startup errors.
+pub fn spawn_owned_captured_with_backend_and_env(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    cmd: Command,
+    env: &std::collections::BTreeMap<String, String>,
+) -> std::io::Result<OwnedChild> {
     let mut jail = jail.clone();
     jail.canonicalize()?;
     require_resources(backend, &jail)?;
     jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
-    backend.spawn_owned_captured(&jail, cmd)
+    backend.spawn_owned_captured_with_env(&jail, cmd, env)
+}
+
+/// Spawn captured work with the detected backend that supports owned children.
+///
+/// # Errors
+/// Returns an error if no owned-child backend is available or jail setup fails.
+pub fn spawn_owned_captured(jail: &Jail, cmd: Command) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with_backend_and_env(
+        default_owned_backend().as_ref(),
+        jail,
+        cmd,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Spawn captured work with the detected owned-child backend and approved environment.
+///
+/// # Errors
+/// Returns an error if no owned-child backend is available or jail setup fails.
+pub fn spawn_owned_captured_with_env(
+    jail: &Jail,
+    cmd: Command,
+    env: &std::collections::BTreeMap<String, String>,
+) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with_backend_and_env(default_owned_backend().as_ref(), jail, cmd, env)
 }
 
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {

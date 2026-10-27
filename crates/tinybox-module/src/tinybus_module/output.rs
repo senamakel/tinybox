@@ -97,7 +97,11 @@ impl OutputJournal {
                 }
             )
         {
-            state.state = ExecutionState::Failed { code };
+            state.state = if state.cancelled && code == ExecutionFailure::BackendFailed {
+                ExecutionState::Cancelled
+            } else {
+                ExecutionState::Failed { code }
+            };
         }
     }
     pub(super) fn cleanup_acknowledged(&self) -> bool {
