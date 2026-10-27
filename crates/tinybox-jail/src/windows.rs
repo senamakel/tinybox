@@ -102,7 +102,7 @@ const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
     JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+    JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
     JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
@@ -113,7 +113,8 @@ use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
     GetExitCodeProcess, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    PROCESS_INFORMATION, ResumeThread,
     STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
     UpdateProcThreadAttribute, WaitForSingleObject,
 };
@@ -233,9 +234,9 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
     let mut flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if let Some(plan) = plan {
-        flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_JOB_MEMORY;
         limits.BasicLimitInformation.ActiveProcessLimit = plan.active_processes;
-        limits.ProcessMemoryLimit = plan.process_memory_bytes;
+        limits.JobMemoryLimit = plan.process_memory_bytes;
     }
     limits.BasicLimitInformation.LimitFlags = flags;
     if SetInformationJobObject(
@@ -359,13 +360,13 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
 
     // 4. Build STARTUPINFOEXW with the security-capabilities attribute.
     let mut size: usize = 0;
-    InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut size);
+    InitializeProcThreadAttributeList(ptr::null_mut(), 2, 0, &mut size);
     let attr_buf = LocalAlloc(LPTR, size) as LPPROC_THREAD_ATTRIBUTE_LIST;
     if attr_buf.is_null() {
         return Err(io::Error::last_os_error());
     }
     let _attr_guard = AttrListGuard(attr_buf);
-    if InitializeProcThreadAttributeList(attr_buf, 1, 0, &mut size) == 0 {
+    if InitializeProcThreadAttributeList(attr_buf, 2, 0, &mut size) == 0 {
         return Err(io::Error::last_os_error());
     }
     if UpdateProcThreadAttribute(
@@ -397,6 +398,23 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     si.StartupInfo.hStdInput = stdin_read.as_raw_handle() as _;
     si.StartupInfo.hStdOutput = stdout_write.as_raw_handle() as _;
     si.StartupInfo.hStdError = stderr_write.as_raw_handle() as _;
+    let inherited_handles = [
+        stdin_read.as_raw_handle() as _,
+        stdout_write.as_raw_handle() as _,
+        stderr_write.as_raw_handle() as _,
+    ];
+    if UpdateProcThreadAttribute(
+        attr_buf,
+        0,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+        inherited_handles.as_ptr() as *mut _,
+        std::mem::size_of_val(&inherited_handles),
+        ptr::null_mut(),
+        ptr::null_mut(),
+    ) == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
 
     // 5. Build the command line and current directory.
     let cmdline = build_command_line(&cmd);
