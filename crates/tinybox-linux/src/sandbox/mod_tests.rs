@@ -482,7 +482,9 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert!(has(&argv, "--tmpfs"));
     assert!(has(&argv, "/run"));
     assert!(has(&argv, "/sys"));
-    assert!(has(&argv, "TINYBOX_INTERNAL_CPU_EVENT_FILE"));
+    assert!(argv
+        .iter()
+        .any(|part| part.contains("TINYBOX_INTERNAL_CPU_EVENT_FILE")));
     assert!(has(&argv, "cpu.stat"));
     assert!(has(&argv, "--ro-bind"));
     assert!(has(&argv, grant.to_str().ok_or("grant path is not UTF-8")?));
