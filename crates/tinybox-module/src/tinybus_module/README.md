@@ -78,12 +78,13 @@ unchanged.
 
 Contract 2.1 adds resource-aware native jail request members. Contract 2.2 adds
 the `ProcessEvent` signal, carrying the caller's `ProcessRef` with each
-observation. The module emits `Started` once after a successful module-owned
-execution starts and `Exited` after its supervisor observes the terminal exit
-status. When an execution times out, it emits `LimitHit { limit: Timeout }`
-before `Exited { status: None }`. Replayed starts do not duplicate these
-events. Signal delivery is best-effort; this increment does not publish access
-denials or resource-limit observations.
+observation. The module emits `Started` once after a successful `StartExec`,
+`StartJailedExec`, `StartJailedExecWithResources`, `StartShellExec`, or
+`StartNativeShellExec`, then `Exited` after its supervisor observes the
+terminal exit status. When an execution times out, it emits
+`LimitHit { limit: Timeout }` before `Exited { status: None }`. Replayed starts
+do not duplicate these events. Signal delivery is best-effort; this increment
+does not publish stdio, access denial, or other resource-limit observations.
 
 Version 1.5 adds bounded file transfer for mounted directory workspaces.
 Reserve `FileRead(resource)` or `FileWrite(resource)` before opening a transfer.
