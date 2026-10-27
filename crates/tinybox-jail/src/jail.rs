@@ -511,6 +511,21 @@ pub trait JailBackend: Send + Sync {
             OwnedChild::from_std(child)
         }
     }
+
+    /// Spawn captured work with an explicit environment approved by the host.
+    /// Backends that launch through `std::process::Command` already receive
+    /// this map through `cmd`; native launchers must use it instead of
+    /// inheriting the parent environment.
+    /// # Errors
+    /// Returns a confinement or native startup error.
+    fn spawn_owned_captured_with_env(
+        &self,
+        jail: &Jail,
+        cmd: Command,
+        _env: &std::collections::BTreeMap<String, String>,
+    ) -> std::io::Result<OwnedChild> {
+        self.spawn_owned_captured(jail, cmd)
+    }
 }
 
 /// Exit information independent of a platform-specific child handle.
