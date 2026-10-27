@@ -417,7 +417,8 @@ pub trait JailBackend: Send + Sync {
 
     /// Inspect only the hard requirements explicitly listed on a box spec.
     fn plan_check_spec(&self, spec: &tinybox_core::BoxSpec) -> tinybox_core::PlanCheck {
-        self.constraint_support().plan_check(&spec.hard_requirements)
+        self.constraint_support()
+            .plan_check(&spec.hard_requirements)
     }
 
     /// Refuse a box spec when any explicit hard requirement is unsupported.

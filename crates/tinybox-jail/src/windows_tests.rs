@@ -227,6 +227,35 @@ fn jail_preflight_accepts_supported_limits_and_refuses_hard_disk_limit() {
 }
 
 #[test]
+fn box_spec_preflight_uses_only_explicit_hard_requirements() {
+    use tinybox_core::{Constraint, HostRef, Placement, SandboxRef, WorkspaceSource};
+
+    let placement = Placement::new(
+        HostRef::new("local").expect("valid host ref"),
+        SandboxRef::new("appcontainer").expect("valid sandbox ref"),
+    );
+    let spec = tinybox_core::BoxSpec::new(
+        placement,
+        WorkspaceSource::LocalDir(PathBuf::from(r"C:\workspace")),
+    );
+    let backend = AppContainerBackend::new();
+    assert!(backend.plan_check_spec(&spec).constraints.is_empty());
+    backend
+        .require_spec(&spec)
+        .expect("soft resource defaults do not become hard requirements");
+
+    let spec = spec.with_hard_requirements([Constraint::Cpu, Constraint::Memory, Constraint::Pids]);
+    let jail = Jail::new(r"C:\workspace", "spec-limits").with_box_spec(&spec);
+    assert!(backend.require_resources(&jail).is_ok());
+    backend
+        .require_spec(&spec)
+        .expect("Job Objects enforce all listed resource requirements");
+
+    let disk_spec = spec.with_hard_requirements([Constraint::Disk]);
+    assert!(backend.require_spec(&disk_spec).is_err());
+}
+
+#[test]
 fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io::Result<()> {
     use std::io::Read;
 
