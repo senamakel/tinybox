@@ -117,7 +117,7 @@ impl Jail {
     #[must_use]
     pub fn with_box_spec(mut self, spec: &tinybox_core::BoxSpec) -> Self {
         self.resources = Some(spec.resources);
-        self.hard_requirements = spec.hard_requirements.clone();
+        self.hard_requirements.clone_from(&spec.hard_requirements);
         self
     }
 
@@ -422,6 +422,9 @@ pub trait JailBackend: Send + Sync {
     }
 
     /// Refuse a box spec when any explicit hard requirement is unsupported.
+    ///
+    /// # Errors
+    /// Returns a typed refusal naming the first unsupported hard constraint.
     fn require_spec(&self, spec: &tinybox_core::BoxSpec) -> tinybox_core::Result<()> {
         self.constraint_support()
             .require(self.name(), &spec.hard_requirements)
