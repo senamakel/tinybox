@@ -953,8 +953,13 @@ fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
         pids_max: 16,
         disk_bytes: 1,
     });
-    let mut argv = args::bwrap(&spec, &ExecRequest::new(["true"]))?;
-    args::wrap_setrlimit(&mut argv, &spec.resources, Path::new("/trusted/prlimit"));
+    let argv = args::exec_with_prlimit_program(
+        &spec,
+        &ExecRequest::new(["true"]),
+        false,
+        Some(Path::new("/trusted/prlimit")),
+        false,
+    )?;
     assert!(
         argv.first()
             .is_some_and(|program| program.ends_with("/prlimit"))
@@ -962,5 +967,19 @@ fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
     assert!(has(&argv, "--as=67108864"));
     assert!(has(&argv, "--"));
     assert!(has(&argv, "bwrap"));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn trusted_resource_launcher_resolution_accepts_only_fixed_trusted_paths() -> std::io::Result<()> {
+    let program = args::trusted_program_from([Path::new("/usr/bin/true")])?;
+    assert!(program.ends_with("/true"));
+    assert_eq!(
+        args::trusted_program_from([Path::new("/path/that/does/not/exist")])
+            .err()
+            .map(|error| error.kind()),
+        Some(std::io::ErrorKind::NotFound)
+    );
     Ok(())
 }

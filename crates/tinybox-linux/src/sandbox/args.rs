@@ -124,6 +124,30 @@ pub(super) fn exec(
     setrlimit_fallback: bool,
     supports_expand_environment: bool,
 ) -> Result<Vec<String>> {
+    let prlimit = if !limits && setrlimit_fallback {
+        Some(trusted_prlimit_program().map_err(|_| Error::Unsupported {
+            sandbox: NAME.to_owned(),
+            capability: Capability::ResourceLimits,
+        })?)
+    } else {
+        None
+    };
+    exec_with_prlimit_program(
+        spec,
+        request,
+        limits,
+        prlimit.as_deref(),
+        supports_expand_environment,
+    )
+}
+
+pub(super) fn exec_with_prlimit_program(
+    spec: &BoxSpec,
+    request: &ExecRequest,
+    limits: bool,
+    prlimit_program: Option<&Path>,
+    supports_expand_environment: bool,
+) -> Result<Vec<String>> {
     if request.argv.is_empty() {
         return Err(Error::EmptyCommand {
             sandbox: NAME.to_owned(),
@@ -136,11 +160,7 @@ pub(super) fn exec(
         Vec::new()
     };
     argv.extend(bwrap(spec, request)?);
-    if !limits && setrlimit_fallback {
-        let prlimit = trusted_prlimit_program().map_err(|_| Error::Unsupported {
-            sandbox: NAME.to_owned(),
-            capability: Capability::ResourceLimits,
-        })?;
+    if !limits && let Some(prlimit) = prlimit_program {
         wrap_setrlimit(&mut argv, &spec.resources, &prlimit);
     }
     Ok(argv)
@@ -158,13 +178,19 @@ pub(super) fn wrap_setrlimit(argv: &mut Vec<String>, resources: &Resources, prli
 }
 
 fn trusted_prlimit_program() -> std::io::Result<std::path::PathBuf> {
-    [Path::new("/usr/bin/prlimit"), Path::new("/bin/prlimit")]
+    trusted_program_from([Path::new("/usr/bin/prlimit"), Path::new("/bin/prlimit")])
+}
+
+pub(super) fn trusted_program_from<'a>(
+    paths: impl IntoIterator<Item = &'a Path>,
+) -> std::io::Result<std::path::PathBuf> {
+    paths
         .into_iter()
         .find_map(|path| validate_trusted_program(path).ok())
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "no trusted prlimit executable in fixed system locations",
+                "no trusted executable in fixed system locations",
             )
         })
 }
