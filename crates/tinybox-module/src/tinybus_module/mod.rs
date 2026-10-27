@@ -12,8 +12,8 @@ use tinybox_bus::{
     AbortFileWriteRequest, BeginFileReadRequest, BeginFileWriteRequest, CloseForwardRequest,
     CreateRequest, ExecOutput, ExecRequest, FileChunk, FileReadInfo, FileWriteInfo,
     FileWriteProgress, FinishFileReadRequest, FinishFileWriteRequest, ForwardInfo, ForwardRequest,
-    INTERFACE, OBJECT_PATH, ProcessRef, ReadFileChunkRequest, ResourceId, ResourceInfo,
-    ShellAnalysis, SpawnRequest, WriteFileChunkRequest,
+    INTERFACE, OBJECT_PATH, ProcessEvent, ProcessRef, ReadFileChunkRequest, ResourceId,
+    ResourceInfo, SandboxEvent, ShellAnalysis, SpawnRequest, WriteFileChunkRequest,
 };
 
 mod docker;
@@ -50,6 +50,7 @@ impl Platform {
 #[derive(Default)]
 struct BoxService {
     resources: std::sync::Arc<resources::Resources>,
+    connection: Option<Connection>,
 }
 
 impl BoxService {
@@ -57,8 +58,66 @@ impl BoxService {
     /// `connection`.
     fn connected(connection: Connection) -> Self {
         Self {
-            resources: std::sync::Arc::new(resources::Resources::with_connection(connection)),
+            resources: std::sync::Arc::new(resources::Resources::with_connection(
+                connection.clone(),
+            )),
+            connection: Some(connection),
         }
+    }
+
+    async fn publish_process_events(&self, process: &ProcessRef) {
+        let Some(connection) = self.connection.clone() else {
+            return;
+        };
+        let Ok(Some(stream)) = self.resources.stream(process) else {
+            return;
+        };
+        if !stream.claim_event_publisher() {
+            return;
+        }
+        emit_process_event(
+            &connection,
+            ProcessEvent {
+                process: process.clone(),
+                event: SandboxEvent::Started,
+            },
+        )
+        .await;
+        let event_process = process.clone();
+        tokio::spawn(async move {
+            let status = stream.wait_for_terminal_exit().await;
+            if stream.timed_out() {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process.clone(),
+                        event: SandboxEvent::LimitHit {
+                            limit: tinybox_bus::LimitKind::Timeout,
+                        },
+                    },
+                )
+                .await;
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited { status: None },
+                    },
+                )
+                .await;
+            } else if let Some(status) = status {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited {
+                            status: Some(status),
+                        },
+                    },
+                )
+                .await;
+            }
+        });
     }
 }
 
@@ -261,10 +320,12 @@ impl BoxService {
     /// Start module-owned execution with replayable bounded output.
     async fn start_exec(&self, request: SpawnRequest) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(
+        let process = finish_operation(tokio::spawn(
             async move { resources.start_exec(request).await },
         ))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
     /// Start an execution in the resource's native directory jail.
     async fn start_jailed_exec(
@@ -273,10 +334,12 @@ impl BoxService {
         config: tinybox_bus::NativeJailConfig,
     ) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             resources.start_jailed_exec(request, config).await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Start a jailed execution with the separately negotiated contract 2.1
@@ -288,12 +351,14 @@ impl BoxService {
         config: tinybox_bus::NativeJailRequest,
     ) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             resources
                 .start_jailed_exec_with_resources(request, config)
                 .await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Execute platform shell text using the original two-argument contract.
@@ -303,10 +368,12 @@ impl BoxService {
         shell: tinybox_bus::SelectShellRequest,
     ) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             resources.start_platform_shell_exec(request, shell).await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Start a shell with module-owned environment, scratch and supervision.
@@ -315,10 +382,12 @@ impl BoxService {
         request: tinybox_bus::ShellExecRequest,
     ) -> TinyBusResult<ProcessRef> {
         let resources = self.resources.clone();
-        finish_operation(tokio::spawn(async move {
+        let process = finish_operation(tokio::spawn(async move {
             resources.start_shell_exec(request).await
         }))
-        .await
+        .await?;
+        self.publish_process_events(&process).await;
+        Ok(process)
     }
 
     /// Start one program with piped stdio inside the resource's native jail.
@@ -462,6 +531,17 @@ impl BoxService {
     }
 }
 
+async fn emit_process_event(connection: &Connection, event: ProcessEvent) {
+    let (Ok(path), Ok(interface), Ok(member)) = (
+        OBJECT_PATH.try_into(),
+        INTERFACE.try_into(),
+        tinybox_bus::names::PROCESS_EVENT.try_into(),
+    ) else {
+        return;
+    };
+    let _ = connection.emit(path, interface, member, event).await;
+}
+
 fn capabilities_for(platform: Platform) -> tinybox_bus::ModuleCapabilities {
     let supervised: Vec<String> = if matches!(
         platform,
@@ -598,7 +678,7 @@ tinybus_module::module_export_optional_static! {
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box"],
     methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources"],
-    signals = [],
+    signals = ["ProcessEvent"],
     requires = [],
     optional = [],
     lazy = false,
