@@ -62,6 +62,17 @@ pub(super) fn prepare(
         pids_max: limits.pids_max,
         disk_bytes: limits.disk_bytes,
     });
+    if jail.resources.is_some() {
+        // An explicitly supplied native jail budget is a hard request. The
+        // default values in a BoxSpec remain soft unless its own
+        // `hard_requirements` lists a constraint.
+        jail.hard_requirements.extend([
+            tinybox_core::Constraint::Cpu,
+            tinybox_core::Constraint::Memory,
+            tinybox_core::Constraint::Pids,
+            tinybox_core::Constraint::Disk,
+        ]);
+    }
     if jail
         .resources
         .is_some_and(|limits| limits.validate().is_err())
