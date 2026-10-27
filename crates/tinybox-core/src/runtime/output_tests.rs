@@ -22,6 +22,8 @@ impl ExecutionObserver for Observer {
     fn output(&self, _: OutputStream, _: &[u8]) -> Result<()> {
         Ok(())
     }
+
+    fn termination_cause(&self, _: TerminationCause) {}
 }
 
 #[tokio::test]

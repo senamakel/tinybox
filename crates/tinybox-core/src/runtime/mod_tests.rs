@@ -44,6 +44,8 @@ async fn a_sandbox_without_observed_execution_refuses_without_collected_fallback
         fn output(&self, _stream: super::OutputStream, _bytes: &[u8]) -> Result<()> {
             Ok(())
         }
+
+        fn termination_cause(&self, _: super::TerminationCause) {}
     }
 
     let sandbox = FakeSandbox::new(CONTAINER);
@@ -598,6 +600,8 @@ impl super::ExecutionObserver for EmptyObserver {
     fn output(&self, _: super::OutputStream, _: &[u8]) -> Result<()> {
         Ok(())
     }
+
+    fn termination_cause(&self, _: super::TerminationCause) {}
 }
 #[tokio::test]
 async fn a_sandbox_without_live_output_refuses_without_executing_its_collected_path() -> Result<()>
