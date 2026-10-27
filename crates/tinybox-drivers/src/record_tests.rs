@@ -58,6 +58,7 @@ fn the_body_is_snake_case_with_millisecond_times_and_no_id() -> Result<()> {
                 },
                 "lifecycle": {"kind": "persistent", "autosnapshot_ms": 60_000},
                 "network": {"kind": "denied"},
+                "hard_requirements": [],
                 "ports": [],
                 "env": {"KEY": "value"},
             },
@@ -133,6 +134,29 @@ fn an_unknown_creation_time_stays_unknown() -> Result<()> {
     let record = BoxRecord::try_from(&info)?;
     assert_eq!(record.created_ms, None);
     assert_eq!(round_trip(&info)?.created_at, None);
+    Ok(())
+}
+
+#[test]
+fn older_stored_records_default_hard_requirements_to_empty() -> Result<()> {
+    let info = info_with(base_spec(WorkspaceSource::OciImage("a".into()))?)?;
+    let mut value = serde_json::to_value(BoxRecord::try_from(&info)?).map_err(|e| Error::Store {
+        operation: "encode",
+        message: e.to_string(),
+    })?;
+    value["spec"]
+        .as_object_mut()
+        .ok_or_else(|| Error::Store {
+            operation: "decode",
+            message: "spec record must be an object".to_owned(),
+        })?
+        .remove("hard_requirements");
+
+    let stored: BoxRecord = serde_json::from_value(value).map_err(|e| Error::Store {
+        operation: "decode",
+        message: e.to_string(),
+    })?;
+    assert!(stored.into_info(info.id).spec.hard_requirements.is_empty());
     Ok(())
 }
 
