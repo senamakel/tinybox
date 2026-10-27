@@ -145,19 +145,13 @@ impl JailBackend for AppContainerBackend {
     }
 
     fn is_available(&self) -> bool {
-        // AppContainer is *reachable* on every supported Windows (8+ / Server
-        // 2012+), but the spawn path in `spawn_in_container` can't yet return
-        // a `std::process::Child` — after `CreateProcessW` succeeds it must
-        // reply `Err(io::ErrorKind::Unsupported)` (see the TODO / `Unsupported`
-        // return at the end of `spawn_in_container`). Reporting the backend as
-        // available anyway strands the successfully-spawned process on the
-        // caller side: `execute_local_jail` bubbles the `Err` up as a spawn
-        // failure and never `wait`s on the running `cmd.exe`, so it
-        // orphan-runs against the redirected stdout/stderr files. Report
-        // unavailable until `Child` bridging lands so `pick_backend()` /
-        // `execute_local_jail` route through `NoopBackend`, which returns a
-        // real waitable `Child`. (PR #4723 review — #4705.)
+        // std::process::Child cannot wrap a Win32 handle. Legacy callers use
+        // the owned-child availability path instead.
         false
+    }
+
+    fn is_owned_available(&self) -> bool {
+        true
     }
 
     fn spawn_owned_captured(&self, jail: &Jail, cmd: Command) -> io::Result<super::jail::OwnedChild> {
@@ -165,17 +159,15 @@ impl JailBackend for AppContainerBackend {
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
-        windows_constraint_support(self.is_available())
+        windows_constraint_support(self.is_owned_available())
     }
 
     fn spawn(&self, jail: &Jail, cmd: Command) -> io::Result<Child> {
-        if !self.is_available() {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "AppContainer cannot return a waitable process handle",
-            ));
-        }
-        unsafe { spawn_in_container(jail, cmd) }
+        let _ = (jail, cmd);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "AppContainer requires the owned-child spawn API on Windows",
+        ))
     }
 }
 
