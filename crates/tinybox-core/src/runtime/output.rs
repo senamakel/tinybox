@@ -5,6 +5,16 @@ use async_trait::async_trait;
 
 pub use tinybox_bus::OutputStream;
 
+/// A resource-limit termination proven by provider-owned runtime evidence.
+///
+/// Backends must not infer these causes from a signal or exit code alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TerminationCause {
+    /// The Linux cgroup v2 CPU controller throttled work under its quota.
+    CpuQuota,
+}
+
 /// Receives bounded output batches inside the provider's execution runtime.
 ///
 /// Module adapters implement this with a bounded journal and a cancellation
@@ -18,6 +28,9 @@ pub trait ExecutionObserver: std::fmt::Debug + Send + Sync + 'static {
     /// # Errors
     /// Returns an error if the bounded journal cannot accept this batch.
     fn output(&self, stream: OutputStream, bytes: &[u8]) -> Result<()>;
+
+    /// Record a provider-proven resource termination while execution is owned.
+    fn termination_cause(&self, _cause: TerminationCause) {}
 
     /// Resolve when the owning module requests execution cancellation.
     ///

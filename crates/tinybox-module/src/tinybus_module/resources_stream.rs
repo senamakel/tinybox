@@ -376,6 +376,34 @@ impl StreamExecution {
     pub(in crate::tinybus_module) fn timed_out(&self) -> bool {
         self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
     }
+    pub(in crate::tinybus_module) fn terminal_events(
+        &self,
+        status: Option<i32>,
+    ) -> Vec<tinybox_bus::SandboxEvent> {
+        use tinybox_bus::{LimitKind, SandboxEvent};
+
+        if self.timed_out() {
+            return vec![
+                SandboxEvent::LimitHit {
+                    limit: LimitKind::Timeout,
+                },
+                SandboxEvent::Exited { status: None },
+            ];
+        }
+
+        let mut events = Vec::new();
+        if self.journal.cpu_quota_hit() {
+            events.push(SandboxEvent::LimitHit {
+                limit: LimitKind::Cpu,
+            });
+        }
+        if let Some(status) = status {
+            events.push(SandboxEvent::Exited {
+                status: Some(status),
+            });
+        }
+        events
+    }
     pub(super) fn running(&self) -> bool {
         !self.journal.cleanup_acknowledged()
     }
