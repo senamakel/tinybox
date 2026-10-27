@@ -177,8 +177,8 @@ impl JailBackend for AppContainerBackend {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct JobObjectLimitPlan {
-    process_memory_bytes: usize,
-    active_processes: u32,
+    process_memory_bytes: Option<usize>,
+    active_processes: Option<u32>,
     cpu_rate: Option<u32>,
     kill_on_close: bool,
 }
@@ -186,24 +186,35 @@ struct JobObjectLimitPlan {
 fn job_object_limit_plan(
     resources: tinybox_core::Resources,
     processor_count: u32,
+    hard_requirements: &[tinybox_core::Constraint],
 ) -> io::Result<JobObjectLimitPlan> {
     resources
         .validate()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let processor_count = u64::from(processor_count.max(1));
     let total_cpu_millis = processor_count * 1_000;
-    let cpu_rate =
-        ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis).clamp(1, 10_000) as u32;
-    let process_memory_bytes = usize::try_from(resources.memory_bytes).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "memory limit exceeds Windows address size",
-        )
-    })?;
+    let cpu_rate = hard_requirements
+        .contains(&tinybox_core::Constraint::Cpu)
+        .then(|| {
+            ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis)
+                .clamp(1, 10_000) as u32
+        });
+    let process_memory_bytes = if hard_requirements.contains(&tinybox_core::Constraint::Memory) {
+        Some(usize::try_from(resources.memory_bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "memory limit exceeds Windows address size",
+            )
+        })?)
+    } else {
+        None
+    };
     Ok(JobObjectLimitPlan {
         process_memory_bytes,
-        active_processes: resources.pids_max,
-        cpu_rate: Some(cpu_rate),
+        active_processes: hard_requirements
+            .contains(&tinybox_core::Constraint::Pids)
+            .then_some(resources.pids_max),
+        cpu_rate,
         kill_on_close: true,
     })
 }
@@ -220,11 +231,16 @@ fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSuppor
         })
 }
 
-unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::Result<OwnedHandle> {
+unsafe fn create_job_object(
+    resources: Option<tinybox_core::Resources>,
+    hard_requirements: &[tinybox_core::Constraint],
+) -> io::Result<OwnedHandle> {
     let mut system_info: SYSTEM_INFO = std::mem::zeroed();
     GetSystemInfo(&raw mut system_info);
     let plan = resources
-        .map(|resources| job_object_limit_plan(resources, system_info.dwNumberOfProcessors))
+        .map(|resources| {
+            job_object_limit_plan(resources, system_info.dwNumberOfProcessors, hard_requirements)
+        })
         .transpose()?;
     let job = CreateJobObjectW(ptr::null(), ptr::null());
     if job.is_null() {
@@ -235,9 +251,14 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
     let mut flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if let Some(plan) = plan {
-        flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_JOB_MEMORY;
-        limits.BasicLimitInformation.ActiveProcessLimit = plan.active_processes;
-        limits.JobMemoryLimit = plan.process_memory_bytes;
+        if let Some(active_processes) = plan.active_processes {
+            flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+            limits.BasicLimitInformation.ActiveProcessLimit = active_processes;
+        }
+        if let Some(memory_bytes) = plan.process_memory_bytes {
+            flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+            limits.JobMemoryLimit = memory_bytes;
+        }
     }
     limits.BasicLimitInformation.LimitFlags = flags;
     if SetInformationJobObject(
@@ -250,11 +271,11 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
         return Err(io::Error::last_os_error());
     }
 
-    if let Some(plan) = plan {
+    if let Some(cpu_rate) = plan.and_then(|plan| plan.cpu_rate) {
         let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
             ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
             Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
-                CpuRate: plan.cpu_rate.unwrap_or(10_000),
+                CpuRate: cpu_rate,
             },
         };
         if SetInformationJobObject(
@@ -452,6 +473,19 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::ja
 
     let process = OwnedHandle::from_raw_handle(pi.hProcess.cast());
     let thread = OwnedHandle::from_raw_handle(pi.hThread.cast());
+    let resource_requirements: Vec<_> = jail
+        .hard_requirements
+        .iter()
+        .copied()
+        .filter(|constraint| {
+            matches!(
+                constraint,
+                tinybox_core::Constraint::Cpu
+                    | tinybox_core::Constraint::Memory
+                    | tinybox_core::Constraint::Pids
+            )
+        })
+        .collect();
     let resources = jail.resources.or_else(|| {
         jail.hard_requirements
             .iter()
@@ -466,7 +500,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::ja
             })
             .then_some(tinybox_core::Resources::DEFAULT)
     });
-    let job = match create_job_object(resources) {
+    let job = match create_job_object(resources, &resource_requirements) {
         Ok(job) => job,
         Err(error) => {
             let _ = TerminateProcess(process.as_raw_handle().cast(), 1);
