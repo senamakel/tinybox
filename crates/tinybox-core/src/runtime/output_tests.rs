@@ -63,6 +63,7 @@ fn a_default_observer_does_not_spuriously_request_cancellation() {
 #[test]
 fn observers_can_receive_a_proven_cpu_quota_cause() {
     let observer = Observer;
+    let observer: &dyn ExecutionObserver = &observer;
     observer.termination_cause(TerminationCause::CpuQuota);
     assert_eq!(TerminationCause::CpuQuota, TerminationCause::CpuQuota);
 }
