@@ -24,7 +24,7 @@ impl ExecutionObserver for Observer {
 fn public_observers_accept_proven_cpu_quota_causes() {
     let observer = Observer;
     let observer: &dyn ExecutionObserver = &observer;
-    observer.termination_cause(TerminationCause::CpuQuota);
+    assert!(!observer.termination_cause(TerminationCause::CpuQuota));
 }
 
 /// Build a placement, propagating identifier validation failures to the test.

@@ -83,7 +83,7 @@ fn cpu_quota_observer_cause_is_forwarded_before_process_exit() {
         process: ResourceId("process".into()),
     };
     let journal = Arc::new(OutputJournal::default());
-    journal.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    assert!(journal.termination_cause(tinybox_core::TerminationCause::CpuQuota));
     let stream = StreamExecution {
         request: SpawnRequest {
             process: process.process.clone(),
