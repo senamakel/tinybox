@@ -2501,3 +2501,20 @@ async fn an_unenforceable_network_allowlist_is_refused_at_creation() -> Result<(
     ));
     Ok(())
 }
+
+#[tokio::test]
+async fn an_unsupported_hard_requirement_is_refused_before_storage() -> Result<()> {
+    let (sandbox, _host, store) = sandbox();
+    let requested = spec()?.with_hard_requirements([tinybox_core::Constraint::Disk]);
+
+    assert!(matches!(
+        sandbox.create(&requested).await,
+        Err(Error::ConstraintNotEnforced {
+            constraint: tinybox_core::Constraint::Disk,
+            enforcement: tinybox_core::Enforcement::Unsupported,
+            ..
+        })
+    ));
+    assert_eq!(store.list()?, []);
+    Ok(())
+}
