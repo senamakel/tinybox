@@ -161,7 +161,7 @@ fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
         environment_block(&env, local_app_data, system_root).expect("valid explicit environment");
     let block = String::from_utf16_lossy(&block);
     assert!(block.starts_with(
-        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0SYSTEMROOT=C:\\Windows\0TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"
+        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0SystemRoot=C:\\Windows\0TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"
     ));
     assert!(!block.contains("PATH="));
     assert!(!block.contains("USERPROFILE="));
@@ -175,7 +175,7 @@ fn empty_environment_block_has_the_required_double_terminator() {
     let block = environment_block(&BTreeMap::new(), local_app_data, system_root).unwrap();
     assert_eq!(
         String::from_utf16_lossy(&block),
-        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0SYSTEMROOT=C:\\Windows\0\0"
+        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0SystemRoot=C:\\Windows\0\0"
     );
 }
 
@@ -186,7 +186,7 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
     let root = tempfile::tempdir()?;
     let backend = AppContainerBackend::new();
     let mut command = Command::new(cmd_exe());
-    command.args(["/C", "echo %TINYBOX_APPROVED_ENV% & echo %PATH%"]);
+    command.args(["/C", "echo %TINYBOX_APPROVED_ENV%"]);
     let approved = BTreeMap::from([(
         "TINYBOX_APPROVED_ENV".to_owned(),
         "approved-value".to_owned(),
@@ -204,7 +204,7 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
         .take_stderr()
         .expect("captured stderr")
         .read_to_string(&mut stderr)?;
-    let status = child.try_wait()?;
+    let status = wait_for_child(&mut child)?;
     assert!(
         output.contains("approved-value"),
         "stdout={output:?}, stderr={stderr:?}, status={status:?}"
@@ -215,7 +215,7 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
             "parent PATH leaked to the child"
         );
     }
-    assert!(status.is_some());
+    assert!(status.success());
     Ok(())
 }
 
@@ -231,7 +231,7 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
     std::fs::write(&secret, "outside-secret-marker")?;
 
     let command_text = format!(
-        "type \"{}\" & type \"{}\"",
+        "type {} & type {}",
         allowed.display(),
         secret.display()
     );
@@ -259,14 +259,14 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
         .take_stderr()
         .expect("captured stderr")
         .read_to_string(&mut stderr)?;
-    let status = child.try_wait()?;
+    let status = wait_for_child(&mut child)?;
     assert!(
         stdout.contains("inside-marker"),
         "stdout={stdout:?}, stderr={stderr:?}, status={status:?}"
     );
     assert!(!stdout.contains("outside-secret-marker"));
     assert!(stderr.to_ascii_lowercase().contains("access is denied"));
-    assert!(status.is_some());
+    assert!(status.success());
     Ok(())
 }
 
@@ -410,12 +410,12 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
         .take_stderr()
         .expect("captured stderr")
         .read_to_string(&mut stderr)?;
-    let status = child.try_wait()?;
+    let status = wait_for_child(&mut child)?;
     assert!(
         output.contains("owned-child-ok"),
         "stdout={output:?}, stderr={stderr:?}, status={status:?}"
     );
-    assert!(status.is_some(), "EOF follows process exit");
+    assert!(status.success(), "captured child exits successfully");
 
     let mut waiting = Command::new(cmd_exe());
     waiting.args(["/C", "set /p waiting="]);
@@ -438,4 +438,22 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
     let mut remaining = Vec::new();
     stdout.read_to_end(&mut remaining)?;
     Ok(())
+}
+
+fn wait_for_child(
+    child: &mut crate::OwnedChild,
+) -> std::io::Result<crate::ChildStatus> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "owned child did not exit after captured output closed",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }

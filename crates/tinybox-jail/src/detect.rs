@@ -75,7 +75,12 @@ pub fn pick_backend() -> Arc<dyn JailBackend> {
 /// Picks the strongest available backend that can return an [`super::jail::OwnedChild`].
 #[must_use]
 pub fn pick_owned_backend() -> Arc<dyn JailBackend> {
-    for backend in owned_candidates() {
+    pick_owned_from(owned_candidates())
+}
+
+/// Select the first backend that can return an owned child.
+fn pick_owned_from(backends: Vec<Arc<dyn JailBackend>>) -> Arc<dyn JailBackend> {
+    for backend in backends {
         if backend.is_owned_available() {
             log::debug!(
                 "[cwd_jail] selected owned-process sandbox {}",
