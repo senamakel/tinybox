@@ -22,6 +22,8 @@ fn cpu_throttling_counter_requires_one_well_formed_nr_throttled_value() {
 fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
 -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tempfile::tempdir()?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700))?;
     let mut command = std::process::Command::new("systemd-run");
     command.args([
         "--scope",
@@ -33,7 +35,6 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "/sys",
         "--clearenv",
     ]);
-    eprintln!("args={:?} runtime={:?} metadata={:?}", command.get_args().collect::<Vec<_>>(), runtime.path(), std::fs::metadata(runtime.path())?);
     let mut env = BTreeMap::new();
     let report = CpuEventReport::prepare_in(&command, &mut env, runtime.path())
         .ok_or("eligible scope did not get a report")?;
