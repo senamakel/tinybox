@@ -105,6 +105,29 @@ fn parse_cpu_throttled_counter(stats: &str) -> Option<u64> {
     counter
 }
 
+#[cfg(target_os = "linux")]
+fn prepare_cpu_event_report(
+    command: &std::process::Command,
+    env: &mut BTreeMap<String, String>,
+    observer_attached: bool,
+) -> Option<CpuEventReport> {
+    observer_attached
+        .then(|| CpuEventReport::prepare(command, env))
+        .flatten()
+}
+
+#[cfg(target_os = "linux")]
+fn report_cpu_termination(
+    report: Option<&CpuEventReport>,
+    observer: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report.is_some_and(CpuEventReport::throttling_observed)
+        && let Some(observer) = observer
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    }
+}
+
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
@@ -464,9 +487,7 @@ impl JailLocalHost {
         mut env: BTreeMap<String, String>,
     ) -> Result<ExecOutput> {
         #[cfg(target_os = "linux")]
-        let cpu_event_report = observer
-            .as_ref()
-            .and_then(|_| CpuEventReport::prepare(&command, &mut env));
+        let cpu_event_report = prepare_cpu_event_report(&command, &mut env, observer.is_some());
         #[cfg(target_os = "linux")]
         let event_observer = observer.clone();
         #[cfg(unix)]
@@ -563,13 +584,7 @@ impl JailLocalHost {
         drop(cancel);
         let output = result??;
         #[cfg(target_os = "linux")]
-        if cpu_event_report
-            .as_ref()
-            .is_some_and(CpuEventReport::throttling_observed)
-            && let Some(observer) = event_observer
-        {
-            observer.termination_cause(tinybox_core::TerminationCause::CpuQuota);
-        }
+        report_cpu_termination(cpu_event_report.as_ref(), event_observer.as_ref());
         Ok(output)
     }
 }
