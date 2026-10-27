@@ -19,12 +19,15 @@ fn cpu_throttling_counter_requires_one_well_formed_nr_throttled_value() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
+fn cpu_event_report_rejects_custom_paths_and_accepts_masked_run_paths()
 -> Result<(), Box<dyn std::error::Error>> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    let runtime = tempfile::tempdir()?;
-    std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700))?;
+    let custom_runtime = tempfile::tempdir()?;
+    std::fs::set_permissions(
+        custom_runtime.path(),
+        std::fs::Permissions::from_mode(0o700),
+    )?;
     let mut command = std::process::Command::new("systemd-run");
     command.args([
         "--scope",
@@ -37,11 +40,37 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "--clearenv",
     ]);
     let mut env = BTreeMap::new();
-    assert!(CpuEventReport::prepare_in(&command, &mut env, runtime.path()).is_none());
+    assert!(CpuEventReport::prepare_in(&command, &mut env, custom_runtime.path()).is_none());
     assert!(
         env.is_empty(),
         "unmasked runtime paths must not be handed off"
     );
+
+    let Some(runtime_root) = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
+    else {
+        return Ok(());
+    };
+    let Ok(metadata) = std::fs::metadata(&runtime_root) else {
+        return Ok(());
+    };
+    if !runtime_root.starts_with("/run/")
+        || metadata.uid() != std::fs::metadata("/proc/self")?.uid()
+        || metadata.mode() & 0o077 != 0
+    {
+        return Ok(());
+    }
+    let runtime = tempfile::Builder::new()
+        .prefix("tinybox-test-")
+        .tempdir_in(runtime_root)?;
+    std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700))?;
+    let report = CpuEventReport::prepare_in(&command, &mut env, runtime.path())
+        .ok_or("masked /run runtime path did not get a report")?;
+    let report_path = env
+        .get(CPU_EVENT_FILE_ENV)
+        .ok_or("report path was not passed to the trusted wrapper")?;
+    assert_eq!(std::fs::read_to_string(report_path)?, "nr_throttled 0\n");
+    drop(report);
+    assert!(!std::path::Path::new(report_path).exists());
 
     let mut unmetered = std::process::Command::new("systemd-run");
     unmetered.args([
@@ -52,7 +81,7 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "--tmpfs",
         "/sys",
     ]);
-    assert!(CpuEventReport::prepare_in(&unmetered, &mut env, runtime.path()).is_none());
+    assert!(CpuEventReport::prepare_in(&unmetered, &mut env, custom_runtime.path()).is_none());
     assert!(env.is_empty());
     Ok(())
 }
