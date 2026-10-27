@@ -145,6 +145,7 @@ fn soft_resource_values_do_not_create_hard_job_limits() {
 fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
     let local_app_data = std::ffi::OsStr::new(r"C:\Users\runner\AppData\Local");
     let env = BTreeMap::from([
+        ("LOCALAPPDATA".to_owned(), "request-override".to_owned()),
         ("TINYBOX_APPROVED".to_owned(), "visible".to_owned()),
         ("Z_LAST".to_owned(), "last".to_owned()),
     ]);
@@ -155,6 +156,7 @@ fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
     ));
     assert!(!block.contains("PATH="));
     assert!(!block.contains("USERPROFILE="));
+    assert!(!block.contains("request-override"));
 }
 
 #[test]
