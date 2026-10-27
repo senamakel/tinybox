@@ -21,6 +21,8 @@ struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 #[cfg(not(unix))]
 type AsyncPipe = tokio::fs::File;
 
+// Keep one fallible call shape across platforms; only Unix pipe registration can fail.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn async_pipe(file: std::fs::File) -> Result<AsyncPipe> {
     #[cfg(unix)]
     {
