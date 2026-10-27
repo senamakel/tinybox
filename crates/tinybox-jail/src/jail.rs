@@ -9,13 +9,6 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-const RESOURCE_CONSTRAINTS: [tinybox_core::Constraint; 4] = [
-    tinybox_core::Constraint::Cpu,
-    tinybox_core::Constraint::Memory,
-    tinybox_core::Constraint::Pids,
-    tinybox_core::Constraint::Disk,
-];
-
 /// Declarative description of a directory jail.
 ///
 /// One `root` (read/write), zero or more extra `read_write` paths, zero or

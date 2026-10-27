@@ -187,3 +187,26 @@ fn supported_job_object_requirements_pass_hard_preflight() {
         )
         .expect("Job Objects enforce the selected hard limits");
 }
+
+#[test]
+fn jail_preflight_accepts_supported_limits_and_refuses_hard_disk_limit() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let backend = AppContainerBackend::new();
+    let supported = Jail::new(r"C:\work", "limits").with_hard_requirements([
+        Constraint::Cpu,
+        Constraint::Memory,
+        Constraint::Pids,
+    ]);
+    assert!(backend.require_resources(&supported).is_ok());
+
+    let disk = Jail::new(r"C:\work", "limits").with_hard_requirements([Constraint::Disk]);
+    assert!(matches!(
+        backend.require_resources(&disk),
+        Err(tinybox_core::Error::ConstraintNotEnforced {
+            constraint: Constraint::Disk,
+            enforcement: Enforcement::Unsupported,
+            ..
+        })
+    ));
+}

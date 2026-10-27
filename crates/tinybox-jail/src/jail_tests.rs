@@ -14,7 +14,10 @@ fn defaults_are_permissive() {
 fn soft_resource_values_do_not_become_hard_constraints() {
     let mut jail = Jail::new("/tmp", "x");
     jail.resources = Some(tinybox_core::Resources::DEFAULT);
-    assert_eq!(jail.constraints(), vec![tinybox_core::Constraint::Filesystem]);
+    assert_eq!(
+        jail.constraints(),
+        vec![tinybox_core::Constraint::Filesystem]
+    );
     jail = jail.with_hard_requirements([
         tinybox_core::Constraint::Cpu,
         tinybox_core::Constraint::Memory,

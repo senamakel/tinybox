@@ -443,7 +443,15 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     let resources = jail.resources.or_else(|| {
         jail.hard_requirements
             .iter()
-            .any(|constraint| matches!(constraint, tinybox_core::Constraint::Cpu | tinybox_core::Constraint::Memory | tinybox_core::Constraint::Pids | tinybox_core::Constraint::Disk))
+            .any(|constraint| {
+                matches!(
+                    constraint,
+                    tinybox_core::Constraint::Cpu
+                        | tinybox_core::Constraint::Memory
+                        | tinybox_core::Constraint::Pids
+                        | tinybox_core::Constraint::Disk
+                )
+            })
             .then_some(tinybox_core::Resources::DEFAULT)
     });
     let job = match create_job_object(resources) {
