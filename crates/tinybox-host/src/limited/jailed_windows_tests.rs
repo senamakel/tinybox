@@ -22,7 +22,12 @@ async fn detected_owned_backend_runs_with_only_the_approved_environment()
     );
     let output = host.run(&request).await?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("approved-marker"), "stdout={stdout:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("approved-marker"),
+        "stdout={stdout:?}, stderr={stderr:?}, exit_code={}",
+        output.exit_code
+    );
     if let Some(parent_path) = parent_path {
         assert!(
             !stdout.contains(&parent_path),
