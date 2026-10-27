@@ -41,11 +41,13 @@ pub struct Jail {
     /// native module rejects overlaps that an allow-list backend cannot enforce.
     /// Missing paths are retained so backend rules can cover later creation.
     pub deny_read: Vec<PathBuf>,
-    /// Optional hard CPU, memory, process and writable-disk limits.
+    /// Optional resource values to apply where the backend supports them.
     ///
-    /// Backends include the corresponding constraints in preflight. A backend
-    /// that does not enforce every requested limit refuses before spawning.
+    /// These values are defaults, not hard requirements. Use
+    /// [`hard_requirements`](Self::hard_requirements) to require enforcement.
     pub resources: Option<tinybox_core::Resources>,
+    /// Constraints the backend must enforce fully before spawning.
+    pub hard_requirements: Vec<tinybox_core::Constraint>,
     /// Allow outbound network. Most agent tools need this; some risky tools
     /// (untrusted code execution) should disable it.
     pub allow_net: bool,
@@ -67,6 +69,7 @@ impl Jail {
             read_write: Vec::new(),
             deny_read: Vec::new(),
             resources: None,
+            hard_requirements: Vec::new(),
             allow_net: true,
             allow_subprocess: true,
             label: label.into(),
@@ -106,6 +109,16 @@ impl Jail {
         self
     }
 
+    /// Require the backend to fully enforce each listed constraint.
+    #[must_use]
+    pub fn with_hard_requirements(
+        mut self,
+        requirements: impl IntoIterator<Item = tinybox_core::Constraint>,
+    ) -> Self {
+        self.hard_requirements = requirements.into_iter().collect();
+        self
+    }
+
     /// Hard constraints implied by this jail's grants and denial flags.
     #[must_use]
     pub fn constraints(&self) -> Vec<tinybox_core::Constraint> {
@@ -117,13 +130,10 @@ impl Jail {
         if !self.allow_subprocess {
             constraints.push(Constraint::Subprocess);
         }
-        if self.resources.is_some() {
-            constraints.extend([
-                Constraint::Cpu,
-                Constraint::Memory,
-                Constraint::Pids,
-                Constraint::Disk,
-            ]);
+        for constraint in &self.hard_requirements {
+            if !constraints.contains(constraint) {
+                constraints.push(*constraint);
+            }
         }
         constraints
     }
@@ -423,9 +433,18 @@ pub trait JailBackend: Send + Sync {
     fn require_resources(&self, jail: &Jail) -> tinybox_core::Result<()> {
         if let Some(resources) = jail.resources {
             resources.validate()?;
-            self.constraint_support()
-                .require(self.name(), &RESOURCE_CONSTRAINTS)?;
         }
+        let requested_resources: Vec<_> = RESOURCE_CONSTRAINTS
+            .into_iter()
+            .filter(|constraint| jail.hard_requirements.contains(constraint))
+            .collect();
+        if !requested_resources.is_empty() && jail.resources.is_none() {
+            return Err(tinybox_core::Error::InvalidInput(
+                "resource hard requirements need resource values".to_owned(),
+            ));
+        }
+        self.constraint_support()
+            .require(self.name(), &requested_resources)?;
         Ok(())
     }
 
