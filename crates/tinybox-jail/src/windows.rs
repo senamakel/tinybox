@@ -36,6 +36,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::OsStr;
+use std::collections::BTreeMap;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -74,6 +75,7 @@ const CONTAINER_INHERIT_ACE: u32 = 0x02;
 /// Required for capability SIDs passed to `AppContainer` `SECURITY_CAPABILITIES`.
 /// Source: WinNT.h.
 const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
 
 /// `AppContainer` capability names granted when `jail.allow_net == true`.
 ///
@@ -159,7 +161,16 @@ impl JailBackend for AppContainerBackend {
         jail: &Jail,
         cmd: Command,
     ) -> io::Result<super::jail::OwnedChild> {
-        unsafe { spawn_in_container(jail, &cmd) }
+        self.spawn_owned_captured_with_env(jail, cmd, &BTreeMap::new())
+    }
+
+    fn spawn_owned_captured_with_env(
+        &self,
+        jail: &Jail,
+        cmd: Command,
+        env: &BTreeMap<String, String>,
+    ) -> io::Result<super::jail::OwnedChild> {
+        unsafe { spawn_in_container(jail, &cmd, env) }
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
@@ -223,7 +234,13 @@ fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSuppor
     if !available {
         return ConstraintSupport::NONE;
     }
-    [Constraint::Cpu, Constraint::Memory, Constraint::Pids]
+    [
+        Constraint::Filesystem,
+        Constraint::Network,
+        Constraint::Cpu,
+        Constraint::Memory,
+        Constraint::Pids,
+    ]
         .into_iter()
         .fold(ConstraintSupport::NONE, |support, constraint| {
             support.with(constraint, Enforcement::Enforced)
@@ -305,8 +322,33 @@ fn size_as_u32(value: usize) -> io::Result<u32> {
     })
 }
 
+fn environment_block(env: &BTreeMap<String, String>) -> io::Result<Vec<u16>> {
+    let mut entries: Vec<_> = env.iter().collect();
+    entries.sort_by_key(|(key, _)| key.to_ascii_lowercase());
+    let mut block = Vec::new();
+    for (key, value) in entries {
+        if key.is_empty() || key.contains('=') || key.contains('\0') || value.contains('\0') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Windows environment entries must have valid names and no NUL bytes",
+            ));
+        }
+        block.extend(format!("{key}={value}").encode_utf16());
+        block.push(0);
+    }
+    block.push(0);
+    if env.is_empty() {
+        block.push(0);
+    }
+    Ok(block)
+}
+
 #[allow(clippy::too_many_lines)] // Win32 startup structures must share their backing lifetimes.
-unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::jail::OwnedChild> {
+unsafe fn spawn_in_container(
+    jail: &Jail,
+    cmd: &Command,
+    env: &BTreeMap<String, String>,
+) -> io::Result<super::jail::OwnedChild> {
     // 1. Create or open the AppContainer profile and obtain its SID.
     let profile_name = sanitize_profile_name(&jail.label);
     let wide_name = to_wide(&profile_name);
@@ -458,6 +500,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::ja
     let cmdline = build_command_line(cmd);
     let mut cmdline_w = to_wide(&cmdline);
     let cwd_w = cmd.get_current_dir().map(|p| to_wide(&p.to_string_lossy()));
+    let mut environment = environment_block(env)?;
 
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
     let ok = CreateProcessW(
@@ -466,8 +509,8 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::ja
         ptr::null_mut(),
         ptr::null_mut(),
         1, // bInheritHandles: only the three inheritable child pipe ends.
-        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
-        ptr::null_mut(),
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+        environment.as_mut_ptr().cast(),
         cwd_w.as_ref().map_or(ptr::null(), std::vec::Vec::as_ptr),
         (&raw mut si).cast::<STARTUPINFOW>(),
         &raw mut pi,
@@ -827,7 +870,11 @@ impl Drop for CapabilityDerivation {
 ///
 /// # Safety
 /// FFI into `userenv.dll`. Safe to call from any thread on Windows.
-unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
+fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
+    unsafe { derive_capability_ffi(name) }
+}
+
+unsafe fn derive_capability_ffi(name: &str) -> io::Result<CapabilityDerivation> {
     let name_w = to_wide(name);
     let mut group_sids: *mut PSID = ptr::null_mut();
     let mut group_count: u32 = 0;

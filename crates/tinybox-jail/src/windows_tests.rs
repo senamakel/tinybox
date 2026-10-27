@@ -20,7 +20,7 @@ fn derive_capability_resolves_well_known_internet_client() {
     // capabilities present on every supported Windows version
     // (10+). DeriveCapabilitySidsFromName must succeed and return
     // at least one non-null capability SID.
-    let deriv = unsafe { derive_capability("internetClient") }
+    let deriv = derive_capability("internetClient")
         .expect("internetClient must resolve on any supported Windows");
     assert!(
         !deriv.capability_sids.is_empty(),
@@ -139,6 +139,93 @@ fn soft_resource_values_do_not_create_hard_job_limits() {
     assert_eq!(limits.active_processes, None);
     assert_eq!(limits.cpu_rate, None);
     assert!(limits.kill_on_close);
+}
+
+#[test]
+fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
+    let env = BTreeMap::from([
+        ("TINYBOX_APPROVED".to_owned(), "visible".to_owned()),
+        ("Z_LAST".to_owned(), "last".to_owned()),
+    ]);
+    let block = environment_block(&env).expect("valid explicit environment");
+    let block = String::from_utf16_lossy(&block);
+    assert!(block.starts_with("TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"));
+    assert!(!block.contains("PATH="));
+    assert!(!block.contains("USERPROFILE="));
+}
+
+#[test]
+fn empty_environment_block_has_the_required_double_terminator() {
+    assert_eq!(environment_block(&BTreeMap::new()).unwrap(), vec![0, 0]);
+}
+
+#[test]
+fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<()> {
+    use std::io::Read;
+
+    let root = tempfile::tempdir()?;
+    let backend = AppContainerBackend::new();
+    let mut command = Command::new("cmd.exe");
+    command.args(["/C", "echo %TINYBOX_APPROVED_ENV%|%PATH%"]);
+    let approved = BTreeMap::from([("TINYBOX_APPROVED_ENV".to_owned(), "approved-value".to_owned())]);
+    let jail = Jail::new(root.path(), "approved-env").deny_net();
+    let mut child = crate::spawn_owned_captured_with_env(&backend, &jail, command, &approved)?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .expect("captured stdout")
+        .read_to_string(&mut output)?;
+    assert!(output.contains("approved-value"));
+    if let Ok(parent_path) = std::env::var("PATH") {
+        assert!(!output.contains(&parent_path), "parent PATH leaked to the child");
+    }
+    assert!(child.try_wait()?.is_some());
+    Ok(())
+}
+
+#[test]
+fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result<()> {
+    use std::io::Read;
+
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let allowed = root.path().join("allowed.txt");
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&allowed, "inside-marker")?;
+    std::fs::write(&secret, "outside-secret-marker")?;
+
+    let command_text = format!(
+        "type \"{}\" & type \"{}\"",
+        allowed.display(),
+        secret.display()
+    );
+    let mut command = Command::new("cmd.exe");
+    command.args(["/C", &command_text]);
+    let jail = Jail::new(root.path(), "acl-regression").deny_net();
+    let backend = AppContainerBackend::new();
+    backend.require(&jail).expect("filesystem preflight is enforced");
+    let mut child = crate::spawn_owned_captured_with_env(
+        &backend,
+        &jail,
+        command,
+        &BTreeMap::new(),
+    )?;
+
+    let mut stdout = String::new();
+    child
+        .take_stdout()
+        .expect("captured stdout")
+        .read_to_string(&mut stdout)?;
+    let mut stderr = String::new();
+    child
+        .take_stderr()
+        .expect("captured stderr")
+        .read_to_string(&mut stderr)?;
+    assert!(stdout.contains("inside-marker"));
+    assert!(!stdout.contains("outside-secret-marker"));
+    assert!(stderr.to_ascii_lowercase().contains("access is denied"));
+    assert!(child.try_wait()?.is_some());
+    Ok(())
 }
 
 #[test]
