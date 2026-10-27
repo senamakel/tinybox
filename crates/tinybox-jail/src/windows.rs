@@ -349,7 +349,7 @@ fn environment_block(
             ));
         }
         block.extend(key.encode_wide());
-        block.push(b'=' as u16);
+        block.push(u16::from(b'='));
         block.extend(value.encode_wide());
         block.push(0);
     }
