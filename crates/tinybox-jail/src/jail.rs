@@ -112,6 +112,15 @@ impl Jail {
         self
     }
 
+    /// Copy resource defaults and hard constraints from a box specification.
+    /// Filesystem roots, grants, and network policy remain explicit Jail data.
+    #[must_use]
+    pub fn with_box_spec(mut self, spec: &tinybox_core::BoxSpec) -> Self {
+        self.resources = Some(spec.resources);
+        self.hard_requirements = spec.hard_requirements.clone();
+        self
+    }
+
     /// Hard constraints implied by this jail's grants and denial flags.
     #[must_use]
     pub fn constraints(&self) -> Vec<tinybox_core::Constraint> {
@@ -404,6 +413,17 @@ pub trait JailBackend: Send + Sync {
     /// Inspect all hard constraints a directory jail requests.
     fn plan_check(&self, jail: &Jail) -> tinybox_core::PlanCheck {
         self.constraint_support().plan_check(&jail.constraints())
+    }
+
+    /// Inspect only the hard requirements explicitly listed on a box spec.
+    fn plan_check_spec(&self, spec: &tinybox_core::BoxSpec) -> tinybox_core::PlanCheck {
+        self.constraint_support().plan_check(&spec.hard_requirements)
+    }
+
+    /// Refuse a box spec when any explicit hard requirement is unsupported.
+    fn require_spec(&self, spec: &tinybox_core::BoxSpec) -> tinybox_core::Result<()> {
+        self.constraint_support()
+            .require(self.name(), &spec.hard_requirements)
     }
 
     /// Refuse incomplete filesystem, network or subprocess confinement.
