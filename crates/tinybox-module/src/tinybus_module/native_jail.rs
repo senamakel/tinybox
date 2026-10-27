@@ -56,20 +56,7 @@ pub(super) fn prepare(
     jail.read_only = grants(&config.read_only)?;
     jail.read_write = grants(&config.read_write)?;
     jail.deny_read = denials(&config.deny_read)?;
-    jail.resources = config.resources.map(|limits| tinybox_core::Resources {
-        cpu_millis: limits.cpu_millis,
-        memory_bytes: limits.memory_bytes,
-        pids_max: limits.pids_max,
-        disk_bytes: limits.disk_bytes,
-    });
-    jail.hard_requirements
-        .extend(required_resource_constraints(config.resources));
-    if jail
-        .resources
-        .is_some_and(|limits| limits.validate().is_err())
-    {
-        return Err(invalid());
-    }
+    configure_resources(&mut jail, config)?;
     // A denial over the root or a writable grant would leave the command no
     // workspace; a denial nested inside a writable grant is safe only for a
     // backend that applies denials after its write allows.
@@ -125,6 +112,24 @@ pub(super) fn prepare(
         }
     }
     Ok(jail)
+}
+
+fn configure_resources(jail: &mut Jail, config: &NativeJailConfig) -> Result<()> {
+    jail.resources = config.resources.map(|limits| tinybox_core::Resources {
+        cpu_millis: limits.cpu_millis,
+        memory_bytes: limits.memory_bytes,
+        pids_max: limits.pids_max,
+        disk_bytes: limits.disk_bytes,
+    });
+    jail.hard_requirements
+        .extend(required_resource_constraints(config.resources));
+    if jail
+        .resources
+        .is_some_and(|limits| limits.validate().is_err())
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 fn required_resource_constraints(
