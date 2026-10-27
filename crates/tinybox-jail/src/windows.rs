@@ -325,16 +325,22 @@ fn size_as_u32(value: usize) -> io::Result<u32> {
 fn environment_block(
     env: &BTreeMap<String, String>,
     local_app_data: &OsStr,
+    system_root: &OsStr,
 ) -> io::Result<Vec<u16>> {
     let mut entries: Vec<(OsString, OsString)> = env
         .iter()
-        .filter(|(key, _)| !key.eq_ignore_ascii_case("LOCALAPPDATA"))
+        .filter(|(key, _)| {
+            !key.eq_ignore_ascii_case("LOCALAPPDATA") && !key.eq_ignore_ascii_case("SYSTEMROOT")
+        })
         .map(|(key, value)| (key.into(), value.into()))
         .collect();
     // CreateProcessW needs the profile root to resolve the AppContainer
     // profile. Forward this single OS-required value even when the requested
     // child environment is otherwise empty; do not inherit the parent block.
     entries.push((OsString::from("LOCALAPPDATA"), local_app_data.to_owned()));
+    // Windows child processes need SystemRoot to locate system runtime files.
+    // This is the only other parent value forwarded into the block.
+    entries.push((OsString::from("SystemRoot"), system_root.to_owned()));
     entries.sort_by_key(|(key, _)| key.to_string_lossy().to_ascii_lowercase());
     let mut block = Vec::new();
     for (key, value) in entries {
@@ -355,6 +361,15 @@ fn environment_block(
     }
     block.push(0);
     Ok(block)
+}
+
+fn required_environment_variable(name: &'static str) -> io::Result<OsString> {
+    std::env::var_os(name).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{name} is required to launch an AppContainer process"),
+        )
+    })
 }
 
 #[allow(clippy::too_many_lines)] // Win32 startup structures must share their backing lifetimes.
@@ -514,13 +529,9 @@ unsafe fn spawn_in_container(
     let cmdline = build_command_line(cmd);
     let mut cmdline_w = to_wide(&cmdline);
     let cwd_w = cmd.get_current_dir().map(|p| to_wide(&p.to_string_lossy()));
-    let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "LOCALAPPDATA is required to launch an AppContainer process",
-        )
-    })?;
-    let mut environment = environment_block(env, &local_app_data)?;
+    let local_app_data = required_environment_variable("LOCALAPPDATA")?;
+    let system_root = required_environment_variable("SystemRoot")?;
+    let mut environment = environment_block(env, &local_app_data, &system_root)?;
 
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
     let ok = CreateProcessW(
