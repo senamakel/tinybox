@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt as _;
-#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -881,5 +880,132 @@ async fn explicitly_required_supported_constraints_allow_creation() -> Result<()
     sandbox.require_spec(&requested)?;
     assert_eq!(sandbox.create(&requested).await?.state, BoxState::Ready);
     assert_eq!(store.list()?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn resource_enforcement_selection_uses_cgroups_then_setrlimit_fallback() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    assert_eq!(
+        args::select_resource_enforcement(true, true),
+        args::ResourceEnforcement::CgroupV2
+    );
+    assert_eq!(
+        args::select_resource_enforcement(false, true),
+        args::ResourceEnforcement::Setrlimit
+    );
+    assert_eq!(
+        args::select_resource_enforcement(false, false),
+        args::ResourceEnforcement::Unavailable
+    );
+
+    let cgroup = args::resource_constraint_support(args::ResourceEnforcement::CgroupV2);
+    let fallback = args::resource_constraint_support(args::ResourceEnforcement::Setrlimit);
+    let unavailable = args::resource_constraint_support(args::ResourceEnforcement::Unavailable);
+    for constraint in [Constraint::Cpu, Constraint::Memory, Constraint::Pids] {
+        assert_eq!(cgroup.enforcement(constraint), Enforcement::Enforced);
+    }
+    assert_eq!(
+        fallback.enforcement(Constraint::Memory),
+        Enforcement::Enforced
+    );
+    for constraint in [Constraint::Cpu, Constraint::Pids] {
+        assert_eq!(fallback.enforcement(constraint), Enforcement::Unsupported);
+        assert_eq!(
+            unavailable.enforcement(constraint),
+            Enforcement::Unsupported
+        );
+    }
+    assert_eq!(
+        unavailable.enforcement(Constraint::Memory),
+        Enforcement::Unsupported
+    );
+}
+
+#[tokio::test]
+async fn setrlimit_fallback_refuses_cpu_and_pids_hard_requirements() -> Result<()> {
+    use tinybox_core::Constraint;
+
+    let sandbox = NamespaceSandbox::new(
+        Arc::new(RecordingHost::default()),
+        Arc::new(MemoryStore::new()),
+    )
+    .with_setrlimit_fallback();
+
+    let memory = spec()?.with_hard_requirements([Constraint::Memory]);
+    sandbox.require_spec(&memory)?;
+    for constraint in [Constraint::Cpu, Constraint::Pids] {
+        let requested = spec()?.with_hard_requirements([constraint]);
+        assert!(matches!(
+            sandbox.create(&requested).await,
+            Err(Error::ConstraintNotEnforced { constraint: unsupported, .. }) if unsupported == constraint
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
+    let spec = spec()?.with_resources(Resources {
+        cpu_millis: 1_000,
+        memory_bytes: 64 * 1024 * 1024,
+        pids_max: 16,
+        disk_bytes: 1,
+    });
+    let argv = args::exec_with_prlimit_resolver(
+        &spec,
+        &ExecRequest::new(["true"]),
+        false,
+        true,
+        false,
+        || Ok(Path::new("/trusted/prlimit").to_path_buf()),
+    )?;
+    assert!(
+        argv.first()
+            .is_some_and(|program| program.ends_with("/prlimit"))
+    );
+    assert!(has(&argv, "--as=67108864"));
+    assert!(has(&argv, "--"));
+    assert!(has(&argv, "bwrap"));
+    Ok(())
+}
+
+#[test]
+fn setrlimit_fallback_refuses_when_no_trusted_launcher_is_available() -> Result<()> {
+    let spec = spec()?;
+    assert!(matches!(
+        args::exec_with_prlimit_resolver(
+            &spec,
+            &ExecRequest::new(["true"]),
+            false,
+            true,
+            false,
+            || Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing prlimit",
+            )),
+        ),
+        Err(Error::Unsupported {
+            capability: Capability::ResourceLimits,
+            ..
+        })
+    ));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn trusted_resource_launcher_resolution_accepts_only_fixed_trusted_paths() -> std::io::Result<()> {
+    let program = args::trusted_program_from([Path::new("/usr/bin/true")])?;
+    assert!(program.is_absolute());
+    assert_eq!(
+        args::trusted_program_from([Path::new("/path/that/does/not/exist")])
+            .err()
+            .map(|error| error.kind()),
+        Some(std::io::ErrorKind::NotFound)
+    );
+    #[cfg(target_os = "linux")]
+    assert!(args::trusted_prlimit_program()?.is_absolute());
     Ok(())
 }
