@@ -891,6 +891,7 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
 }
 
 #[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus::Result<()> {
     use serde_json::Value;
     use tinybox_bus::{
@@ -958,7 +959,7 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tinybus::Result<()> {
     use serde_json::Value;
     use tinybox_bus::{
