@@ -215,7 +215,7 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
             "parent PATH leaked to the child"
         );
     }
-    assert!(!status.success(), "outside path access should fail");
+    assert!(status.success());
     Ok(())
 }
 
@@ -262,7 +262,7 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
     );
     assert!(!stdout.contains("outside-secret-marker"));
     assert!(stderr.to_ascii_lowercase().contains("access is denied"));
-    assert!(status.success());
+    assert!(!status.success(), "outside path access should fail");
     Ok(())
 }
 
