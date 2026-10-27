@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt as _;
-#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -946,21 +945,16 @@ async fn setrlimit_fallback_refuses_cpu_and_pids_hard_requirements() -> Result<(
     Ok(())
 }
 
-#[tokio::test]
-async fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
-    let host = Arc::new(RecordingHost::default());
-    let sandbox =
-        NamespaceSandbox::new(host.clone(), Arc::new(MemoryStore::new())).with_setrlimit_fallback();
+#[test]
+fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
     let spec = spec()?.with_resources(Resources {
         cpu_millis: 1_000,
         memory_bytes: 64 * 1024 * 1024,
         pids_max: 16,
         disk_bytes: 1,
     });
-    let info = sandbox.create(&spec).await?;
-    sandbox.exec(&info.id, &ExecRequest::new(["true"])).await?;
-
-    let argv = host.last();
+    let mut argv = args::bwrap(&spec, &ExecRequest::new(["true"]))?;
+    args::wrap_setrlimit(&mut argv, &spec.resources, Path::new("/trusted/prlimit"));
     assert!(
         argv.first()
             .is_some_and(|program| program.ends_with("/prlimit"))

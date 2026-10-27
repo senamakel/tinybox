@@ -141,16 +141,20 @@ pub(super) fn exec(
             sandbox: NAME.to_owned(),
             capability: Capability::ResourceLimits,
         })?;
-        argv.splice(
-            0..0,
-            [
-                prlimit.to_string_lossy().into_owned(),
-                format!("--as={}", spec.resources.memory_bytes),
-                "--".to_owned(),
-            ],
-        );
+        wrap_setrlimit(&mut argv, &spec.resources, &prlimit);
     }
     Ok(argv)
+}
+
+pub(super) fn wrap_setrlimit(argv: &mut Vec<String>, resources: &Resources, prlimit: &Path) {
+    argv.splice(
+        0..0,
+        [
+            prlimit.to_string_lossy().into_owned(),
+            format!("--as={}", resources.memory_bytes),
+            "--".to_owned(),
+        ],
+    );
 }
 
 fn trusted_prlimit_program() -> std::io::Result<std::path::PathBuf> {
@@ -613,7 +617,7 @@ fn ensure_mount_parents(argv: &mut Vec<String>, request: &NativeJailCommand) {
 }
 
 /// The `bwrap` invocation itself.
-fn bwrap(spec: &BoxSpec, request: &ExecRequest) -> Result<Vec<String>> {
+pub(super) fn bwrap(spec: &BoxSpec, request: &ExecRequest) -> Result<Vec<String>> {
     let workspace = workspace_dir(spec)?;
     let mut argv = vec!["bwrap".to_owned()];
 
