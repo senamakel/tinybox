@@ -912,13 +912,13 @@ async fn native_cancellation_kills_detached_descendants_and_preserves_stream_eve
     };
     let mut exec = tinybox_core::ExecRequest::new(["python3", "-c", &python]);
     exec.cwd = Some(root.path().into());
+    let backend = resource_backend();
+    let jail = prepare_with_resources(root.path(), &request, &mut exec, backend.as_ref())?;
     for key in ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"] {
         if let Ok(value) = std::env::var(key) {
             exec.env.insert(key.to_owned(), value);
         }
     }
-    let backend = resource_backend();
-    let jail = prepare_with_resources(root.path(), &request, &mut exec, backend.as_ref())?;
     let host = Arc::new(tinybox_host::JailLocalHost::with_backend(
         jail,
         backend,
