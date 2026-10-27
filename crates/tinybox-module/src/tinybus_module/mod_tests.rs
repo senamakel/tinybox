@@ -924,7 +924,7 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
         process: process_id.clone(),
     };
     let request = SpawnRequest {
-        process: process_id,
+        process: process_id.clone(),
         command: ExecRequest {
             resource: resource.clone(),
             argv: vec!["/bin/sh".into(), "-c".into(), "exit 7".into()],
