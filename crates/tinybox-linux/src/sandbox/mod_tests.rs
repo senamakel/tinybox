@@ -473,7 +473,7 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert_eq!(argv.first().map(String::as_str), Some("/bin/bash"));
     assert!(argv.contains(&systemd_run.display().to_string()));
     assert!(systemd_run.is_absolute());
-    assert!(argv.iter().any(|part| part == crate::CPU_EVENT_SCOPE_WRAPPER));
+    assert!(has(&argv, "cpu.stat"));
     assert!(has(&argv, "--property=CPUQuota=0.1%"));
     assert!(has(&argv, "--property=MemoryMax=67108864"));
     assert!(has(&argv, "--property=MemorySwapMax=0"));
