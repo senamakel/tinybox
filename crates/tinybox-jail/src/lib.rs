@@ -15,11 +15,11 @@
 //! | Linux   | bubblewrap    | `bwrap` namespaces; process isolation      |
 //! | Linux   | landlock      | Fallback: kernel 5.13+ LSM, spawn thread   |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | (not compiled)| `AppContainer`, pending a `Child` bridge   |
+//! | Windows | `AppContainer`| AppContainer ACLs + Job Object limits     |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
-//! The Windows backend is not compiled yet (see `windows.rs`); on Windows the
-//! default backend is `unsupported` and a host must opt into `NoopBackend`.
+//! Windows exposes AppContainer through the owned-child API because
+//! `std::process::Child` cannot be constructed from Win32 process handles.
 //!
 //! ## Quick start
 //!

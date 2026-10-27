@@ -100,8 +100,8 @@ This crate depends only on std and:
   (registry).
 - `landlock` crate: Linux backend, gated on the `landlock` cargo
   feature.
-- `windows-sys`: Windows AppContainer FFI (Security/Isolation, Threading,
-  Memory APIs).
+- `windows-sys`: Windows AppContainer, Job Object, process/threading,
+  pipe and memory APIs.
 - macOS backend shells out to the system binary `/usr/bin/sandbox-exec`.
 
 The Linux backend's docstring references `crate::security::landlock` as
@@ -120,13 +120,14 @@ not import that module.
   as a real read grant and maps `allow_net` to the strictly outbound-only
   `internetClient` capability (LAN and inbound capabilities are deliberately
   excluded).
-- Windows `spawn` currently returns an error after a successful launch.
-  `spawn_in_container` creates the process successfully but cannot bridge
-  the raw `HANDLE` into a `std::process::Child` (the needed
-  `FromRawHandle for Child` is unstable), so it closes the handle and
-  returns `io::ErrorKind::Unsupported`. See the TODO in `windows.rs`. The
-  Windows path is compile-checked but flagged as needing real-hardware
-  testing.
+- Windows callers use `spawn_owned_captured` / `spawn_owned_captured_with`;
+  the legacy `spawn` API refuses before launch because Windows cannot create a
+  `std::process::Child` from a raw process handle. The owned AppContainer
+  backend retains process and Job Object handles, captures standard pipes,
+  applies CPU, aggregate memory and active-process limits when requested, and
+  terminates the whole job on cleanup. Job Objects do not enforce disk quotas,
+  so hard disk requirements are refused in preflight. The Windows path still
+  needs real-hardware validation.
 - macOS forwards only variables explicitly supplied with `Command::env` or
   `Command::envs`. The launcher clears the inherited environment because Rust
   exposes no getter for `Command::env_clear`; this prevents restoring parent
