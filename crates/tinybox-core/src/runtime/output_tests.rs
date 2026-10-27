@@ -62,7 +62,8 @@ fn a_default_observer_does_not_spuriously_request_cancellation() {
 
 #[test]
 fn a_default_observer_accepts_provider_termination_causes() {
-    let observer = Observer;
+    let observer = DefaultTerminationObserver;
     let observer: &dyn ExecutionObserver = &observer;
+    assert!(observer.output(OutputStream::Stdout, b"fixture").is_ok());
     observer.termination_cause(TerminationCause::CpuQuota);
 }
