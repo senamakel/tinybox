@@ -86,33 +86,12 @@ impl BoxService {
         let event_process = process.clone();
         tokio::spawn(async move {
             let status = stream.wait_for_terminal_exit().await;
-            if stream.timed_out() {
+            for event in stream.terminal_events(status) {
                 emit_process_event(
                     &connection,
                     ProcessEvent {
                         process: event_process.clone(),
-                        event: SandboxEvent::LimitHit {
-                            limit: tinybox_bus::LimitKind::Timeout,
-                        },
-                    },
-                )
-                .await;
-                emit_process_event(
-                    &connection,
-                    ProcessEvent {
-                        process: event_process,
-                        event: SandboxEvent::Exited { status: None },
-                    },
-                )
-                .await;
-            } else if let Some(status) = status {
-                emit_process_event(
-                    &connection,
-                    ProcessEvent {
-                        process: event_process,
-                        event: SandboxEvent::Exited {
-                            status: Some(status),
-                        },
+                        event,
                     },
                 )
                 .await;

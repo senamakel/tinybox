@@ -74,6 +74,48 @@ async fn live_admission_is_bounded_until_outputs_are_explicitly_released() -> Re
     Ok(())
 }
 
+#[test]
+fn cpu_quota_observer_cause_is_forwarded_before_process_exit() {
+    use tinybox_core::ExecutionObserver;
+
+    let process = ProcessRef {
+        resource: ResourceId("resource".into()),
+        process: ResourceId("process".into()),
+    };
+    let journal = Arc::new(OutputJournal::default());
+    journal.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    let stream = StreamExecution {
+        request: SpawnRequest {
+            process: process.process.clone(),
+            command: ExecRequest {
+                resource: process.resource.clone(),
+                argv: true_command(),
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                stdin: None,
+            },
+        },
+        shell: None,
+        platform_shell: None,
+        jail: None,
+        journal,
+        task: Mutex::new(None),
+        collector: Collector::Host(Arc::new(tinybox_host::LimitedLocalHost::new(64)), None),
+        timed_out: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        event_publisher_claimed: std::sync::atomic::AtomicBool::new(false),
+    };
+
+    assert_eq!(
+        stream.terminal_events(Some(0)),
+        vec![
+            tinybox_bus::SandboxEvent::LimitHit {
+                limit: tinybox_bus::LimitKind::Cpu,
+            },
+            tinybox_bus::SandboxEvent::Exited { status: Some(0) },
+        ]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_replay_keeps_request_identity_and_rejects_cross_resource_handles() -> Result<()> {
     let resources = Resources::test_resources();

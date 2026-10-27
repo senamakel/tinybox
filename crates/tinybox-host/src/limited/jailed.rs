@@ -13,6 +13,144 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, watch};
 
+#[cfg(target_os = "linux")]
+const CPU_EVENT_FILE_ENV: &str = "TINYBOX_INTERNAL_CPU_EVENT_FILE";
+#[cfg(target_os = "linux")]
+static CPU_EVENT_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
+
+#[cfg(target_os = "linux")]
+struct CpuEventReport(std::path::PathBuf);
+
+#[cfg(target_os = "linux")]
+impl CpuEventReport {
+    fn prepare(
+        command: &std::process::Command,
+        env: &mut BTreeMap<String, String>,
+    ) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, env, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &std::process::Command,
+        env: &mut BTreeMap<String, String>,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        let runtime_dir = runtime_dir.canonicalize().ok()?;
+        if !runtime_dir.starts_with("/run/") {
+            return None;
+        }
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        let has_scope = args.iter().any(|arg| {
+            arg.strip_prefix("--unit=")
+                .and_then(|unit| std::path::Path::new(unit).extension())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
+                && arg.starts_with("--unit=tinybox-native-")
+        });
+        let has_cpu_limit = args
+            .iter()
+            .any(|arg| arg.starts_with("--property=CPUQuota="))
+            || args
+                .windows(2)
+                .any(|pair| pair[0] == "--property" && pair[1].starts_with("CPUQuota="));
+        let masks_runtime = args.windows(2).any(|pair| pair == ["--tmpfs", "/run"]);
+        let masks_cgroup = args.windows(2).any(|pair| pair == ["--tmpfs", "/sys"]);
+        if !has_scope || !has_cpu_limit || !masks_runtime || !masks_cgroup {
+            return None;
+        }
+        let metadata = std::fs::metadata(&runtime_dir).ok()?;
+        let uid = std::fs::metadata("/proc/self").ok()?.uid();
+        if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
+            return None;
+        }
+        let sequence = CPU_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = runtime_dir.join(format!(
+            "tinybox-cpu-event-{}-{sequence}",
+            std::process::id()
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        if std::io::Write::write_all(&mut file, b"nr_throttled 0\n").is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        env.insert(
+            CPU_EVENT_FILE_ENV.into(),
+            path.to_string_lossy().into_owned(),
+        );
+        Some(Self(path))
+    }
+
+    fn throttling_observed(&self) -> bool {
+        std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|contents| parse_cpu_throttled_counter(&contents))
+            .is_some_and(|count| count > 0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for CpuEventReport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_cpu_throttled_counter(stats: &str) -> Option<u64> {
+    let mut counter = None;
+    for line in stats.lines() {
+        if let Some(value) = line.strip_prefix("nr_throttled ") {
+            if counter.is_some() {
+                return None;
+            }
+            counter = Some(value.parse().ok()?);
+        }
+    }
+    counter
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_cpu_event_report(
+    command: &std::process::Command,
+    env: &mut BTreeMap<String, String>,
+    observer_attached: bool,
+) -> Option<CpuEventReport> {
+    observer_attached
+        .then(|| CpuEventReport::prepare(command, env))
+        .flatten()
+}
+
+#[cfg(target_os = "linux")]
+fn report_cpu_termination(
+    report: Option<&CpuEventReport>,
+    observer: Option<&Arc<dyn ExecutionObserver>>,
+) {
+    if report.is_some_and(CpuEventReport::throttling_observed)
+        && let Some(observer) = observer
+    {
+        observer.termination_cause(tinybox_core::TerminationCause::CpuQuota);
+    }
+}
+
+fn configure_jail_command(command: &mut std::process::Command, env: &BTreeMap<String, String>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command.env_clear().envs(env);
+}
+
 #[cfg(unix)]
 struct AsyncPipe(tokio::io::unix::AsyncFd<std::fs::File>);
 
@@ -369,17 +507,13 @@ impl JailLocalHost {
         mut command: std::process::Command,
         payload: Option<Vec<u8>>,
         observer: Option<Arc<dyn ExecutionObserver>>,
-        env: BTreeMap<String, String>,
+        mut env: BTreeMap<String, String>,
     ) -> Result<ExecOutput> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        command
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        command.env_clear().envs(&env);
+        #[cfg(target_os = "linux")]
+        let cpu_event_report = prepare_cpu_event_report(&command, &mut env, observer.is_some());
+        #[cfg(target_os = "linux")]
+        let event_observer = observer.clone();
+        configure_jail_command(&mut command, &env);
         let jail = self.jail.clone();
         let backend = self.backend.clone();
         let state = self.state.clone();
@@ -463,7 +597,10 @@ impl JailLocalHost {
             .await
             .map_err(|error| failure("collect native jail", error.to_string()));
         drop(cancel);
-        result?
+        let output = result??;
+        #[cfg(target_os = "linux")]
+        report_cpu_termination(cpu_event_report.as_ref(), event_observer.as_ref());
+        Ok(output)
     }
 }
 

@@ -84,7 +84,10 @@ observation. The module emits `Started` once after a successful `StartExec`,
 terminal exit status. When an execution times out, it emits
 `LimitHit { limit: Timeout }` before `Exited { status: None }`. Replayed starts
 do not duplicate these events. Signal delivery is best-effort; this increment
-does not publish stdio, access denial, or other resource-limit observations.
+also emits `LimitHit { limit: Cpu }` before exit when the trusted Linux
+cgroup-v2 CPU counter proves that a scoped CPU quota throttled the workload.
+This reports throttling, not CPU exhaustion or process termination. Other
+resource-limit observations remain unpublished.
 
 Version 1.5 adds bounded file transfer for mounted directory workspaces.
 Reserve `FileRead(resource)` or `FileWrite(resource)` before opening a transfer.

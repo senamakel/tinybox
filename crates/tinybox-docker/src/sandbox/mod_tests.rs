@@ -1014,6 +1014,7 @@ fn flag_value<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
 struct CapturingObserver {
     cancel: bool,
     batches: Mutex<Vec<(tinybox_core::OutputStream, Vec<u8>)>>,
+    causes: Mutex<Vec<tinybox_core::TerminationCause>>,
 }
 
 impl CapturingObserver {
@@ -1035,11 +1036,49 @@ impl tinybox_core::ExecutionObserver for CapturingObserver {
         Ok(())
     }
 
+    fn termination_cause(&self, cause: tinybox_core::TerminationCause) {
+        self.causes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(cause);
+    }
+
     async fn cancelled(&self) {
         if !self.cancel {
             std::future::pending::<()>().await;
         }
     }
+}
+
+#[test]
+fn docker_observer_forwards_provider_termination_causes() -> Result<()> {
+    let inner = Arc::new(CapturingObserver::default());
+    let observer = super::DockerExecutionObserver {
+        inner: inner.clone(),
+        host: Arc::new(ScriptedHost::default()),
+        namespace: "fixture".into(),
+        handle: super::CleanupHandle {
+            id: BoxId::new("box-0")?,
+            token: "token".into(),
+            generation: 0,
+            launched: true,
+            acknowledged: Arc::default(),
+            unsupported: Arc::default(),
+        },
+        observed_boxes: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        control: Arc::new(super::ObservedControl::default()),
+    };
+
+    tinybox_core::ExecutionObserver::termination_cause(
+        &observer,
+        tinybox_core::TerminationCause::CpuQuota,
+    );
+    assert_eq!(
+        *inner.causes.lock().unwrap_or_else(PoisonError::into_inner),
+        vec![tinybox_core::TerminationCause::CpuQuota]
+    );
+    Ok(())
 }
 
 #[test]

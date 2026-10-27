@@ -327,6 +327,10 @@ impl ExecutionObserver for DockerExecutionObserver {
         self.inner.output(stream, bytes)
     }
 
+    fn termination_cause(&self, cause: tinybox_core::TerminationCause) {
+        self.inner.termination_cause(cause);
+    }
+
     async fn cancelled(&self) {
         self.inner.cancelled().await;
         match cleanup_remote(self.host.clone(), &self.namespace, &self.handle).await {
