@@ -87,10 +87,18 @@ use std::sync::{Arc, OnceLock};
 
 /// Cached default backend for the current platform.
 static DEFAULT_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
+static DEFAULT_OWNED_BACKEND: OnceLock<Arc<dyn JailBackend>> = OnceLock::new();
 
 /// Returns the process-wide default backend, lazily auto-detected.
 pub fn default_backend() -> Arc<dyn JailBackend> {
     DEFAULT_BACKEND.get_or_init(detect::pick_backend).clone()
+}
+
+/// Cached default backend for the process-owned child API.
+pub fn default_owned_backend() -> Arc<dyn JailBackend> {
+    DEFAULT_OWNED_BACKEND
+        .get_or_init(detect::pick_owned_backend)
+        .clone()
 }
 
 /// Spawn `cmd` inside the jail described by `jail`, using the default backend.
@@ -168,6 +176,11 @@ pub fn spawn_owned_captured_with(
     require_resources(backend, &jail)?;
     jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
     backend.spawn_owned_captured(&jail, cmd)
+}
+
+/// Spawn captured work with the detected backend that supports owned children.
+pub fn spawn_owned_captured(jail: &Jail, cmd: Command) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with(default_owned_backend().as_ref(), jail, cmd)
 }
 
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {

@@ -346,6 +346,12 @@ pub trait JailBackend: Send + Sync {
     /// a backend.
     fn is_available(&self) -> bool;
 
+    /// Whether the backend can spawn through [`OwnedChild`]. Backends that
+    /// cannot expose a `std::process::Child` may override this independently.
+    fn is_owned_available(&self) -> bool {
+        self.is_available()
+    }
+
     /// Declares implemented constraints; unknown backends claim nothing.
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
         tinybox_core::ConstraintSupport::NONE
