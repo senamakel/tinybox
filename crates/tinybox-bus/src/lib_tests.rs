@@ -152,7 +152,8 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
     assert!(!is_compatible((1, 22)));
     assert!(!is_compatible((3, 0)));
     assert!(!is_compatible((2, 0)));
-    assert!(is_compatible((2, 1)));
+    assert!(!is_compatible((2, 1)));
+    assert!(is_compatible((2, 2)));
     assert!(!supports_native_jail_resources((2, 0)));
     assert!(supports_native_jail_resources((2, 1)));
     assert!(supports_native_jail_resources((2, 2)));
@@ -162,7 +163,7 @@ fn version_and_capability_wire_snapshot_preserve_contract_compatibility()
         exec_backends: Vec::new(),
         spawn_backends: Vec::new(),
     };
-    let snapshot = serde_json::json!({"contract_version":[2,1],"create_backends":["passthrough"],"exec_backends":[],"spawn_backends":[]});
+    let snapshot = serde_json::json!({"contract_version":[2,2],"create_backends":["passthrough"],"exec_backends":[],"spawn_backends":[]});
     assert_eq!(serde_json::to_value(&capabilities)?, snapshot);
     assert_eq!(
         serde_json::from_value::<ModuleCapabilities>(snapshot)?,
