@@ -14,7 +14,7 @@ enum NativeJailRequest {
     Resources(tinybox_bus::NativeJailRequest),
 }
 
-pub(super) struct StreamExecution {
+pub(in crate::tinybus_module) struct StreamExecution {
     request: SpawnRequest,
     shell: Option<tinybox_bus::ShellExecRequest>,
     platform_shell: Option<tinybox_bus::SelectShellRequest>,
@@ -352,12 +352,12 @@ impl StreamExecution {
             event_publisher_claimed: std::sync::atomic::AtomicBool::new(false),
         }
     }
-    pub(super) fn claim_event_publisher(&self) -> bool {
+    pub(in crate::tinybus_module) fn claim_event_publisher(&self) -> bool {
         !self
             .event_publisher_claimed
             .swap(true, std::sync::atomic::Ordering::AcqRel)
     }
-    pub(super) async fn wait_for_terminal_exit(&self) -> Option<i32> {
+    pub(in crate::tinybus_module) async fn wait_for_terminal_exit(&self) -> Option<i32> {
         let mut task = self.task.lock().await;
         if let Some(join) = task.as_mut()
             && join.await.is_err()
@@ -708,7 +708,10 @@ impl Resources {
         error.map_or(Ok(()), Err)
     }
 
-    pub(super) fn stream(&self, process: &ProcessRef) -> Result<Option<Arc<StreamExecution>>> {
+    pub(in crate::tinybus_module) fn stream(
+        &self,
+        process: &ProcessRef,
+    ) -> Result<Option<Arc<StreamExecution>>> {
         validate_id(&process.resource)?;
         validate_id(&process.process)?;
         let streams = self

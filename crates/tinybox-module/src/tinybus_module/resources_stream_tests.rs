@@ -209,6 +209,7 @@ async fn a_panicked_job_is_joined_and_cleanup_failure_stays_owned_until_retry() 
         shell: None,
         platform_shell: None,
         timed_out: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        event_publisher_claimed: std::sync::atomic::AtomicBool::new(false),
         journal,
         task: Mutex::new(Some(task)),
         collector: Collector::Host(Arc::new(tinybox_host::LimitedLocalHost::new(64)), None),
