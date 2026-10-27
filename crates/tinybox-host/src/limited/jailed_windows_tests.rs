@@ -5,7 +5,7 @@ use tinybox_core::ExecRequest;
 
 #[tokio::test]
 async fn detected_owned_backend_runs_with_only_the_approved_environment()
--> Result<(), Box<dyn std::error::Error>> {
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let host = JailLocalHost::new(
         tinybox_jail::Jail::new(root.path(), "host-owned-appcontainer"),
