@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One process-scoped sandbox observation sent by the TinyBox module.
+/// One process-scoped sandbox observation sent by the `TinyBox` module.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessEvent {
     /// Resource and process identifiers chosen by the caller.
