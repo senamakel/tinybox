@@ -104,3 +104,52 @@ fn path_grants_keep_write_access_on_paths_also_listed_read_only() {
         ]
     );
 }
+
+#[test]
+fn job_object_limit_plan_sets_memory_process_cpu_and_kill_on_close() {
+    use tinybox_core::Resources;
+
+    let limits = job_object_limit_plan(
+        Resources {
+            cpu_millis: 1_500,
+            memory_bytes: 512 * 1024 * 1024,
+            pids_max: 17,
+            disk_bytes: Resources::DEFAULT.disk_bytes,
+        },
+        4,
+    )
+    .expect("valid Windows Job Object limits");
+
+    assert_eq!(limits.process_memory_bytes, 512 * 1024 * 1024);
+    assert_eq!(limits.active_processes, 17);
+    assert_eq!(limits.cpu_rate, Some(3_750));
+    assert!(limits.kill_on_close);
+}
+
+#[test]
+fn windows_capabilities_report_only_job_object_resource_limits() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let support = windows_constraint_support();
+    assert_eq!(support.enforcement(Constraint::Cpu), Enforcement::Enforced);
+    assert_eq!(support.enforcement(Constraint::Memory), Enforcement::Enforced);
+    assert_eq!(support.enforcement(Constraint::Pids), Enforcement::Enforced);
+    assert_eq!(support.enforcement(Constraint::Disk), Enforcement::Unsupported);
+}
+
+#[test]
+fn unsupported_windows_disk_limit_is_a_typed_preflight_refusal() {
+    use tinybox_core::{Constraint, Enforcement, Error};
+
+    let error = windows_constraint_support()
+        .require("appcontainer", &[Constraint::Disk])
+        .expect_err("Job Objects do not enforce disk quotas");
+    assert!(matches!(
+        error,
+        Error::ConstraintNotEnforced {
+            sandbox,
+            constraint: Constraint::Disk,
+            enforcement: Enforcement::Unsupported,
+        } if sandbox == "appcontainer"
+    ));
+}
