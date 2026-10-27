@@ -474,12 +474,15 @@ impl BoxService {
     }
 
     async fn publish_process_events(&self, process: &ProcessRef) {
-        let Some(connection) = self.connection.clone()
-            && let Ok(Some(stream)) = self.resources.stream(process)
-            && stream.claim_event_publisher()
-        else {
+        let Some(connection) = self.connection.clone() else {
             return;
         };
+        let Ok(Some(stream)) = self.resources.stream(process) else {
+            return;
+        };
+        if !stream.claim_event_publisher() {
+            return;
+        }
         emit_process_event(
             &connection,
             ProcessEvent {
