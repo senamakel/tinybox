@@ -268,6 +268,10 @@ pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     }
 
     /// Refuse a spec whose explicitly required constraints are not enforced.
+    ///
+    /// # Errors
+    /// Returns [`Error::ConstraintNotEnforced`] if any explicit requirement is
+    /// unsupported or only best effort.
     fn require_spec(&self, spec: &BoxSpec) -> Result<()> {
         self.require(&spec.hard_requirements)
     }
