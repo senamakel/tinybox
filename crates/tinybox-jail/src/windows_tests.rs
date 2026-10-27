@@ -248,10 +248,18 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
 }
 
 #[test]
-fn windows_capabilities_report_only_job_object_resource_limits() {
+fn windows_capabilities_report_acl_and_job_object_enforcement() {
     use tinybox_core::{Constraint, Enforcement};
 
     let support = windows_constraint_support(true);
+    assert_eq!(
+        support.enforcement(Constraint::Filesystem),
+        Enforcement::Enforced
+    );
+    assert_eq!(
+        support.enforcement(Constraint::Network),
+        Enforcement::Enforced
+    );
     assert_eq!(support.enforcement(Constraint::Cpu), Enforcement::Enforced);
     assert_eq!(
         support.enforcement(Constraint::Memory),
