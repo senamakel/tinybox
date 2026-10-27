@@ -108,7 +108,7 @@ fn older_specs_default_hard_requirements_to_empty()
     object.remove("hard_requirements");
 
     let restored: BoxSpec = serde_json::from_value(value)?;
-    assert!(restored.hard_requirements.is_empty());
+    assert_eq!(restored.hard_requirements, []);
     Ok(())
 }
 

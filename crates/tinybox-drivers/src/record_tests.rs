@@ -157,7 +157,7 @@ fn older_stored_records_default_hard_requirements_to_empty() -> Result<()> {
         operation: "decode",
         message: e.to_string(),
     })?;
-    assert!(stored.into_info(info.id).spec.hard_requirements.is_empty());
+    assert_eq!(stored.into_info(info.id).spec.hard_requirements, []);
     Ok(())
 }
 
