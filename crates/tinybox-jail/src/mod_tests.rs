@@ -42,6 +42,12 @@ fn facade_refuses_resource_limits_before_spawning() -> std::io::Result<()> {
     let marker = root.path().join("executed");
     let mut jail = Jail::new(root.path(), "resources");
     jail.resources = Some(tinybox_core::Resources::DEFAULT);
+    jail = jail.with_hard_requirements([
+        tinybox_core::Constraint::Cpu,
+        tinybox_core::Constraint::Memory,
+        tinybox_core::Constraint::Pids,
+        tinybox_core::Constraint::Disk,
+    ]);
     let mut command = if cfg!(windows) {
         let mut command = Command::new("cmd");
         command.args(["/C", "echo executed > executed"]);
