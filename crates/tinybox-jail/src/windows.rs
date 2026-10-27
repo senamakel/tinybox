@@ -108,6 +108,7 @@ use windows_sys::Win32::System::JobObjects::{
     JobObjectExtendedLimitInformation, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
     JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY, SetInformationJobObject,
+    TerminateJobObject,
 };
 use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 use windows_sys::Win32::System::Threading::{
@@ -380,6 +381,19 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     si.lpAttributeList = attr_buf;
 
+    // Inherit only the child-facing pipe ends. The host keeps the opposite
+    // ends as ordinary Files on the OwnedChild.
+    let (stdin_read, stdin_write) = create_pipe_pair()?;
+    let (stdout_read, stdout_write) = create_pipe_pair()?;
+    let (stderr_read, stderr_write) = create_pipe_pair()?;
+    set_noninheritable(&stdin_write)?;
+    set_noninheritable(&stdout_read)?;
+    set_noninheritable(&stderr_read)?;
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = stdin_read.as_raw_handle() as _;
+    si.StartupInfo.hStdOutput = stdout_write.as_raw_handle() as _;
+    si.StartupInfo.hStdError = stderr_write.as_raw_handle() as _;
+
     // 5. Build the command line and current directory.
     let cmdline = build_command_line(&cmd);
     let mut cmdline_w = to_wide(&cmdline);
@@ -391,8 +405,8 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
         cmdline_w.as_mut_ptr() as PWSTR,
         ptr::null_mut(),
         ptr::null_mut(),
-        0, // bInheritHandles
-        EXTENDED_STARTUPINFO_PRESENT,
+        1, // bInheritHandles: only the three inheritable child pipe ends.
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
         ptr::null_mut(),
         cwd_w.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null()),
         &mut si as *mut _ as *mut STARTUPINFOW,
@@ -402,27 +416,86 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
         return Err(io::Error::last_os_error());
     }
 
-    // 6. Wrap the raw process handle in a std `Child`.
-    //
-    // std::process::Child has no public constructor from a raw HANDLE on
-    // Windows. We close the thread handle (we don't need it) and leak the
-    // process handle into an OwnedHandle so the caller can at least wait
-    // via the OS. Returning a `Child` requires nightly's `FromRawHandle for
-    // Child`, which is unstable. For now we close the process handle too
-    // and return an error explaining the limitation — see TODO below.
-    CloseHandle(pi.hThread);
+    let process = OwnedHandle::from_raw_handle(pi.hProcess as _);
+    let thread = OwnedHandle::from_raw_handle(pi.hThread as _);
+    let job = match create_job_object(jail.resources) {
+        Ok(job) => job,
+        Err(error) => {
+            let _ = TerminateProcess(process.as_raw_handle() as _, 1);
+            return Err(error);
+        }
+    };
+    if AssignProcessToJobObject(job.as_raw_handle() as _, process.as_raw_handle() as _) == 0 {
+        let error = io::Error::last_os_error();
+        let _ = TerminateProcess(process.as_raw_handle() as _, 1);
+        return Err(error);
+    }
+    if ResumeThread(thread.as_raw_handle() as _) == u32::MAX {
+        let error = io::Error::last_os_error();
+        let _ = TerminateJobObject(job.as_raw_handle() as _, 1);
+        return Err(error);
+    }
 
-    let _process_handle = OwnedHandle::from_raw_handle(pi.hProcess as _);
-
-    // TODO: bridge OwnedHandle -> std::process::Child once
-    // `std::os::windows::process::ChildExt::from_raw_handle` lands, OR
-    // expose a custom `OpenhumanChild` from the cwd_jail module that
-    // mirrors the bits of `Child` callers actually need (id, wait, kill).
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "AppContainer spawn succeeded but cannot yet be returned as std::process::Child; \
-         see TODO in crates/tinybox-jail/src/windows.rs",
+    Ok(super::jail::OwnedChild::new(
+        AppContainerOwnedProcess { process, job },
+        Some(std::fs::File::from(stdin_write)),
+        Some(std::fs::File::from(stdout_read)),
+        Some(std::fs::File::from(stderr_read)),
     ))
+}
+
+unsafe fn create_pipe_pair() -> io::Result<(OwnedHandle, OwnedHandle)> {
+    let mut read = ptr::null_mut();
+    let mut write = ptr::null_mut();
+    let mut security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: ptr::null_mut(),
+        bInheritHandle: 1,
+    };
+    if CreatePipe(&mut read, &mut write, &mut security, 0) == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((OwnedHandle::from_raw_handle(read as _), OwnedHandle::from_raw_handle(write as _)))
+}
+
+unsafe fn set_noninheritable(handle: &OwnedHandle) -> io::Result<()> {
+    if SetHandleInformation(handle.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+struct AppContainerOwnedProcess {
+    process: OwnedHandle,
+    job: OwnedHandle,
+}
+
+impl super::jail::OwnedProcess for AppContainerOwnedProcess {
+    fn id(&self) -> Option<u32> {
+        Some(unsafe { windows_sys::Win32::System::Threading::GetProcessId(self.process.as_raw_handle() as _) })
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<super::jail::ChildStatus>> {
+        let wait = unsafe { WaitForSingleObject(self.process.as_raw_handle() as _, 0) };
+        if wait == WAIT_TIMEOUT {
+            return Ok(None);
+        }
+        if wait != WAIT_OBJECT_0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut exit_code = 0;
+        if unsafe { GetExitCodeProcess(self.process.as_raw_handle() as _, &mut exit_code) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Some(super::jail::ChildStatus::from_code(Some(exit_code as i32))))
+    }
+
+    fn terminate(&mut self) -> io::Result<()> {
+        if unsafe { TerminateJobObject(self.job.as_raw_handle() as _, 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
 }
 
 /// The DACL grants a jail needs: the root and every `read_write` path get

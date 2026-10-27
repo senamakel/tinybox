@@ -79,6 +79,7 @@ tinybox-drivers = { path = "crates/tinybox-drivers", version = "0.2.4" }
 # Lints apply to every crate in the workspace via `[lints] workspace = true`.
 # CI runs clippy with `-D warnings`, so anything set to "warn" here fails CI.
 [workspace.lints.rust]
+# Keep this overridable so the isolated Windows FFI module can opt in locally.
 unsafe_code = "deny"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
