@@ -719,3 +719,7 @@ where
 #[cfg(all(test, unix))]
 #[path = "jailed_tests.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "jailed_windows_tests.rs"]
+mod windows_tests;
