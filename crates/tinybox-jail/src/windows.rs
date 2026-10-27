@@ -429,7 +429,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::ja
     }
 
     // 5. Build the command line and current directory.
-    let cmdline = build_command_line(&cmd);
+    let cmdline = build_command_line(cmd);
     let mut cmdline_w = to_wide(&cmdline);
     let cwd_w = cmd.get_current_dir().map(|p| to_wide(&p.to_string_lossy()));
 
