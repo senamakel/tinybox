@@ -169,7 +169,12 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
     command.args(["/C", "echo %TINYBOX_APPROVED_ENV%|%PATH%"]);
     let approved = BTreeMap::from([("TINYBOX_APPROVED_ENV".to_owned(), "approved-value".to_owned())]);
     let jail = Jail::new(root.path(), "approved-env").deny_net();
-    let mut child = crate::spawn_owned_captured_with_env(&backend, &jail, command, &approved)?;
+    let mut child = crate::spawn_owned_captured_with_backend_and_env(
+        &backend,
+        &jail,
+        command,
+        &approved,
+    )?;
     let mut output = String::new();
     child
         .take_stdout()
@@ -204,7 +209,7 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
     let jail = Jail::new(root.path(), "acl-regression").deny_net();
     let backend = AppContainerBackend::new();
     backend.require(&jail).expect("filesystem preflight is enforced");
-    let mut child = crate::spawn_owned_captured_with_env(
+    let mut child = crate::spawn_owned_captured_with_backend_and_env(
         &backend,
         &jail,
         command,
