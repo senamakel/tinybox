@@ -275,3 +275,7 @@ impl ExecOutput {
         String::from_utf8_lossy(&self.stderr)
     }
 }
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod tests;

@@ -11,4 +11,3 @@ pub enum TerminationCause {
     /// The Linux cgroup v2 CPU controller throttled work under its quota.
     CpuQuota,
 }
-
