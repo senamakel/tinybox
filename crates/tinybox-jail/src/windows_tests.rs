@@ -225,3 +225,44 @@ fn jail_preflight_accepts_supported_limits_and_refuses_hard_disk_limit() {
         })
     ));
 }
+
+#[test]
+fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io::Result<()> {
+    use std::io::Read;
+
+    let root = tempfile::tempdir()?;
+    let backend = AppContainerBackend::new();
+    let mut echo = Command::new("cmd.exe");
+    echo.args(["/C", "echo owned-child-ok"]);
+    let jail = Jail::new(root.path(), "owned-child-capture").deny_net();
+    let mut child = crate::spawn_owned_captured_with(&backend, &jail, echo)?;
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .expect("captured stdout")
+        .read_to_string(&mut output)?;
+    assert!(output.contains("owned-child-ok"));
+    assert!(child.try_wait()?.is_some(), "EOF follows process exit");
+
+    let mut waiting = Command::new("cmd.exe");
+    waiting.args(["/C", "set /p waiting="]);
+    let jail = Jail::new(root.path(), "owned-child-terminate").deny_net();
+    let mut child = crate::spawn_owned_captured_with(&backend, &jail, waiting)?;
+    let _keep_stdin_open = child.take_stdin();
+    let mut stdout = child.take_stdout().expect("captured stdout");
+    child.terminate()?;
+    let mut remaining = Vec::new();
+    stdout.read_to_end(&mut remaining)?;
+    assert!(child.try_wait()?.is_some(), "terminated job exits");
+
+    let mut waiting = Command::new("cmd.exe");
+    waiting.args(["/C", "set /p waiting="]);
+    let jail = Jail::new(root.path(), "owned-child-cleanup").deny_net();
+    let mut child = crate::spawn_owned_captured_with(&backend, &jail, waiting)?;
+    let _keep_stdin_open = child.take_stdin();
+    let mut stdout = child.take_stdout().expect("captured stdout");
+    drop(child);
+    let mut remaining = Vec::new();
+    stdout.read_to_end(&mut remaining)?;
+    Ok(())
+}
