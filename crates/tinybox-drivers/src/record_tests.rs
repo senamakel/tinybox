@@ -157,6 +157,7 @@ fn the_contracts_v1_migration_matches_the_record_encoding() {
         ttl: Duration::from_secs(60),
     };
     spec.network = NetworkPolicy::Allowlist(EgressAllowlist::new(["a.test"], vec![443]));
+    spec.hard_requirements = vec![tinybox_core::Constraint::Cpu];
     spec.ports.insert(PortMapping {
         guest: 80,
         host: None,
