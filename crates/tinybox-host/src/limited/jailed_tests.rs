@@ -71,6 +71,7 @@ fn cpu_event_report_rejects_custom_paths_and_accepts_masked_run_paths()
     assert_eq!(std::fs::read_to_string(report_path)?, "nr_throttled 0\n");
     drop(report);
     assert!(!std::path::Path::new(report_path).exists());
+    env.clear();
 
     let mut unmetered = std::process::Command::new("systemd-run");
     unmetered.args([
