@@ -143,20 +143,28 @@ fn soft_resource_values_do_not_create_hard_job_limits() {
 
 #[test]
 fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
+    let local_app_data = std::ffi::OsStr::new(r"C:\Users\runner\AppData\Local");
     let env = BTreeMap::from([
         ("TINYBOX_APPROVED".to_owned(), "visible".to_owned()),
         ("Z_LAST".to_owned(), "last".to_owned()),
     ]);
-    let block = environment_block(&env).expect("valid explicit environment");
+    let block = environment_block(&env, local_app_data).expect("valid explicit environment");
     let block = String::from_utf16_lossy(&block);
-    assert!(block.starts_with("TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"));
+    assert!(block.starts_with(
+        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"
+    ));
     assert!(!block.contains("PATH="));
     assert!(!block.contains("USERPROFILE="));
 }
 
 #[test]
 fn empty_environment_block_has_the_required_double_terminator() {
-    assert_eq!(environment_block(&BTreeMap::new()).unwrap(), vec![0, 0]);
+    let local_app_data = std::ffi::OsStr::new(r"C:\Users\runner\AppData\Local");
+    let block = environment_block(&BTreeMap::new(), local_app_data).unwrap();
+    assert_eq!(
+        String::from_utf16_lossy(&block),
+        "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0\0"
+    );
 }
 
 #[test]
