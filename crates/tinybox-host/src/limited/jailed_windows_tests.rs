@@ -14,7 +14,15 @@ async fn detected_owned_backend_runs_with_only_the_approved_environment()
     assert!(format!("{host:?}").contains("appcontainer"));
 
     let parent_path = std::env::var("PATH").ok();
-    let mut request = ExecRequest::new(["cmd.exe", "/C", "echo %TINYBOX_APPROVED_ENV%|%PATH%"]);
+    let cmd =
+        std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("Windows system root"))
+            .join("System32")
+            .join("cmd.exe");
+    let mut request = ExecRequest::new([
+        cmd.to_string_lossy().as_ref(),
+        "/C",
+        "echo %TINYBOX_APPROVED_ENV% & echo %PATH%",
+    ]);
     request.cwd = Some(root.path().to_owned());
     request.env.insert(
         "TINYBOX_APPROVED_ENV".to_owned(),

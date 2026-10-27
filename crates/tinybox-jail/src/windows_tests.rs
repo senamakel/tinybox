@@ -141,6 +141,12 @@ fn soft_resource_values_do_not_create_hard_job_limits() {
     assert!(limits.kill_on_close);
 }
 
+fn cmd_exe() -> PathBuf {
+    PathBuf::from(std::env::var_os("SystemRoot").expect("Windows system root"))
+        .join("System32")
+        .join("cmd.exe")
+}
+
 #[test]
 fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
     let local_app_data = std::ffi::OsStr::new(r"C:\Users\runner\AppData\Local");
@@ -179,8 +185,8 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
 
     let root = tempfile::tempdir()?;
     let backend = AppContainerBackend::new();
-    let mut command = Command::new("cmd.exe");
-    command.args(["/C", "echo %TINYBOX_APPROVED_ENV%|%PATH%"]);
+    let mut command = Command::new(cmd_exe());
+    command.args(["/C", "echo %TINYBOX_APPROVED_ENV% & echo %PATH%"]);
     let approved = BTreeMap::from([(
         "TINYBOX_APPROVED_ENV".to_owned(),
         "approved-value".to_owned(),
@@ -229,7 +235,7 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
         allowed.display(),
         secret.display()
     );
-    let mut command = Command::new("cmd.exe");
+    let mut command = Command::new(cmd_exe());
     command.args(["/C", &command_text]);
     let jail = Jail::new(root.path(), "acl-regression").deny_net();
     let backend = AppContainerBackend::new();
@@ -390,7 +396,7 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
 
     let root = tempfile::tempdir()?;
     let backend = AppContainerBackend::new();
-    let mut echo = Command::new("cmd.exe");
+    let mut echo = Command::new(cmd_exe());
     echo.args(["/C", "echo owned-child-ok"]);
     let jail = Jail::new(root.path(), "owned-child-capture").deny_net();
     let mut child = crate::spawn_owned_captured_with(&backend, &jail, echo)?;
@@ -411,7 +417,7 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
     );
     assert!(status.is_some(), "EOF follows process exit");
 
-    let mut waiting = Command::new("cmd.exe");
+    let mut waiting = Command::new(cmd_exe());
     waiting.args(["/C", "set /p waiting="]);
     let jail = Jail::new(root.path(), "owned-child-terminate").deny_net();
     let mut child = crate::spawn_owned_captured_with(&backend, &jail, waiting)?;
@@ -422,7 +428,7 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
     stdout.read_to_end(&mut remaining)?;
     assert!(child.try_wait()?.is_some(), "terminated job exits");
 
-    let mut waiting = Command::new("cmd.exe");
+    let mut waiting = Command::new(cmd_exe());
     waiting.args(["/C", "set /p waiting="]);
     let jail = Jail::new(root.path(), "owned-child-cleanup").deny_net();
     let mut child = crate::spawn_owned_captured_with(&backend, &jail, waiting)?;
