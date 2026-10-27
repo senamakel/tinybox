@@ -18,13 +18,15 @@ impl ExecutionObserver for Observer {
     fn output(&self, _: OutputStream, _: &[u8]) -> Result<()> {
         Ok(())
     }
+
+    fn termination_cause(&self, _: TerminationCause) {}
 }
 
 #[test]
 fn public_observers_accept_proven_cpu_quota_causes() {
     let observer = Observer;
     let observer: &dyn ExecutionObserver = &observer;
-    assert!(!observer.termination_cause(TerminationCause::CpuQuota));
+    observer.termination_cause(TerminationCause::CpuQuota);
 }
 
 /// Build a placement, propagating identifier validation failures to the test.

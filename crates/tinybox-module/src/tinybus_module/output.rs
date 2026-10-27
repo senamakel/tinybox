@@ -156,12 +156,9 @@ impl ExecutionObserver for OutputJournal {
         state.bytes = total;
         Ok(())
     }
-    fn termination_cause(&self, cause: TerminationCause) -> bool {
+    fn termination_cause(&self, cause: TerminationCause) {
         if cause == TerminationCause::CpuQuota {
             self.cpu_quota_hit.store(true, Ordering::SeqCst);
-            true
-        } else {
-            false
         }
     }
     async fn cancelled(&self) {
