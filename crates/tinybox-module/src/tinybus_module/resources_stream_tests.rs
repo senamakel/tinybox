@@ -75,7 +75,7 @@ async fn live_admission_is_bounded_until_outputs_are_explicitly_released() -> Re
 }
 
 #[test]
-fn cpu_quota_observer_cause_is_forwarded_before_process_exit() -> Result<()> {
+fn cpu_quota_observer_cause_is_forwarded_before_process_exit() {
     use tinybox_core::ExecutionObserver;
 
     let process = ProcessRef {
@@ -114,7 +114,6 @@ fn cpu_quota_observer_cause_is_forwarded_before_process_exit() -> Result<()> {
             tinybox_bus::SandboxEvent::Exited { status: Some(0) },
         ]
     );
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
