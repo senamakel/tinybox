@@ -866,7 +866,7 @@ async fn explicitly_required_cpu_is_refused_before_box_storage() -> Result<()> {
             ..
         })
     ));
-    assert!(store.list()?.is_empty());
+    assert_eq!(store.list()?, []);
     Ok(())
 }
 

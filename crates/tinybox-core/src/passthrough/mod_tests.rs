@@ -111,7 +111,7 @@ async fn passthrough_refuses_explicit_hard_requirements_before_storage() -> Resu
             ..
         })
     ));
-    assert!(store.list()?.is_empty());
+    assert_eq!(store.list()?, []);
     Ok(())
 }
 
