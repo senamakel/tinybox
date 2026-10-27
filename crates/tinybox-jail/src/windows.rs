@@ -159,7 +159,7 @@ impl JailBackend for AppContainerBackend {
         jail: &Jail,
         cmd: Command,
     ) -> io::Result<super::jail::OwnedChild> {
-        unsafe { spawn_in_container(jail, cmd) }
+        unsafe { spawn_in_container(jail, &cmd) }
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
@@ -244,7 +244,7 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
         job.as_raw_handle().cast(),
         JobObjectExtendedLimitInformation,
         (&raw const limits).cast(),
-        std::mem::size_of_val(&limits) as u32,
+        size_as_u32(std::mem::size_of_val(&limits))?,
     ) == 0
     {
         return Err(io::Error::last_os_error());
@@ -261,7 +261,7 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
             job.as_raw_handle().cast(),
             JobObjectCpuRateControlInformation,
             (&raw const cpu).cast(),
-            std::mem::size_of_val(&cpu) as u32,
+            size_as_u32(std::mem::size_of_val(&cpu))?,
         ) == 0
         {
             return Err(io::Error::last_os_error());
@@ -270,7 +270,17 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
     Ok(job)
 }
 
-unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jail::OwnedChild> {
+fn size_as_u32(value: usize) -> io::Result<u32> {
+    u32::try_from(value).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Win32 structure size exceeds u32",
+        )
+    })
+}
+
+#[allow(clippy::too_many_lines)] // Win32 startup structures must share their backing lifetimes.
+unsafe fn spawn_in_container(jail: &Jail, cmd: &Command) -> io::Result<super::jail::OwnedChild> {
     // 1. Create or open the AppContainer profile and obtain its SID.
     let profile_name = sanitize_profile_name(&jail.label);
     let wide_name = to_wide(&profile_name);
@@ -289,9 +299,10 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     if hr != 0 {
         // 0x800700B7 = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS).
         // In that case derive the SID from the existing profile.
-        if hr as u32 == 0x800700B7 {
+        if hr.cast_unsigned() == 0x8007_00B7 {
             let mut existing: PSID = ptr::null_mut();
-            let drv = DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &raw mut existing);
+            let drv =
+                DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &raw mut existing);
             if drv != 0 {
                 return Err(io::Error::from_raw_os_error(drv));
             }
@@ -312,14 +323,14 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     //    access by default; honour `jail.allow_net` by deriving the
     //    capability SIDs in `NET_CAPABILITY_NAMES` via
     //    `DeriveCapabilitySidsFromName` and attaching them as
-    //    SE_GROUP_ENABLED entries. `_cap_derivations` owns the
+    //    SE_GROUP_ENABLED entries. `cap_derivations` owns the
     //    OS-allocated SID buffers and frees them via Drop after
     //    CreateProcessW has captured the values into the child process.
     //    `cap_attrs` must outlive CreateProcessW (the attribute list
     //    references it by pointer) — it stays in scope until the end of
     //    `spawn_in_container`.
     let mut cap_attrs: Vec<SID_AND_ATTRIBUTES> = Vec::new();
-    let mut _cap_derivations: Vec<CapabilityDerivation> = Vec::new();
+    let mut cap_derivations: Vec<CapabilityDerivation> = Vec::new();
     if jail.allow_net {
         let mut any_derived = false;
         for &name in NET_CAPABILITY_NAMES {
@@ -332,7 +343,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
                         });
                         any_derived = true;
                     }
-                    _cap_derivations.push(deriv);
+                    cap_derivations.push(deriv);
                 }
                 Err(e) => log::warn!(
                     "[cwd_jail] DeriveCapabilitySidsFromName({name}) failed: \
@@ -355,7 +366,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
         } else {
             cap_attrs.as_mut_ptr()
         },
-        CapabilityCount: cap_attrs.len() as u32,
+        CapabilityCount: size_as_u32(cap_attrs.len())?,
         Reserved: 0,
     };
 
@@ -384,7 +395,7 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     }
 
     let mut si: STARTUPINFOEXW = std::mem::zeroed();
-    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    si.StartupInfo.cb = size_as_u32(std::mem::size_of::<STARTUPINFOEXW>())?;
     si.lpAttributeList = attr_buf;
 
     // Inherit only the child-facing pipe ends. The host keeps the opposite
@@ -485,7 +496,7 @@ unsafe fn create_pipe_pair() -> io::Result<(OwnedHandle, OwnedHandle)> {
     let mut read = ptr::null_mut();
     let mut write = ptr::null_mut();
     let security = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        nLength: size_as_u32(std::mem::size_of::<SECURITY_ATTRIBUTES>())?,
         lpSecurityDescriptor: ptr::null_mut(),
         bInheritHandle: 1,
     };
@@ -526,11 +537,13 @@ impl super::jail::OwnedProcess for AppContainerOwnedProcess {
             return Err(io::Error::last_os_error());
         }
         let mut exit_code = 0;
-        if unsafe { GetExitCodeProcess(self.process.as_raw_handle().cast(), &raw mut exit_code) } == 0 {
+        if unsafe { GetExitCodeProcess(self.process.as_raw_handle().cast(), &raw mut exit_code) }
+            == 0
+        {
             return Err(io::Error::last_os_error());
         }
         Ok(Some(super::jail::ChildStatus::from_code(Some(
-            exit_code as i32,
+            exit_code.cast_signed(),
         ))))
     }
 
@@ -583,7 +596,7 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
         &raw mut sd_ptr,
     );
     if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
+        return Err(io::Error::from_raw_os_error(rc.cast_signed()));
     }
     let _sd_guard = LocalGuard(sd_ptr as HLOCAL);
     let _ = dacl_present;
@@ -603,7 +616,7 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
     let mut new_acl: *mut ACL = ptr::null_mut();
     let rc = SetEntriesInAclW(1, &raw const ea, existing_dacl, &raw mut new_acl);
     if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
+        return Err(io::Error::from_raw_os_error(rc.cast_signed()));
     }
     let _acl_guard = LocalGuard(new_acl as HLOCAL);
 
@@ -617,7 +630,7 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
         ptr::null_mut(),
     );
     if rc != 0 {
-        return Err(io::Error::from_raw_os_error(rc as i32));
+        return Err(io::Error::from_raw_os_error(rc.cast_signed()));
     }
     Ok(())
 }

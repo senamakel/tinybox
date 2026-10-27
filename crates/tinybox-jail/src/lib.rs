@@ -178,6 +178,9 @@ pub fn spawn_owned_captured_with(
 }
 
 /// Spawn captured work with the detected backend that supports owned children.
+///
+/// # Errors
+/// Returns an error if no owned-child backend is available or jail setup fails.
 pub fn spawn_owned_captured(jail: &Jail, cmd: Command) -> std::io::Result<OwnedChild> {
     spawn_owned_captured_with(default_owned_backend().as_ref(), jail, cmd)
 }
