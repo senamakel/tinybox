@@ -1,5 +1,8 @@
 //! Module-owned bounded output journal and cooperative execution cancellation.
-use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tinybox_bus::{
     ExecutionFailure, ExecutionState, MAX_OUTPUT_BYTES, OutputBatch, OutputChunk, OutputStream,
 };

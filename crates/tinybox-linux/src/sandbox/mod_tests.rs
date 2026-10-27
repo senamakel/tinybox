@@ -475,8 +475,7 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert!(systemd_run.is_absolute());
     let bubblewrap = argv
         .iter()
-        .position(|part| part == "--")
-        .and_then(|position| argv.get(position + 1))
+        .find(|part| part.starts_with('/') && part.ends_with("/bwrap"))
         .ok_or("missing bubblewrap command")?;
     assert!(std::path::Path::new(bubblewrap).is_absolute());
     assert!(has(&argv, "--property=CPUQuota=0.1%"));
@@ -488,6 +487,8 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert!(has(&argv, "--tmpfs"));
     assert!(has(&argv, "/run"));
     assert!(has(&argv, "/sys"));
+    assert!(has(&argv, "TINYBOX_INTERNAL_CPU_EVENT_FILE"));
+    assert!(has(&argv, "cpu.stat"));
     assert!(has(&argv, "--ro-bind"));
     assert!(has(&argv, grant.to_str().ok_or("grant path is not UTF-8")?));
     assert!(has(&argv, "BASH_ENV"));

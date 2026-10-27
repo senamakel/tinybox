@@ -1,5 +1,21 @@
 //! Native jail ownership regressions; providers are mocked without external services.
 use super::*;
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cpu_throttling_counter_requires_one_well_formed_nr_throttled_value() {
+    assert_eq!(
+        parse_cpu_throttled_counter("usage_usec 12\nnr_throttled 0\n"),
+        Some(0)
+    );
+    assert_eq!(parse_cpu_throttled_counter("nr_throttled 3\n"), Some(3));
+    assert_eq!(parse_cpu_throttled_counter("nr_throttled nope\n"), None);
+    assert_eq!(
+        parse_cpu_throttled_counter("nr_throttled 1\nnr_throttled 2\n"),
+        None
+    );
+    assert_eq!(parse_cpu_throttled_counter("usage_usec 12\n"), None);
+}
 use std::result::Result;
 use std::sync::Arc;
 use tinybox_core::{ExecRequest, Host};

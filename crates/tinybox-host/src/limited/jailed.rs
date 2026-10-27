@@ -36,7 +36,9 @@ impl CpuEventReport {
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("scope"))
                 && arg.starts_with("--unit=tinybox-native-")
         });
-        let has_cpu_limit = args.iter().any(|arg| arg.starts_with("--property=CPUQuota="))
+        let has_cpu_limit = args
+            .iter()
+            .any(|arg| arg.starts_with("--property=CPUQuota="))
             || args
                 .windows(2)
                 .any(|pair| pair[0] == "--property" && pair[1].starts_with("CPUQuota="));
@@ -53,7 +55,10 @@ impl CpuEventReport {
             return None;
         }
         let sequence = CPU_EVENT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let path = runtime_dir.join(format!("tinybox-cpu-event-{}-{sequence}", std::process::id()));
+        let path = runtime_dir.join(format!(
+            "tinybox-cpu-event-{}-{sequence}",
+            std::process::id()
+        ));
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -64,7 +69,10 @@ impl CpuEventReport {
             let _ = std::fs::remove_file(&path);
             return None;
         }
-        env.insert(CPU_EVENT_FILE_ENV.into(), path.to_string_lossy().into_owned());
+        env.insert(
+            CPU_EVENT_FILE_ENV.into(),
+            path.to_string_lossy().into_owned(),
+        );
         Some(Self(path))
     }
 
