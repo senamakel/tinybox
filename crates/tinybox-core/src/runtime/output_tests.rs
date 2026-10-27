@@ -66,9 +66,3 @@ fn a_default_observer_accepts_provider_termination_causes() {
     let observer: &dyn ExecutionObserver = &observer;
     observer.termination_cause(TerminationCause::CpuQuota);
 }
-
-#[test]
-fn default_termination_observers_accept_proven_cpu_quota_causes() {
-    let observer = DefaultTerminationObserver;
-    observer.termination_cause(TerminationCause::CpuQuota);
-}
