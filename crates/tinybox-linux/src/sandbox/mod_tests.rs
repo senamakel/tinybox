@@ -974,7 +974,10 @@ fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
 #[test]
 fn trusted_resource_launcher_resolution_accepts_only_fixed_trusted_paths() -> std::io::Result<()> {
     let program = args::trusted_program_from([Path::new("/usr/bin/true")])?;
-    assert!(program.ends_with("/true"));
+    assert_eq!(
+        program.file_name().and_then(|name| name.to_str()),
+        Some("true")
+    );
     assert_eq!(
         args::trusted_program_from([Path::new("/path/that/does/not/exist")])
             .err()
