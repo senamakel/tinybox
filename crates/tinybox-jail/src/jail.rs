@@ -422,24 +422,16 @@ pub trait JailBackend: Send + Sync {
             .require(self.name(), &jail.constraints())
     }
 
-    /// Require full enforcement for every resource limit present on a jail.
-    ///
-    /// Resource limits are hard requirements even when the caller accepts
-    /// declared filesystem, network, or subprocess enforcement.
+    /// Validate resource values and preflight every explicit hard requirement.
     ///
     /// # Errors
-    /// Returns a typed refusal if any requested resource constraint is not
-    /// fully enforced.
+    /// Returns a typed refusal if any listed hard constraint is not fully enforced.
     fn require_resources(&self, jail: &Jail) -> tinybox_core::Result<()> {
         if let Some(resources) = jail.resources {
             resources.validate()?;
         }
-        let requested_resources: Vec<_> = RESOURCE_CONSTRAINTS
-            .into_iter()
-            .filter(|constraint| jail.hard_requirements.contains(constraint))
-            .collect();
         self.constraint_support()
-            .require(self.name(), &requested_resources)?;
+            .require(self.name(), &jail.hard_requirements)?;
         Ok(())
     }
 
