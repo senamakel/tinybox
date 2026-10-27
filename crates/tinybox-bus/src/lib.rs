@@ -46,7 +46,7 @@ mod policy;
 pub use policy::{DockerPolicyReport, DockerPolicyRequest};
 
 mod event;
-pub use event::{DenialKind, EgressAllowlist, LimitKind, SandboxEvent};
+pub use event::{DenialKind, EgressAllowlist, LimitKind, ProcessEvent, SandboxEvent};
 
 mod files;
 pub use files::{
@@ -90,8 +90,9 @@ pub use files::{
 /// `AnalyzeShell.hidden_execution` policy signal. Generic shell structure facts
 /// and transport helpers remain.
 /// 2.1 adds separate resource-aware native jail request members without
-/// changing the 2.0 Rust request shapes.
-pub const CONTRACT_VERSION: (u32, u32) = (2, 1);
+/// changing the 2.0 Rust request shapes. 2.2 adds process-scoped lifecycle
+/// events for module-owned executions and timeout observations.
+pub const CONTRACT_VERSION: (u32, u32) = (2, 2);
 
 /// Minimum contract version required for resource-aware native jail members.
 pub const NATIVE_JAIL_RESOURCES_VERSION: (u32, u32) = (2, 1);
@@ -228,7 +229,12 @@ pub mod names {
     pub const STDIO_STATUS: &str = "StdioStatus";
     /// Wire name of the 2.1 resource-aware jailed exec member.
     pub const START_JAILED_EXEC_WITH_RESOURCES: &str = "StartJailedExecWithResources";
+    /// Wire name of the process-scoped sandbox lifecycle signal.
+    pub const PROCESS_EVENT: &str = "ProcessEvent";
 }
+
+/// Supported signals in this contract.
+pub const SIGNALS: &[&str] = &[names::PROCESS_EVENT];
 
 /// Supported methods in this contract, including the original discovery
 /// operation. Derived from [`names`]; the order is stable within this major.
