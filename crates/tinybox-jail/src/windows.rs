@@ -43,7 +43,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE_FLAG_INHERIT, HLOCAL, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::Security::Authorization::{
     EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
     SetNamedSecurityInfoW, TRUSTEE_IS_GROUP, TRUSTEE_IS_SID, TRUSTEE_W,
@@ -53,6 +55,7 @@ use windows_sys::Win32::Security::Isolation::{
 };
 use windows_sys::Win32::Security::{
     ACL, DACL_SECURITY_INFORMATION, DeriveCapabilitySidsFromName, FreeSid, PSID,
+    SECURITY_ATTRIBUTES,
     SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
 };
 use windows_sys::core::PWSTR;
@@ -111,8 +114,11 @@ use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED,
     InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute, ResumeThread,
+    UpdateProcThreadAttribute, ResumeThread, GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+    STARTF_USESTDHANDLES,
 };
+use windows_sys::Win32::System::Pipes::CreatePipe;
+use windows_sys::Win32::System::Threading::SetHandleInformation;
 
 use super::jail::{Jail, JailBackend};
 
@@ -152,6 +158,10 @@ impl JailBackend for AppContainerBackend {
         // `execute_local_jail` route through `NoopBackend`, which returns a
         // real waitable `Child`. (PR #4723 review — #4705.)
         false
+    }
+
+    fn spawn_owned_captured(&self, jail: &Jail, cmd: Command) -> io::Result<super::jail::OwnedChild> {
+        unsafe { spawn_in_container(jail, cmd) }
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
@@ -211,10 +221,12 @@ fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSuppor
         })
 }
 
-unsafe fn create_job_object(resources: tinybox_core::Resources) -> io::Result<OwnedHandle> {
+unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::Result<OwnedHandle> {
     let mut system_info: SYSTEM_INFO = std::mem::zeroed();
     GetSystemInfo(&mut system_info);
-    let plan = job_object_limit_plan(resources, system_info.dwNumberOfProcessors)?;
+    let plan = resources
+        .map(|resources| job_object_limit_plan(resources, system_info.dwNumberOfProcessors))
+        .transpose()?;
     let job = CreateJobObjectW(ptr::null(), ptr::null());
     if job.is_null() {
         return Err(io::Error::last_os_error());
@@ -222,14 +234,13 @@ unsafe fn create_job_object(resources: tinybox_core::Resources) -> io::Result<Ow
     let job = OwnedHandle::from_raw_handle(job as _);
 
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-    limits.BasicLimitInformation = JOBOBJECT_BASIC_LIMIT_INFORMATION {
-        LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-            | JOB_OBJECT_LIMIT_PROCESS_MEMORY,
-        ActiveProcessLimit: plan.active_processes,
-        ..std::mem::zeroed()
-    };
-    limits.ProcessMemoryLimit = plan.process_memory_bytes;
+    let mut flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if let Some(plan) = plan {
+        flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        limits.BasicLimitInformation.ActiveProcessLimit = plan.active_processes;
+        limits.ProcessMemoryLimit = plan.process_memory_bytes;
+    }
+    limits.BasicLimitInformation.LimitFlags = flags;
     if SetInformationJobObject(
         job.as_raw_handle() as _,
         JobObjectExtendedLimitInformation,
@@ -240,25 +251,27 @@ unsafe fn create_job_object(resources: tinybox_core::Resources) -> io::Result<Ow
         return Err(io::Error::last_os_error());
     }
 
-    let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
-        ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
-        Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
-            CpuRate: plan.cpu_rate.unwrap_or(10_000),
-        },
-    };
-    if SetInformationJobObject(
-        job.as_raw_handle() as _,
-        JobObjectCpuRateControlInformation,
-        &cpu as *const _ as _,
-        std::mem::size_of_val(&cpu) as u32,
-    ) == 0
-    {
-        return Err(io::Error::last_os_error());
+    if let Some(plan) = plan {
+        let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
+            ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
+            Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
+                CpuRate: plan.cpu_rate.unwrap_or(10_000),
+            },
+        };
+        if SetInformationJobObject(
+            job.as_raw_handle() as _,
+            JobObjectCpuRateControlInformation,
+            &cpu as *const _ as _,
+            std::mem::size_of_val(&cpu) as u32,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
     }
     Ok(job)
 }
 
-unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {
+unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jail::OwnedChild> {
     // 1. Create or open the AppContainer profile and obtain its SID.
     let profile_name = sanitize_profile_name(&jail.label);
     let wide_name = to_wide(&profile_name);
