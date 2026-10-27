@@ -1507,6 +1507,7 @@ version = "0.2.4"
 dependencies = [
  "async-trait",
  "serde",
+ "serde_json",
  "thiserror",
  "tinybox-bus",
  "tokio",

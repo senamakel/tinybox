@@ -845,3 +845,41 @@ async fn an_unenforceable_network_allowlist_is_refused_at_creation() -> Result<(
     ));
     Ok(())
 }
+
+#[tokio::test]
+async fn explicitly_required_cpu_is_refused_before_box_storage() -> Result<()> {
+    use tinybox_core::{Constraint, Enforcement};
+
+    let store = Arc::new(MemoryStore::new());
+    let sandbox = NamespaceSandbox::new(Arc::new(RecordingHost::default()), store.clone());
+    let requested = spec()?.with_hard_requirements([Constraint::Cpu]);
+
+    assert_eq!(
+        sandbox.plan_check_spec(&requested).constraints,
+        vec![(Constraint::Cpu, Enforcement::Unsupported)]
+    );
+    assert!(matches!(
+        sandbox.create(&requested).await,
+        Err(Error::ConstraintNotEnforced {
+            constraint: Constraint::Cpu,
+            enforcement: Enforcement::Unsupported,
+            ..
+        })
+    ));
+    assert_eq!(store.list()?, []);
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicitly_required_supported_constraints_allow_creation() -> Result<()> {
+    use tinybox_core::Constraint;
+
+    let store = Arc::new(MemoryStore::new());
+    let sandbox = NamespaceSandbox::new(Arc::new(RecordingHost::default()), store.clone());
+    let requested = spec()?.with_hard_requirements([Constraint::Filesystem, Constraint::Network]);
+
+    sandbox.require_spec(&requested)?;
+    assert_eq!(sandbox.create(&requested).await?.state, BoxState::Ready);
+    assert_eq!(store.list()?.len(), 1);
+    Ok(())
+}
