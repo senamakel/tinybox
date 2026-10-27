@@ -1,6 +1,6 @@
-//! Windows backend: AppContainer.
+//! Windows backend: `AppContainer`.
 //!
-//! AppContainer is Microsoft's strict process-isolation model — the same one
+//! `AppContainer` is Microsoft's strict process-isolation model — the same one
 //! UWP apps and Edge's renderer use. Each container gets a unique SID; the
 //! process can only touch filesystem objects whose DACL explicitly grants
 //! that SID access. To jail an agent in `jail.root`:
@@ -14,7 +14,7 @@
 //!
 //! Things this backend deliberately does not do:
 //!
-//! - Network capability requests. By default an AppContainer has *no*
+//! - Network capability requests. By default an `AppContainer` has *no*
 //!   network capabilities — we honor `jail.allow_net` by adding the
 //!   `internetClient` capability (outbound client only, matching the
 //!   `jail.allow_net` docstring of "Allow outbound network"). LAN /
@@ -70,12 +70,12 @@ const GENERIC_WRITE: u32 = 0x4000_0000;
 const DELETE: u32 = 0x0001_0000;
 const OBJECT_INHERIT_ACE: u32 = 0x01;
 const CONTAINER_INHERIT_ACE: u32 = 0x02;
-/// SE_GROUP_ENABLED — marks a SID in a `SID_AND_ATTRIBUTES` entry as active.
-/// Required for capability SIDs passed to AppContainer SECURITY_CAPABILITIES.
+/// `SE_GROUP_ENABLED` — marks a SID in a `SID_AND_ATTRIBUTES` entry as active.
+/// Required for capability SIDs passed to `AppContainer` `SECURITY_CAPABILITIES`.
 /// Source: WinNT.h.
 const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 
-/// AppContainer capability names granted when `jail.allow_net == true`.
+/// `AppContainer` capability names granted when `jail.allow_net == true`.
 ///
 /// Per `jail.rs`, `allow_net` is documented as **"Allow outbound network"**
 /// — so the capability set here is strictly outbound-client only:
@@ -121,12 +121,13 @@ use windows_sys::Win32::System::Threading::{
 
 use super::jail::{Jail, JailBackend};
 
-/// Windows AppContainer backend.
+/// Windows `AppContainer` backend.
 #[derive(Debug)]
 pub struct AppContainerBackend;
 
 impl AppContainerBackend {
     /// Creates the backend.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -189,7 +190,7 @@ fn job_object_limit_plan(
     resources
         .validate()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let processor_count = processor_count.max(1) as u64;
+    let processor_count = u64::from(processor_count.max(1));
     let total_cpu_millis = processor_count * 1_000;
     let cpu_rate =
         ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis).clamp(1, 10_000) as u32;
@@ -221,7 +222,7 @@ fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSuppor
 
 unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::Result<OwnedHandle> {
     let mut system_info: SYSTEM_INFO = std::mem::zeroed();
-    GetSystemInfo(&mut system_info);
+    GetSystemInfo(&raw mut system_info);
     let plan = resources
         .map(|resources| job_object_limit_plan(resources, system_info.dwNumberOfProcessors))
         .transpose()?;
@@ -229,7 +230,7 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
     if job.is_null() {
         return Err(io::Error::last_os_error());
     }
-    let job = OwnedHandle::from_raw_handle(job as _);
+    let job = OwnedHandle::from_raw_handle(job.cast());
 
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
     let mut flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -240,9 +241,9 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
     }
     limits.BasicLimitInformation.LimitFlags = flags;
     if SetInformationJobObject(
-        job.as_raw_handle() as _,
+        job.as_raw_handle().cast(),
         JobObjectExtendedLimitInformation,
-        &limits as *const _ as _,
+        (&raw const limits).cast(),
         std::mem::size_of_val(&limits) as u32,
     ) == 0
     {
@@ -257,9 +258,9 @@ unsafe fn create_job_object(resources: Option<tinybox_core::Resources>) -> io::R
             },
         };
         if SetInformationJobObject(
-            job.as_raw_handle() as _,
+            job.as_raw_handle().cast(),
             JobObjectCpuRateControlInformation,
-            &cpu as *const _ as _,
+            (&raw const cpu).cast(),
             std::mem::size_of_val(&cpu) as u32,
         ) == 0
         {
@@ -283,14 +284,14 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
         desc.as_ptr(),
         ptr::null_mut(),
         0,
-        &mut sid,
+        &raw mut sid,
     );
     if hr != 0 {
         // 0x800700B7 = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS).
         // In that case derive the SID from the existing profile.
         if hr as u32 == 0x800700B7 {
             let mut existing: PSID = ptr::null_mut();
-            let drv = DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &mut existing);
+            let drv = DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &raw mut existing);
             if drv != 0 {
                 return Err(io::Error::from_raw_os_error(drv));
             }
@@ -360,20 +361,20 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
 
     // 4. Build STARTUPINFOEXW with the security-capabilities attribute.
     let mut size: usize = 0;
-    InitializeProcThreadAttributeList(ptr::null_mut(), 2, 0, &mut size);
+    InitializeProcThreadAttributeList(ptr::null_mut(), 2, 0, &raw mut size);
     let attr_buf = LocalAlloc(LPTR, size) as LPPROC_THREAD_ATTRIBUTE_LIST;
     if attr_buf.is_null() {
         return Err(io::Error::last_os_error());
     }
     let _attr_guard = AttrListGuard(attr_buf);
-    if InitializeProcThreadAttributeList(attr_buf, 2, 0, &mut size) == 0 {
+    if InitializeProcThreadAttributeList(attr_buf, 2, 0, &raw mut size) == 0 {
         return Err(io::Error::last_os_error());
     }
     if UpdateProcThreadAttribute(
         attr_buf,
         0,
         PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        &mut caps as *mut _ as *mut _,
+        (&raw mut caps).cast(),
         std::mem::size_of::<SECURITY_CAPABILITIES>(),
         ptr::null_mut(),
         ptr::null_mut(),
@@ -395,13 +396,13 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     set_noninheritable(&stdout_read)?;
     set_noninheritable(&stderr_read)?;
     si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    si.StartupInfo.hStdInput = stdin_read.as_raw_handle() as _;
-    si.StartupInfo.hStdOutput = stdout_write.as_raw_handle() as _;
-    si.StartupInfo.hStdError = stderr_write.as_raw_handle() as _;
+    si.StartupInfo.hStdInput = stdin_read.as_raw_handle().cast();
+    si.StartupInfo.hStdOutput = stdout_write.as_raw_handle().cast();
+    si.StartupInfo.hStdError = stderr_write.as_raw_handle().cast();
     let inherited_handles: [HANDLE; 3] = [
-        stdin_read.as_raw_handle() as _,
-        stdout_write.as_raw_handle() as _,
-        stderr_write.as_raw_handle() as _,
+        stdin_read.as_raw_handle().cast(),
+        stdout_write.as_raw_handle().cast(),
+        stderr_write.as_raw_handle().cast(),
     ];
     if UpdateProcThreadAttribute(
         attr_buf,
@@ -430,16 +431,16 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
         1, // bInheritHandles: only the three inheritable child pipe ends.
         EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
         ptr::null_mut(),
-        cwd_w.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null()),
-        &mut si as *mut _ as *mut STARTUPINFOW,
-        &mut pi,
+        cwd_w.as_ref().map_or(ptr::null(), std::vec::Vec::as_ptr),
+        (&raw mut si).cast::<STARTUPINFOW>(),
+        &raw mut pi,
     );
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
 
-    let process = OwnedHandle::from_raw_handle(pi.hProcess as _);
-    let thread = OwnedHandle::from_raw_handle(pi.hThread as _);
+    let process = OwnedHandle::from_raw_handle(pi.hProcess.cast());
+    let thread = OwnedHandle::from_raw_handle(pi.hThread.cast());
     let resources = jail.resources.or_else(|| {
         jail.hard_requirements
             .iter()
@@ -457,18 +458,18 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
     let job = match create_job_object(resources) {
         Ok(job) => job,
         Err(error) => {
-            let _ = TerminateProcess(process.as_raw_handle() as _, 1);
+            let _ = TerminateProcess(process.as_raw_handle().cast(), 1);
             return Err(error);
         }
     };
-    if AssignProcessToJobObject(job.as_raw_handle() as _, process.as_raw_handle() as _) == 0 {
+    if AssignProcessToJobObject(job.as_raw_handle().cast(), process.as_raw_handle().cast()) == 0 {
         let error = io::Error::last_os_error();
-        let _ = TerminateProcess(process.as_raw_handle() as _, 1);
+        let _ = TerminateProcess(process.as_raw_handle().cast(), 1);
         return Err(error);
     }
-    if ResumeThread(thread.as_raw_handle() as _) == u32::MAX {
+    if ResumeThread(thread.as_raw_handle().cast()) == u32::MAX {
         let error = io::Error::last_os_error();
-        let _ = TerminateJobObject(job.as_raw_handle() as _, 1);
+        let _ = TerminateJobObject(job.as_raw_handle().cast(), 1);
         return Err(error);
     }
 
@@ -483,22 +484,22 @@ unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<super::jai
 unsafe fn create_pipe_pair() -> io::Result<(OwnedHandle, OwnedHandle)> {
     let mut read = ptr::null_mut();
     let mut write = ptr::null_mut();
-    let mut security = SECURITY_ATTRIBUTES {
+    let security = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: ptr::null_mut(),
         bInheritHandle: 1,
     };
-    if CreatePipe(&mut read, &mut write, &mut security, 0) == 0 {
+    if CreatePipe(&raw mut read, &raw mut write, &raw const security, 0) == 0 {
         return Err(io::Error::last_os_error());
     }
     Ok((
-        OwnedHandle::from_raw_handle(read as _),
-        OwnedHandle::from_raw_handle(write as _),
+        OwnedHandle::from_raw_handle(read.cast()),
+        OwnedHandle::from_raw_handle(write.cast()),
     ))
 }
 
 unsafe fn set_noninheritable(handle: &OwnedHandle) -> io::Result<()> {
-    if SetHandleInformation(handle.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) == 0 {
+    if SetHandleInformation(handle.as_raw_handle().cast(), HANDLE_FLAG_INHERIT, 0) == 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(())
@@ -512,12 +513,12 @@ struct AppContainerOwnedProcess {
 impl super::jail::OwnedProcess for AppContainerOwnedProcess {
     fn id(&self) -> Option<u32> {
         Some(unsafe {
-            windows_sys::Win32::System::Threading::GetProcessId(self.process.as_raw_handle() as _)
+            windows_sys::Win32::System::Threading::GetProcessId(self.process.as_raw_handle().cast())
         })
     }
 
     fn try_wait(&mut self) -> io::Result<Option<super::jail::ChildStatus>> {
-        let wait = unsafe { WaitForSingleObject(self.process.as_raw_handle() as _, 0) };
+        let wait = unsafe { WaitForSingleObject(self.process.as_raw_handle().cast(), 0) };
         if wait == WAIT_TIMEOUT {
             return Ok(None);
         }
@@ -525,7 +526,7 @@ impl super::jail::OwnedProcess for AppContainerOwnedProcess {
             return Err(io::Error::last_os_error());
         }
         let mut exit_code = 0;
-        if unsafe { GetExitCodeProcess(self.process.as_raw_handle() as _, &mut exit_code) } == 0 {
+        if unsafe { GetExitCodeProcess(self.process.as_raw_handle().cast(), &raw mut exit_code) } == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Some(super::jail::ChildStatus::from_code(Some(
@@ -534,7 +535,7 @@ impl super::jail::OwnedProcess for AppContainerOwnedProcess {
     }
 
     fn terminate(&mut self) -> io::Result<()> {
-        if unsafe { TerminateJobObject(self.job.as_raw_handle() as _, 1) } == 0 {
+        if unsafe { TerminateJobObject(self.job.as_raw_handle().cast(), 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(())
@@ -577,9 +578,9 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
         DACL_SECURITY_INFORMATION,
         ptr::null_mut(),
         ptr::null_mut(),
-        &mut existing_dacl,
+        &raw mut existing_dacl,
         ptr::null_mut(),
-        &mut sd_ptr,
+        &raw mut sd_ptr,
     );
     if rc != 0 {
         return Err(io::Error::from_raw_os_error(rc as i32));
@@ -596,18 +597,18 @@ unsafe fn grant_sid_access(path: &Path, sid: PSID, access: u32) -> io::Result<()
         MultipleTrusteeOperation: 0,
         TrusteeForm: TRUSTEE_IS_SID,
         TrusteeType: TRUSTEE_IS_GROUP,
-        ptstrName: sid as *mut _,
+        ptstrName: sid.cast(),
     };
 
     let mut new_acl: *mut ACL = ptr::null_mut();
-    let rc = SetEntriesInAclW(1, &ea, existing_dacl, &mut new_acl);
+    let rc = SetEntriesInAclW(1, &raw const ea, existing_dacl, &raw mut new_acl);
     if rc != 0 {
         return Err(io::Error::from_raw_os_error(rc as i32));
     }
     let _acl_guard = LocalGuard(new_acl as HLOCAL);
 
     let rc = SetNamedSecurityInfoW(
-        path_w.as_ptr() as PWSTR,
+        path_w.as_ptr().cast_mut(),
         SE_FILE_OBJECT,
         DACL_SECURITY_INFORMATION,
         ptr::null_mut(),
@@ -646,7 +647,7 @@ fn push_arg(out: &mut String, a: &str) {
         match c {
             '\\' => backslashes += 1,
             '"' => {
-                for _ in 0..(backslashes * 2 + 1) {
+                for _ in 0..=(backslashes * 2) {
                     out.push('\\');
                 }
                 out.push('"');
@@ -733,7 +734,7 @@ impl Drop for LocalGuard {
 /// reverse order they were allocated.
 ///
 /// The `capability_sids` are the ones we actually want for an
-/// AppContainer's `SECURITY_CAPABILITIES.Capabilities`; the
+/// `AppContainer`'s `SECURITY_CAPABILITIES.Capabilities`; the
 /// `group_sids` come along because the Win32 API returns both, and we
 /// hold them here purely so we can free them.
 struct CapabilityDerivation {
@@ -782,10 +783,10 @@ unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
     let mut cap_count: u32 = 0;
     let ok = DeriveCapabilitySidsFromName(
         name_w.as_ptr(),
-        &mut group_sids,
-        &mut group_count,
-        &mut cap_sids,
-        &mut cap_count,
+        &raw mut group_sids,
+        &raw mut group_count,
+        &raw mut cap_sids,
+        &raw mut cap_count,
     );
     if ok == 0 {
         return Err(io::Error::last_os_error());

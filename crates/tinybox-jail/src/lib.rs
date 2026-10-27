@@ -15,10 +15,10 @@
 //! | Linux   | bubblewrap    | `bwrap` namespaces; process isolation      |
 //! | Linux   | landlock      | Fallback: kernel 5.13+ LSM, spawn thread   |
 //! | macOS   | seatbelt      | `sandbox-exec -p '<profile>' …`            |
-//! | Windows | `AppContainer`| AppContainer ACLs + Job Object limits     |
+//! | Windows | `AppContainer`| `AppContainer` ACLs + Job Object limits     |
 //! | other   | unsupported   | Spawning is rejected                       |
 //!
-//! Windows exposes AppContainer through the owned-child API because
+//! Windows exposes `AppContainer` through the owned-child API because
 //! `std::process::Child` cannot be constructed from Win32 process handles.
 //!
 //! ## Quick start
