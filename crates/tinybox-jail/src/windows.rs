@@ -29,6 +29,7 @@
 //! shipping. Win32 has many subtle wrong-trees you can bark up.
 
 #![cfg(target_os = "windows")]
+#![allow(unsafe_code)]
 // Written for edition 2021, where the body of an `unsafe fn` is an unsafe
 // context. Each fn documents its own safety contract; re-scoping them into
 // per-call blocks is a separate, hardware-tested change.
