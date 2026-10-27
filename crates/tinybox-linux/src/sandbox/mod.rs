@@ -123,26 +123,15 @@ impl Sandbox for NamespaceSandbox {
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
         use tinybox_core::Constraint::{Cpu, Filesystem, Memory, Network, Pids};
         use tinybox_core::Enforcement::Enforced;
-        let resource_enforcement = args::select_resource_enforcement(
-            self.limits,
-            self.setrlimit_fallback,
-        );
+        let resource_enforcement =
+            args::select_resource_enforcement(self.limits, self.setrlimit_fallback);
         let resource_support = args::resource_constraint_support(resource_enforcement);
         tinybox_core::ConstraintSupport::NONE
             .with(Filesystem, Enforced)
             .with(Network, Enforced)
-            .with(
-                Cpu,
-                resource_support.enforcement(Cpu),
-            )
-            .with(
-                Memory,
-                resource_support.enforcement(Memory),
-            )
-            .with(
-                Pids,
-                resource_support.enforcement(Pids),
-            )
+            .with(Cpu, resource_support.enforcement(Cpu))
+            .with(Memory, resource_support.enforcement(Memory))
+            .with(Pids, resource_support.enforcement(Pids))
     }
 
     async fn create(&self, spec: &BoxSpec) -> Result<BoxInfo> {

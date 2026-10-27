@@ -907,12 +907,21 @@ fn resource_enforcement_selection_uses_cgroups_then_setrlimit_fallback() {
     for constraint in [Constraint::Cpu, Constraint::Memory, Constraint::Pids] {
         assert_eq!(cgroup.enforcement(constraint), Enforcement::Enforced);
     }
-    assert_eq!(fallback.enforcement(Constraint::Memory), Enforcement::Enforced);
+    assert_eq!(
+        fallback.enforcement(Constraint::Memory),
+        Enforcement::Enforced
+    );
     for constraint in [Constraint::Cpu, Constraint::Pids] {
         assert_eq!(fallback.enforcement(constraint), Enforcement::Unsupported);
-        assert_eq!(unavailable.enforcement(constraint), Enforcement::Unsupported);
+        assert_eq!(
+            unavailable.enforcement(constraint),
+            Enforcement::Unsupported
+        );
     }
-    assert_eq!(unavailable.enforcement(Constraint::Memory), Enforcement::Unsupported);
+    assert_eq!(
+        unavailable.enforcement(Constraint::Memory),
+        Enforcement::Unsupported
+    );
 }
 
 #[tokio::test]
@@ -940,8 +949,8 @@ async fn setrlimit_fallback_refuses_cpu_and_pids_hard_requirements() -> Result<(
 #[tokio::test]
 async fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
     let host = Arc::new(RecordingHost::default());
-    let sandbox = NamespaceSandbox::new(host.clone(), Arc::new(MemoryStore::new()))
-        .with_setrlimit_fallback();
+    let sandbox =
+        NamespaceSandbox::new(host.clone(), Arc::new(MemoryStore::new())).with_setrlimit_fallback();
     let spec = spec()?.with_resources(Resources {
         cpu_millis: 1_000,
         memory_bytes: 64 * 1024 * 1024,
@@ -952,7 +961,10 @@ async fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<
     sandbox.exec(&info.id, &ExecRequest::new(["true"])).await?;
 
     let argv = host.last();
-    assert!(argv.first().is_some_and(|program| program.ends_with("/prlimit")));
+    assert!(
+        argv.first()
+            .is_some_and(|program| program.ends_with("/prlimit"))
+    );
     assert!(has(&argv, "--as=67108864"));
     assert!(has(&argv, "--"));
     assert!(has(&argv, "bwrap"));
