@@ -128,6 +128,7 @@ impl Sandbox for NamespaceSandbox {
 
     async fn create(&self, spec: &BoxSpec) -> Result<BoxInfo> {
         spec.validate()?;
+        self.require_spec(spec)?;
         spec.network.refuse_allowlist(self.name())?;
         // Nothing is started here: a box is a record plus a directory, and the
         // sandbox itself exists only for the length of a command. Checking the
