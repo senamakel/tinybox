@@ -119,12 +119,27 @@ fn job_object_limit_plan_sets_memory_process_cpu_and_kill_on_close() {
             disk_bytes: Resources::DEFAULT.disk_bytes,
         },
         4,
+        &[
+            tinybox_core::Constraint::Cpu,
+            tinybox_core::Constraint::Memory,
+            tinybox_core::Constraint::Pids,
+        ],
     )
     .expect("valid Windows Job Object limits");
 
-    assert_eq!(limits.process_memory_bytes, 512 * 1024 * 1024);
-    assert_eq!(limits.active_processes, 17);
+    assert_eq!(limits.process_memory_bytes, Some(512 * 1024 * 1024));
+    assert_eq!(limits.active_processes, Some(17));
     assert_eq!(limits.cpu_rate, Some(3_750));
+    assert!(limits.kill_on_close);
+}
+
+#[test]
+fn soft_resource_values_do_not_create_hard_job_limits() {
+    let limits = job_object_limit_plan(tinybox_core::Resources::DEFAULT, 8, &[])
+        .expect("valid soft defaults");
+    assert_eq!(limits.process_memory_bytes, None);
+    assert_eq!(limits.active_processes, None);
+    assert_eq!(limits.cpu_rate, None);
     assert!(limits.kill_on_close);
 }
 

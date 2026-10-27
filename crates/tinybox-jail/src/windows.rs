@@ -196,8 +196,7 @@ fn job_object_limit_plan(
     let cpu_rate = hard_requirements
         .contains(&tinybox_core::Constraint::Cpu)
         .then(|| {
-            ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis)
-                .clamp(1, 10_000) as u32
+            ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis).clamp(1, 10_000) as u32
         });
     let process_memory_bytes = if hard_requirements.contains(&tinybox_core::Constraint::Memory) {
         Some(usize::try_from(resources.memory_bytes).map_err(|_| {
@@ -239,7 +238,11 @@ unsafe fn create_job_object(
     GetSystemInfo(&raw mut system_info);
     let plan = resources
         .map(|resources| {
-            job_object_limit_plan(resources, system_info.dwNumberOfProcessors, hard_requirements)
+            job_object_limit_plan(
+                resources,
+                system_info.dwNumberOfProcessors,
+                hard_requirements,
+            )
         })
         .transpose()?;
     let job = CreateJobObjectW(ptr::null(), ptr::null());
@@ -249,7 +252,11 @@ unsafe fn create_job_object(
     let job = OwnedHandle::from_raw_handle(job.cast());
 
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-    let mut flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let mut flags = if plan.is_none_or(|limits| limits.kill_on_close) {
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    } else {
+        0
+    };
     if let Some(plan) = plan {
         if let Some(active_processes) = plan.active_processes {
             flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
@@ -274,9 +281,7 @@ unsafe fn create_job_object(
     if let Some(cpu_rate) = plan.and_then(|plan| plan.cpu_rate) {
         let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
             ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
-            Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
-                CpuRate: cpu_rate,
-            },
+            Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 { CpuRate: cpu_rate },
         };
         if SetInformationJobObject(
             job.as_raw_handle().cast(),
