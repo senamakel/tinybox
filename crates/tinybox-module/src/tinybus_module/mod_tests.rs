@@ -934,7 +934,10 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
             stdin: None,
         },
     };
-    assert_eq!(proxy.call::<ProcessRef>("StartExec", (request,)).await?, process);
+    assert_eq!(
+        proxy.call::<ProcessRef>("StartExec", (request,)).await?,
+        process
+    );
 
     let receive_event = async |events: &mut tokio::sync::broadcast::Receiver<tinybus::Message>| {
         tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
@@ -962,8 +965,8 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
 async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tinybus::Result<()> {
     use serde_json::Value;
     use tinybox_bus::{
-        CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest, ShellExecRequest,
-        Workspace,
+        CreateRequest, ProcessRef, ReserveRequest, ResourceId, SelectShellRequest,
+        ShellExecRequest, Workspace,
     };
 
     let state = tempfile::tempdir().map_err(tinybus::Error::failed)?;
@@ -995,7 +998,8 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
         process: process_id.clone(),
     };
     #[cfg(windows)]
-    let command = "echo partial & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"";
+    let command =
+        "echo partial & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"";
     #[cfg(not(windows))]
     let command = "echo partial; sleep 60";
     let request = ShellExecRequest {

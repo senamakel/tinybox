@@ -58,7 +58,9 @@ impl BoxService {
     /// `connection`.
     fn connected(connection: Connection) -> Self {
         Self {
-            resources: std::sync::Arc::new(resources::Resources::with_connection(connection.clone())),
+            resources: std::sync::Arc::new(resources::Resources::with_connection(
+                connection.clone(),
+            )),
             connection: Some(connection),
         }
     }
