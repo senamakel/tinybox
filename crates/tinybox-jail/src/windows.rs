@@ -35,8 +35,8 @@
 // per-call blocks is a separate, hardware-tested change.
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use std::ffi::OsStr;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -241,10 +241,10 @@ fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSuppor
         Constraint::Memory,
         Constraint::Pids,
     ]
-        .into_iter()
-        .fold(ConstraintSupport::NONE, |support, constraint| {
-            support.with(constraint, Enforcement::Enforced)
-        })
+    .into_iter()
+    .fold(ConstraintSupport::NONE, |support, constraint| {
+        support.with(constraint, Enforcement::Enforced)
+    })
 }
 
 unsafe fn create_job_object(

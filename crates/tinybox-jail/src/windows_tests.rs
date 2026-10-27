@@ -167,14 +167,13 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
     let backend = AppContainerBackend::new();
     let mut command = Command::new("cmd.exe");
     command.args(["/C", "echo %TINYBOX_APPROVED_ENV%|%PATH%"]);
-    let approved = BTreeMap::from([("TINYBOX_APPROVED_ENV".to_owned(), "approved-value".to_owned())]);
+    let approved = BTreeMap::from([(
+        "TINYBOX_APPROVED_ENV".to_owned(),
+        "approved-value".to_owned(),
+    )]);
     let jail = Jail::new(root.path(), "approved-env").deny_net();
-    let mut child = crate::spawn_owned_captured_with_backend_and_env(
-        &backend,
-        &jail,
-        command,
-        &approved,
-    )?;
+    let mut child =
+        crate::spawn_owned_captured_with_backend_and_env(&backend, &jail, command, &approved)?;
     let mut output = String::new();
     child
         .take_stdout()
@@ -182,7 +181,10 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
         .read_to_string(&mut output)?;
     assert!(output.contains("approved-value"));
     if let Ok(parent_path) = std::env::var("PATH") {
-        assert!(!output.contains(&parent_path), "parent PATH leaked to the child");
+        assert!(
+            !output.contains(&parent_path),
+            "parent PATH leaked to the child"
+        );
     }
     assert!(child.try_wait()?.is_some());
     Ok(())
@@ -208,7 +210,9 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
     command.args(["/C", &command_text]);
     let jail = Jail::new(root.path(), "acl-regression").deny_net();
     let backend = AppContainerBackend::new();
-    backend.require(&jail).expect("filesystem preflight is enforced");
+    backend
+        .require(&jail)
+        .expect("filesystem preflight is enforced");
     let mut child = crate::spawn_owned_captured_with_backend_and_env(
         &backend,
         &jail,

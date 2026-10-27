@@ -326,7 +326,7 @@ impl JailLocalHost {
             observer,
             request.env.clone(),
         )
-            .await
+        .await
     }
 
     /// Collect a prepared shell inside this host's explicit native jail.
@@ -358,7 +358,8 @@ impl JailLocalHost {
         } else {
             std::process::Stdio::null()
         });
-        self.collect_command(command, payload, Some(observer), env).await
+        self.collect_command(command, payload, Some(observer), env)
+            .await
     }
 
     async fn collect_command(
