@@ -37,10 +37,18 @@ fn default_owned_spawn_wrappers_preserve_owned_child_and_approved_environment()
         return Ok(());
     }
 
-    let mut child = spawn_owned_captured(&jail, Command::new("/bin/true"))?;
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "exit 0"])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    let mut child = spawn_owned_captured(&jail, command)?;
     assert!(wait_owned_child(&mut child)?.success());
 
     let env = std::collections::BTreeMap::from([(
+        "PATH".to_owned(),
+        "/usr/bin:/bin".to_owned(),
+    ), (
         "TINYBOX_APPROVED_CHILD_ENV".to_owned(),
         "visible-to-child".to_owned(),
     )]);

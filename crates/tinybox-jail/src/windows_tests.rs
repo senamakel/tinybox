@@ -422,7 +422,10 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
     child.terminate()?;
     let mut remaining = Vec::new();
     stdout.read_to_end(&mut remaining)?;
-    assert!(child.try_wait()?.is_some(), "terminated job exits");
+    assert!(
+        wait_for_child(&mut child).is_ok(),
+        "terminated job exits after termination is acknowledged"
+    );
 
     let mut waiting = Command::new(cmd_exe());
     waiting.args(["/C", "set /p waiting="]);
