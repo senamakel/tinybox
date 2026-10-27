@@ -230,11 +230,7 @@ fn appcontainer_acl_grants_the_root_and_denies_an_outside_secret() -> io::Result
     std::fs::write(&allowed, "inside-marker")?;
     std::fs::write(&secret, "outside-secret-marker")?;
 
-    let command_text = format!(
-        "type {} & type {}",
-        allowed.display(),
-        secret.display()
-    );
+    let command_text = format!("type {} & type {}", allowed.display(), secret.display());
     let mut command = Command::new(cmd_exe());
     command.args(["/C", &command_text]);
     let jail = Jail::new(root.path(), "acl-regression").deny_net();
@@ -440,9 +436,7 @@ fn owned_appcontainer_child_captures_output_waits_and_kills_on_drop() -> std::io
     Ok(())
 }
 
-fn wait_for_child(
-    child: &mut crate::OwnedChild,
-) -> std::io::Result<crate::ChildStatus> {
+fn wait_for_child(child: &mut crate::OwnedChild) -> std::io::Result<crate::ChildStatus> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait()? {

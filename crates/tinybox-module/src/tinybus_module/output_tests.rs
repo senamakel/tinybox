@@ -136,10 +136,7 @@ fn cancellation_wins_when_command_failure_is_recorded_after_the_cancel_signal() 
     // just after the stream task checked cancel_requested().
     journal.cancel();
     journal.finish_failed(ExecutionFailure::BackendFailed);
-    assert_eq!(
-        journal.read(0).unwrap().state,
-        ExecutionState::Cancelled
-    );
+    assert_eq!(journal.read(0).unwrap().state, ExecutionState::Cancelled);
 }
 
 #[test]
