@@ -482,8 +482,6 @@ impl crate::ExecutionObserver for RecordingObserver {
             .extend_from_slice(bytes);
         Ok(())
     }
-
-    fn termination_cause(&self, _: crate::TerminationCause) {}
 }
 #[tokio::test]
 async fn observed_execution_resolves_workspace_environment_and_stdin_before_dispatch() -> Result<()>

@@ -42,7 +42,6 @@ impl ExecutionObserver for Observer {
         }
         Ok(())
     }
-    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
     async fn cancelled(&self) {
         let cancelled = self.notify.notified();
         tokio::pin!(cancelled);
@@ -130,8 +129,6 @@ impl ExecutionObserver for RefusingObserver {
             &std::io::Error::other("receiver closed"),
         ))
     }
-
-    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 }
 
 #[tokio::test]
@@ -199,8 +196,6 @@ impl ExecutionObserver for PanickingObserver {
         }
         panic!("fixture receiver panicked");
     }
-
-    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 }
 impl Drop for PanickingObserver {
     fn drop(&mut self) {

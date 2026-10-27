@@ -22,8 +22,6 @@ impl ExecutionObserver for Observer {
     fn output(&self, _: OutputStream, _: &[u8]) -> Result<()> {
         Ok(())
     }
-
-    fn termination_cause(&self, _: TerminationCause) {}
 }
 
 #[tokio::test]
@@ -60,4 +58,10 @@ fn a_default_observer_does_not_spuriously_request_cancellation() {
     let mut future = std::pin::pin!(observer.cancelled());
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());
+}
+
+#[test]
+fn default_termination_observers_accept_proven_cpu_quota_causes() {
+    let observer = DefaultTerminationObserver;
+    observer.termination_cause(TerminationCause::CpuQuota);
 }

@@ -30,7 +30,7 @@ pub trait ExecutionObserver: std::fmt::Debug + Send + Sync + 'static {
     fn output(&self, stream: OutputStream, bytes: &[u8]) -> Result<()>;
 
     /// Record a provider-proven resource termination while execution is owned.
-    fn termination_cause(&self, cause: TerminationCause);
+    fn termination_cause(&self, _cause: TerminationCause) {}
 
     /// Resolve when the owning module requests execution cancellation.
     ///
@@ -39,6 +39,18 @@ pub trait ExecutionObserver: std::fmt::Debug + Send + Sync + 'static {
     /// existing supervisor/cleanup ownership guarantees.
     async fn cancelled(&self) {
         std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct DefaultTerminationObserver;
+
+#[cfg(test)]
+#[async_trait]
+impl ExecutionObserver for DefaultTerminationObserver {
+    fn output(&self, _: OutputStream, _: &[u8]) -> Result<()> {
+        Ok(())
     }
 }
 
