@@ -889,9 +889,11 @@ async fn cancelled_native_shell_retains_scratch_until_output_release()
     })
     .await??;
     resources.cancel(&process).await?;
+    let output = resources.read_output(&process, 0).await?;
     assert_eq!(
-        resources.read_output(&process, 0).await?.state,
-        ExecutionState::Cancelled
+        output.state,
+        ExecutionState::Cancelled,
+        "cancellation failed after captured output: {output:?}"
     );
     let scratch = state.path().join("artifacts/sandbox-scratch");
     assert_eq!(std::fs::read_dir(&scratch)?.count(), 1);

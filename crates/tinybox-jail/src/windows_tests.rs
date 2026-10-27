@@ -215,7 +215,7 @@ fn appcontainer_owned_spawn_uses_only_the_approved_environment() -> io::Result<(
             "parent PATH leaked to the child"
         );
     }
-    assert!(status.success());
+    assert!(!status.success(), "outside path access should fail");
     Ok(())
 }
 
