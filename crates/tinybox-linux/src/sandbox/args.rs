@@ -353,8 +353,50 @@ pub fn native_jail_argv_with_programs(
     let bwrap = validate_trusted_program(bwrap)?;
     let supports_expand_environment = systemd_run_supports_safe_arguments(&systemd_run)?;
     let argv = native_bwrap_argv(request, supports_expand_environment, &systemd_run, &bwrap);
-    Ok(native_launcher_argv(argv))
+    Ok(native_launcher_argv(wrap_scope_command(argv)))
 }
+
+/// Sample cgroup counters from inside the transient scope before it is stopped.
+fn wrap_scope_command(mut argv: Vec<String>) -> Vec<String> {
+    let Some(delimiter) = argv.iter().position(|arg| arg == "--") else {
+        return argv;
+    };
+    let Some(unit) = argv
+        .iter()
+        .find_map(|arg| arg.strip_prefix("--unit=").map(str::to_owned))
+    else {
+        return argv;
+    };
+    let workload = argv.split_off(delimiter + 1);
+    argv.extend([
+        "/bin/bash".to_owned(),
+        "--noprofile".to_owned(),
+        "--norc".to_owned(),
+        "-c".to_owned(),
+        CPU_EVENT_SCOPE_WRAPPER.to_owned(),
+        "tinybox-cpu-event-scope".to_owned(),
+        unit,
+    ]);
+    argv.extend(workload);
+    argv
+}
+
+const CPU_EVENT_SCOPE_WRAPPER: &str = r#"
+unit=$1
+shift
+"$@"
+status=$?
+report=${TINYBOX_INTERNAL_CPU_EVENT_FILE:-}
+if [ -n "$report" ]; then
+    control_group=$(/usr/bin/systemctl --user show --property=ControlGroup --value "$unit" 2>/dev/null)
+    stats=
+    case $control_group in /*) stats=/sys/fs/cgroup${control_group}/cpu.stat;; esac
+    if [ -r "$stats" ]; then
+        cat "$stats" > "$report" 2>/dev/null || :
+    fi
+fi
+exit "$status"
+"#;
 
 /// Find systemd-run only in fixed system locations and return its trusted
 /// canonical path. This does not consult the caller's `PATH`.
