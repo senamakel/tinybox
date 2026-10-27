@@ -890,7 +890,6 @@ async fn bounded_live_output_roundtrips_through_the_bus_codec() -> tinybus::Resu
     Ok(())
 }
 
-#[tokio::test]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus::Result<()> {
     use serde_json::Value;
