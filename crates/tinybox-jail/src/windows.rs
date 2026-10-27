@@ -38,7 +38,7 @@
 use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::ptr;
@@ -106,11 +106,12 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY, SetInformationJobObject,
 };
+use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED,
     InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute, GetSystemInfo, ResumeThread, SYSTEM_INFO,
+    UpdateProcThreadAttribute, ResumeThread,
 };
 
 use super::jail::{Jail, JailBackend};
@@ -680,9 +681,6 @@ unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
     })
 }
 
-#[cfg(test)]
-#[path = "windows_tests.rs"]
-mod tests;
 
 #[cfg(test)]
 #[path = "windows_tests.rs"]
