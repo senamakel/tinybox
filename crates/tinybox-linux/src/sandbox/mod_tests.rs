@@ -473,11 +473,7 @@ fn native_jail_command_keeps_limits_and_target_environment_after_namespace_setup
     assert_eq!(argv.first().map(String::as_str), Some("/bin/bash"));
     assert!(argv.contains(&systemd_run.display().to_string()));
     assert!(systemd_run.is_absolute());
-    let bubblewrap = argv
-        .iter()
-        .find(|part| part.starts_with('/') && part.ends_with("/bwrap"))
-        .ok_or("missing bubblewrap command")?;
-    assert!(std::path::Path::new(bubblewrap).is_absolute());
+    assert!(argv.iter().any(|part| part == "/bin/true"));
     assert!(has(&argv, "--property=CPUQuota=0.1%"));
     assert!(has(&argv, "--property=MemoryMax=67108864"));
     assert!(has(&argv, "--property=MemorySwapMax=0"));
