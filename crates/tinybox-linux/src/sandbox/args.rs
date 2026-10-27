@@ -179,7 +179,7 @@ pub(super) fn exec_with_prlimit_program(
     };
     argv.extend(bwrap(spec, request)?);
     if !limits && let Some(prlimit) = prlimit_program {
-        wrap_setrlimit(&mut argv, &spec.resources, &prlimit);
+        wrap_setrlimit(&mut argv, &spec.resources, prlimit);
     }
     Ok(argv)
 }
