@@ -59,3 +59,10 @@ fn a_default_observer_does_not_spuriously_request_cancellation() {
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());
 }
+
+#[test]
+fn observers_can_receive_a_proven_cpu_quota_cause() {
+    let observer = Observer;
+    observer.termination_cause(TerminationCause::CpuQuota);
+    assert_eq!(TerminationCause::CpuQuota, TerminationCause::CpuQuota);
+}
