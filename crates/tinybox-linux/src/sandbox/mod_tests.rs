@@ -952,7 +952,7 @@ async fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<
     sandbox.exec(&info.id, &ExecRequest::new(["true"])).await?;
 
     let argv = host.last();
-    assert_eq!(argv.first().map(String::as_str), Some("prlimit"));
+    assert!(argv.first().is_some_and(|program| program.ends_with("/prlimit")));
     assert!(has(&argv, "--as=67108864"));
     assert!(has(&argv, "--"));
     assert!(has(&argv, "bwrap"));

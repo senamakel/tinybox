@@ -9,7 +9,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use tinybox_core::{BoxSpec, Capability, Error, ExecRequest, Resources, Result, WorkspaceSource};
+use tinybox_core::{
+    BoxSpec, Capability, Constraint, ConstraintSupport, Enforcement, Error, ExecRequest, Resources,
+    Result, WorkspaceSource,
+};
 
 use super::NAME;
 
@@ -25,6 +28,44 @@ pub const WORKSPACE_MOUNT: &str = "/workspace";
 const USR: &str = "/usr";
 const SYSTEMD_EXPAND_ENVIRONMENT_FLAG: &[u8] = b"--expand-environment";
 static NATIVE_SCOPE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResourceEnforcement {
+    CgroupV2,
+    Setrlimit,
+    Unavailable,
+}
+
+pub(super) const fn select_resource_enforcement(
+    cgroup_v2_delegated: bool,
+    allow_setrlimit_fallback: bool,
+) -> ResourceEnforcement {
+    if cgroup_v2_delegated {
+        ResourceEnforcement::CgroupV2
+    } else if allow_setrlimit_fallback {
+        ResourceEnforcement::Setrlimit
+    } else {
+        ResourceEnforcement::Unavailable
+    }
+}
+
+pub(super) const fn resource_constraint_support(
+    enforcement: ResourceEnforcement,
+) -> ConstraintSupport {
+    match enforcement {
+        ResourceEnforcement::CgroupV2 => ConstraintSupport::NONE
+            .with(Constraint::Cpu, Enforcement::Enforced)
+            .with(Constraint::Memory, Enforcement::Enforced)
+            .with(Constraint::Pids, Enforcement::Enforced),
+        // RLIMIT_AS gives each process in the box a hard address-space ceiling.
+        // It cannot cap aggregate memory, CPU rate or process count, so those
+        // constraints must stay unsupported in the preflight contract.
+        ResourceEnforcement::Setrlimit => {
+            ConstraintSupport::NONE.with(Constraint::Memory, Enforcement::Enforced)
+        }
+        ResourceEnforcement::Unavailable => ConstraintSupport::NONE,
+    }
+}
 
 /// Files a normal command expects to exist.
 ///
@@ -80,6 +121,7 @@ pub(super) fn exec(
     spec: &BoxSpec,
     request: &ExecRequest,
     limits: bool,
+    setrlimit_fallback: bool,
     supports_expand_environment: bool,
 ) -> Result<Vec<String>> {
     if request.argv.is_empty() {
@@ -94,7 +136,33 @@ pub(super) fn exec(
         Vec::new()
     };
     argv.extend(bwrap(spec, request)?);
+    if !limits && setrlimit_fallback {
+        let prlimit = trusted_prlimit_program().map_err(|_| Error::Unsupported {
+            sandbox: NAME.to_owned(),
+            capability: Capability::ResourceLimits,
+        })?;
+        argv.splice(
+            0..0,
+            [
+                prlimit.to_string_lossy().into_owned(),
+                format!("--as={}", spec.resources.memory_bytes),
+                "--".to_owned(),
+            ],
+        );
+    }
     Ok(argv)
+}
+
+fn trusted_prlimit_program() -> std::io::Result<std::path::PathBuf> {
+    [Path::new("/usr/bin/prlimit"), Path::new("/bin/prlimit")]
+        .into_iter()
+        .find_map(|path| validate_trusted_program(path).ok())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no trusted prlimit executable in fixed system locations",
+            )
+        })
 }
 
 /// Wrap the sandbox in a transient systemd scope so cgroup limits apply.
