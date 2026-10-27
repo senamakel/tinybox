@@ -38,6 +38,10 @@ impl CpuEventReport {
     ) -> Option<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
+        let runtime_dir = runtime_dir.canonicalize().ok()?;
+        if !runtime_dir.starts_with("/run/") {
+            return None;
+        }
         let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
         let has_scope = args.iter().any(|arg| {
             arg.strip_prefix("--unit=")
@@ -56,7 +60,7 @@ impl CpuEventReport {
         if !has_scope || !has_cpu_limit || !masks_runtime || !masks_cgroup {
             return None;
         }
-        let metadata = std::fs::metadata(runtime_dir).ok()?;
+        let metadata = std::fs::metadata(&runtime_dir).ok()?;
         let uid = std::fs::metadata("/proc/self").ok()?.uid();
         if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
             return None;

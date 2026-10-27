@@ -37,14 +37,11 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "--clearenv",
     ]);
     let mut env = BTreeMap::new();
-    let report = CpuEventReport::prepare_in(&command, &mut env, runtime.path())
-        .ok_or("eligible scope did not get a report")?;
-    let report_path = env
-        .get(CPU_EVENT_FILE_ENV)
-        .ok_or("report path was not passed to the trusted wrapper")?;
-    assert_eq!(std::fs::read_to_string(report_path)?, "nr_throttled 0\n");
-    drop(report);
-    assert!(!std::path::Path::new(report_path).exists());
+    assert!(CpuEventReport::prepare_in(&command, &mut env, runtime.path()).is_none());
+    assert!(
+        env.is_empty(),
+        "unmasked runtime paths must not be handed off"
+    );
 
     let mut unmetered = std::process::Command::new("systemd-run");
     unmetered.args([
@@ -55,7 +52,6 @@ fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
         "--tmpfs",
         "/sys",
     ]);
-    env.clear();
     assert!(CpuEventReport::prepare_in(&unmetered, &mut env, runtime.path()).is_none());
     assert!(env.is_empty());
     Ok(())
