@@ -30,6 +30,7 @@ pub trait ExecutionObserver: std::fmt::Debug + Send + Sync + 'static {
     fn output(&self, stream: OutputStream, bytes: &[u8]) -> Result<()>;
 
     /// Record a provider-proven resource termination while execution is owned.
+    #[inline(never)]
     fn termination_cause(&self, cause: TerminationCause) {
         std::hint::black_box(cause);
     }
