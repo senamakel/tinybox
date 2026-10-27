@@ -140,10 +140,11 @@ fn an_unknown_creation_time_stays_unknown() -> Result<()> {
 #[test]
 fn older_stored_records_default_hard_requirements_to_empty() -> Result<()> {
     let info = info_with(base_spec(WorkspaceSource::OciImage("a".into()))?)?;
-    let mut value = serde_json::to_value(BoxRecord::try_from(&info)?).map_err(|e| Error::Store {
-        operation: "encode",
-        message: e.to_string(),
-    })?;
+    let mut value =
+        serde_json::to_value(BoxRecord::try_from(&info)?).map_err(|e| Error::Store {
+            operation: "encode",
+            message: e.to_string(),
+        })?;
     value["spec"]
         .as_object_mut()
         .ok_or_else(|| Error::Store {
