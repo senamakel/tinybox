@@ -98,11 +98,19 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 /// this list conditionally — do NOT silently expand `allow_net`.
 const NET_CAPABILITY_NAMES: &[&str] = &["internetClient"];
 use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOBOBJECT_BASIC_LIMIT_INFORMATION,
+    JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
+    JobObjectExtendedLimitInformation, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
+    JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY, SetInformationJobObject,
+};
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED,
     InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute,
+    UpdateProcThreadAttribute, GetSystemInfo, ResumeThread, SYSTEM_INFO,
 };
 
 use super::jail::{Jail, JailBackend};
@@ -145,6 +153,10 @@ impl JailBackend for AppContainerBackend {
         false
     }
 
+    fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
+        windows_constraint_support()
+    }
+
     fn spawn(&self, jail: &Jail, cmd: Command) -> io::Result<Child> {
         if !self.is_available() {
             return Err(io::Error::new(
@@ -154,6 +166,92 @@ impl JailBackend for AppContainerBackend {
         }
         unsafe { spawn_in_container(jail, cmd) }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct JobObjectLimitPlan {
+    process_memory_bytes: usize,
+    active_processes: u32,
+    cpu_rate: Option<u32>,
+    kill_on_close: bool,
+}
+
+fn job_object_limit_plan(
+    resources: tinybox_core::Resources,
+    processor_count: u32,
+) -> io::Result<JobObjectLimitPlan> {
+    resources
+        .validate()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let processor_count = processor_count.max(1) as u64;
+    let total_cpu_millis = processor_count * 1_000;
+    let cpu_rate = ((u64::from(resources.cpu_millis) * 10_000) / total_cpu_millis)
+        .clamp(1, 10_000) as u32;
+    let process_memory_bytes = usize::try_from(resources.memory_bytes).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "memory limit exceeds Windows address size")
+    })?;
+    Ok(JobObjectLimitPlan {
+        process_memory_bytes,
+        active_processes: resources.pids_max,
+        cpu_rate: Some(cpu_rate),
+        kill_on_close: true,
+    })
+}
+
+fn windows_constraint_support() -> tinybox_core::ConstraintSupport {
+    use tinybox_core::{Constraint, ConstraintSupport, Enforcement};
+    [Constraint::Cpu, Constraint::Memory, Constraint::Pids]
+        .into_iter()
+        .fold(ConstraintSupport::NONE, |support, constraint| {
+            support.with(constraint, Enforcement::Enforced)
+        })
+}
+
+unsafe fn create_job_object(resources: tinybox_core::Resources) -> io::Result<OwnedHandle> {
+    let mut system_info: SYSTEM_INFO = std::mem::zeroed();
+    GetSystemInfo(&mut system_info);
+    let plan = job_object_limit_plan(resources, system_info.dwNumberOfProcessors)?;
+    let job = CreateJobObjectW(ptr::null(), ptr::null());
+    if job.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let job = OwnedHandle::from_raw_handle(job as _);
+
+    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+    limits.BasicLimitInformation = JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            | JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+        ActiveProcessLimit: plan.active_processes,
+        ..std::mem::zeroed()
+    };
+    limits.ProcessMemoryLimit = plan.process_memory_bytes;
+    if SetInformationJobObject(
+        job.as_raw_handle() as _,
+        JobObjectExtendedLimitInformation,
+        &limits as *const _ as _,
+        std::mem::size_of_val(&limits) as u32,
+    ) == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+
+    let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
+        ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
+        Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
+            CpuRate: plan.cpu_rate.unwrap_or(10_000),
+        },
+    };
+    if SetInformationJobObject(
+        job.as_raw_handle() as _,
+        JobObjectCpuRateControlInformation,
+        &cpu as *const _ as _,
+        std::mem::size_of_val(&cpu) as u32,
+    ) == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(job)
 }
 
 unsafe fn spawn_in_container(jail: &Jail, cmd: Command) -> io::Result<Child> {

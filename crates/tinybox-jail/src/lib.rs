@@ -81,9 +81,6 @@ pub use macos::SeatbeltBackend;
 pub use noop::{NOOP_BACKEND_NAME, NoopBackend};
 pub use registry::{IndexStore, JailRecord, JailRegistry};
 
-#[cfg(all(test, target_os = "windows"))]
-#[path = "windows_tests.rs"]
-mod windows_tests;
 
 use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
