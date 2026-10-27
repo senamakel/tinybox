@@ -195,7 +195,7 @@ pub(super) fn wrap_setrlimit(argv: &mut Vec<String>, resources: &Resources, prli
     );
 }
 
-fn trusted_prlimit_program() -> std::io::Result<std::path::PathBuf> {
+pub(super) fn trusted_prlimit_program() -> std::io::Result<std::path::PathBuf> {
     trusted_program_from([Path::new("/usr/bin/prlimit"), Path::new("/bin/prlimit")])
 }
 
