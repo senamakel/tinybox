@@ -170,11 +170,30 @@ pub fn spawn_owned_captured_with(
     jail: &Jail,
     cmd: Command,
 ) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with_backend_and_env(
+        backend,
+        jail,
+        cmd,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Spawn captured work through an explicit backend and approved environment.
+/// Native launchers must pass `env` as the child environment rather than
+/// inheriting values from the host process.
+/// # Errors
+/// Returns canonicalization, hard-preflight, confinement, or startup errors.
+pub fn spawn_owned_captured_with_backend_and_env(
+    backend: &dyn JailBackend,
+    jail: &Jail,
+    cmd: Command,
+    env: &std::collections::BTreeMap<String, String>,
+) -> std::io::Result<OwnedChild> {
     let mut jail = jail.clone();
     jail.canonicalize()?;
     require_resources(backend, &jail)?;
     jail.validate_denials(backend.carves_denials(), &backend.implicit_grants())?;
-    backend.spawn_owned_captured(&jail, cmd)
+    backend.spawn_owned_captured_with_env(&jail, cmd, env)
 }
 
 /// Spawn captured work with the detected backend that supports owned children.
@@ -182,7 +201,24 @@ pub fn spawn_owned_captured_with(
 /// # Errors
 /// Returns an error if no owned-child backend is available or jail setup fails.
 pub fn spawn_owned_captured(jail: &Jail, cmd: Command) -> std::io::Result<OwnedChild> {
-    spawn_owned_captured_with(default_owned_backend().as_ref(), jail, cmd)
+    spawn_owned_captured_with_backend_and_env(
+        default_owned_backend().as_ref(),
+        jail,
+        cmd,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Spawn captured work with the detected owned-child backend and approved environment.
+///
+/// # Errors
+/// Returns an error if no owned-child backend is available or jail setup fails.
+pub fn spawn_owned_captured_with_env(
+    jail: &Jail,
+    cmd: Command,
+    env: &std::collections::BTreeMap<String, String>,
+) -> std::io::Result<OwnedChild> {
+    spawn_owned_captured_with_backend_and_env(default_owned_backend().as_ref(), jail, cmd, env)
 }
 
 fn require_resources(backend: &dyn JailBackend, jail: &Jail) -> std::io::Result<()> {

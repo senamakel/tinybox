@@ -393,7 +393,7 @@ impl JailLocalHost {
             }
             let approved_env = env.clone();
             let child = tokio::task::spawn_blocking(move || {
-                tinybox_jail::spawn_owned_captured_with_env(
+                tinybox_jail::spawn_owned_captured_with_backend_and_env(
                     backend.as_ref(),
                     &jail,
                     command,
