@@ -27,6 +27,15 @@ impl CpuEventReport {
         command: &std::process::Command,
         env: &mut BTreeMap<String, String>,
     ) -> Option<Self> {
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+        Self::prepare_in(command, env, std::path::Path::new(&runtime_dir))
+    }
+
+    fn prepare_in(
+        command: &std::process::Command,
+        env: &mut BTreeMap<String, String>,
+        runtime_dir: &std::path::Path,
+    ) -> Option<Self> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
         let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
@@ -47,8 +56,6 @@ impl CpuEventReport {
         if !has_scope || !has_cpu_limit || !masks_runtime || !masks_cgroup {
             return None;
         }
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
-        let runtime_dir = std::path::Path::new(&runtime_dir);
         let metadata = std::fs::metadata(runtime_dir).ok()?;
         let uid = std::fs::metadata("/proc/self").ok()?.uid();
         if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {

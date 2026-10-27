@@ -16,6 +16,47 @@ fn cpu_throttling_counter_requires_one_well_formed_nr_throttled_value() {
     );
     assert_eq!(parse_cpu_throttled_counter("usage_usec 12\n"), None);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cpu_event_report_is_created_only_for_masked_cpu_limited_scopes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tempfile::tempdir()?;
+    let mut command = std::process::Command::new("systemd-run");
+    command.args([
+        "--scope",
+        "--unit=tinybox-native-fixture.scope",
+        "--property=CPUQuota=10%",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+        "--clearenv",
+    ]);
+    let mut env = BTreeMap::new();
+    let report = CpuEventReport::prepare_in(&command, &mut env, runtime.path())
+        .ok_or("eligible scope did not get a report")?;
+    let report_path = env
+        .get(CPU_EVENT_FILE_ENV)
+        .ok_or("report path was not passed to the trusted wrapper")?;
+    assert_eq!(std::fs::read_to_string(report_path)?, "nr_throttled 0\n");
+    drop(report);
+    assert!(!std::path::Path::new(report_path).exists());
+
+    let mut unmetered = std::process::Command::new("systemd-run");
+    unmetered.args([
+        "--scope",
+        "--unit=tinybox-native-fixture.scope",
+        "--tmpfs",
+        "/run",
+        "--tmpfs",
+        "/sys",
+    ]);
+    env.clear();
+    assert!(CpuEventReport::prepare_in(&unmetered, &mut env, runtime.path()).is_none());
+    assert!(env.is_empty());
+    Ok(())
+}
 use std::result::Result;
 use std::sync::Arc;
 use tinybox_core::{ExecRequest, Host};
