@@ -1,4 +1,4 @@
-//! Windows integration coverage for the backend-owned AppContainer process path.
+//! Windows integration coverage for the backend-owned `AppContainer` process path.
 
 use super::*;
 use tinybox_core::ExecRequest;
