@@ -438,11 +438,6 @@ pub trait JailBackend: Send + Sync {
             .into_iter()
             .filter(|constraint| jail.hard_requirements.contains(constraint))
             .collect();
-        if !requested_resources.is_empty() && jail.resources.is_none() {
-            return Err(tinybox_core::Error::InvalidInput(
-                "resource hard requirements need resource values".to_owned(),
-            ));
-        }
         self.constraint_support()
             .require(self.name(), &requested_resources)?;
         Ok(())
