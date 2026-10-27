@@ -151,8 +151,8 @@ fn explicit_environment_block_is_sorted_and_does_not_add_parent_values() {
         ("TINYBOX_APPROVED".to_owned(), "visible".to_owned()),
         ("Z_LAST".to_owned(), "last".to_owned()),
     ]);
-    let block = environment_block(&env, local_app_data, system_root)
-        .expect("valid explicit environment");
+    let block =
+        environment_block(&env, local_app_data, system_root).expect("valid explicit environment");
     let block = String::from_utf16_lossy(&block);
     assert!(block.starts_with(
         "LOCALAPPDATA=C:\\Users\\runner\\AppData\\Local\0SYSTEMROOT=C:\\Windows\0TINYBOX_APPROVED=visible\0Z_LAST=last\0\0"
