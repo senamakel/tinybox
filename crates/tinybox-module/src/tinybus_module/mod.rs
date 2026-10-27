@@ -64,6 +64,61 @@ impl BoxService {
             connection: Some(connection),
         }
     }
+
+    async fn publish_process_events(&self, process: &ProcessRef) {
+        let Some(connection) = self.connection.clone() else {
+            return;
+        };
+        let Ok(Some(stream)) = self.resources.stream(process) else {
+            return;
+        };
+        if !stream.claim_event_publisher() {
+            return;
+        }
+        emit_process_event(
+            &connection,
+            ProcessEvent {
+                process: process.clone(),
+                event: SandboxEvent::Started,
+            },
+        )
+        .await;
+        let event_process = process.clone();
+        tokio::spawn(async move {
+            let status = stream.wait_for_terminal_exit().await;
+            if stream.timed_out() {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process.clone(),
+                        event: SandboxEvent::LimitHit {
+                            limit: tinybox_bus::LimitKind::Timeout,
+                        },
+                    },
+                )
+                .await;
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited { status: None },
+                    },
+                )
+                .await;
+            } else if let Some(status) = status {
+                emit_process_event(
+                    &connection,
+                    ProcessEvent {
+                        process: event_process,
+                        event: SandboxEvent::Exited {
+                            status: Some(status),
+                        },
+                    },
+                )
+                .await;
+            }
+        });
+    }
 }
 
 /// Serialize resolved grant paths without replacing invalid UTF-8 bytes.
@@ -473,61 +528,6 @@ impl BoxService {
     /// before it tries to create a box.
     async fn describe(&self) -> TinyBusResult<String> {
         std::future::ready(Ok(describe(&registered_sandboxes()))).await
-    }
-
-    async fn publish_process_events(&self, process: &ProcessRef) {
-        let Some(connection) = self.connection.clone() else {
-            return;
-        };
-        let Ok(Some(stream)) = self.resources.stream(process) else {
-            return;
-        };
-        if !stream.claim_event_publisher() {
-            return;
-        }
-        emit_process_event(
-            &connection,
-            ProcessEvent {
-                process: process.clone(),
-                event: SandboxEvent::Started,
-            },
-        )
-        .await;
-        let event_process = process.clone();
-        tokio::spawn(async move {
-            let status = stream.wait_for_terminal_exit().await;
-            if stream.timed_out() {
-                emit_process_event(
-                    &connection,
-                    ProcessEvent {
-                        process: event_process.clone(),
-                        event: SandboxEvent::LimitHit {
-                            limit: tinybox_bus::LimitKind::Timeout,
-                        },
-                    },
-                )
-                .await;
-                emit_process_event(
-                    &connection,
-                    ProcessEvent {
-                        process: event_process,
-                        event: SandboxEvent::Exited { status: None },
-                    },
-                )
-                .await;
-            } else if let Some(status) = status {
-                emit_process_event(
-                    &connection,
-                    ProcessEvent {
-                        process: event_process,
-                        event: SandboxEvent::Exited {
-                            status: Some(status),
-                        },
-                    },
-                )
-                .await;
-            }
-        });
     }
 }
 
