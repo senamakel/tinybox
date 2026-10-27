@@ -154,7 +154,7 @@ impl JailBackend for AppContainerBackend {
     }
 
     fn constraint_support(&self) -> tinybox_core::ConstraintSupport {
-        windows_constraint_support()
+        windows_constraint_support(self.is_available())
     }
 
     fn spawn(&self, jail: &Jail, cmd: Command) -> io::Result<Child> {
@@ -198,8 +198,11 @@ fn job_object_limit_plan(
     })
 }
 
-fn windows_constraint_support() -> tinybox_core::ConstraintSupport {
+fn windows_constraint_support(available: bool) -> tinybox_core::ConstraintSupport {
     use tinybox_core::{Constraint, ConstraintSupport, Enforcement};
+    if !available {
+        return ConstraintSupport::NONE;
+    }
     [Constraint::Cpu, Constraint::Memory, Constraint::Pids]
         .into_iter()
         .fold(ConstraintSupport::NONE, |support, constraint| {
@@ -676,6 +679,10 @@ unsafe fn derive_capability(name: &str) -> io::Result<CapabilityDerivation> {
         group_sids_ptr: group_sids,
     })
 }
+
+#[cfg(test)]
+#[path = "windows_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "windows_tests.rs"]

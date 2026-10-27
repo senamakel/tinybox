@@ -132,7 +132,7 @@ fn job_object_limit_plan_sets_memory_process_cpu_and_kill_on_close() {
 fn windows_capabilities_report_only_job_object_resource_limits() {
     use tinybox_core::{Constraint, Enforcement};
 
-    let support = windows_constraint_support();
+    let support = windows_constraint_support(true);
     assert_eq!(support.enforcement(Constraint::Cpu), Enforcement::Enforced);
     assert_eq!(support.enforcement(Constraint::Memory), Enforcement::Enforced);
     assert_eq!(support.enforcement(Constraint::Pids), Enforcement::Enforced);
@@ -143,7 +143,7 @@ fn windows_capabilities_report_only_job_object_resource_limits() {
 fn unsupported_windows_disk_limit_is_a_typed_preflight_refusal() {
     use tinybox_core::{Constraint, Enforcement, Error};
 
-    let error = windows_constraint_support()
+    let error = windows_constraint_support(true)
         .require("appcontainer", &[Constraint::Disk])
         .expect_err("Job Objects do not enforce disk quotas");
     assert!(matches!(
@@ -154,4 +154,16 @@ fn unsupported_windows_disk_limit_is_a_typed_preflight_refusal() {
             enforcement: Enforcement::Unsupported,
         } if sandbox == "appcontainer"
     ));
+}
+
+#[test]
+fn unavailable_appcontainer_reports_no_enforcement() {
+    use tinybox_core::{Constraint, Enforcement};
+
+    assert_eq!(
+        AppContainerBackend::new()
+            .constraint_support()
+            .enforcement(Constraint::Memory),
+        Enforcement::Unsupported
+    );
 }
