@@ -899,6 +899,7 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
 
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service).await?;
     let client = Connection::connect(bus.connect().await?).await?;
@@ -968,6 +969,7 @@ async fn native_shell_timeout_broadcasts_limit_hit_before_terminal_exit() -> tin
     let state = tempfile::tempdir().map_err(tinybus::Error::failed)?;
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
     let service = Connection::connect(bus.connect().await?).await?;
     setup(service).await?;
     let client = Connection::connect(bus.connect().await?).await?;
