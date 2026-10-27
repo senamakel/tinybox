@@ -14,10 +14,10 @@ async fn detected_owned_backend_runs_with_only_the_approved_environment()
     assert!(format!("{host:?}").contains("appcontainer"));
 
     let parent_path = std::env::var("PATH").ok();
-    let cmd =
-        std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("Windows system root"))
-            .join("System32")
-            .join("cmd.exe");
+    let system_root = std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?;
+    let cmd = std::path::PathBuf::from(system_root)
+        .join("System32")
+        .join("cmd.exe");
     let mut request = ExecRequest::new([
         cmd.to_string_lossy().as_ref(),
         "/C",
