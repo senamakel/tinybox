@@ -953,12 +953,13 @@ fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
         pids_max: 16,
         disk_bytes: 1,
     });
-    let argv = args::exec_with_prlimit_program(
+    let argv = args::exec_with_prlimit_resolver(
         &spec,
         &ExecRequest::new(["true"]),
         false,
-        Some(Path::new("/trusted/prlimit")),
+        true,
         false,
+        || Ok(Path::new("/trusted/prlimit").to_path_buf()),
     )?;
     assert!(
         argv.first()
@@ -967,6 +968,29 @@ fn setrlimit_fallback_wraps_commands_with_address_space_limit() -> Result<()> {
     assert!(has(&argv, "--as=67108864"));
     assert!(has(&argv, "--"));
     assert!(has(&argv, "bwrap"));
+    Ok(())
+}
+
+#[test]
+fn setrlimit_fallback_refuses_when_no_trusted_launcher_is_available() -> Result<()> {
+    let spec = spec()?;
+    assert!(matches!(
+        args::exec_with_prlimit_resolver(
+            &spec,
+            &ExecRequest::new(["true"]),
+            false,
+            true,
+            false,
+            || Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing prlimit",
+            )),
+        ),
+        Err(Error::Unsupported {
+            capability: Capability::ResourceLimits,
+            ..
+        })
+    ));
     Ok(())
 }
 
@@ -981,5 +1005,7 @@ fn trusted_resource_launcher_resolution_accepts_only_fixed_trusted_paths() -> st
             .map(|error| error.kind()),
         Some(std::io::ErrorKind::NotFound)
     );
+    #[cfg(target_os = "linux")]
+    assert!(args::trusted_prlimit_program()?.is_absolute());
     Ok(())
 }

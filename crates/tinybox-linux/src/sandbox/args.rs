@@ -124,8 +124,26 @@ pub(super) fn exec(
     setrlimit_fallback: bool,
     supports_expand_environment: bool,
 ) -> Result<Vec<String>> {
+    exec_with_prlimit_resolver(
+        spec,
+        request,
+        limits,
+        setrlimit_fallback,
+        supports_expand_environment,
+        trusted_prlimit_program,
+    )
+}
+
+pub(super) fn exec_with_prlimit_resolver(
+    spec: &BoxSpec,
+    request: &ExecRequest,
+    limits: bool,
+    setrlimit_fallback: bool,
+    supports_expand_environment: bool,
+    resolve_prlimit: impl FnOnce() -> std::io::Result<std::path::PathBuf>,
+) -> Result<Vec<String>> {
     let prlimit = if !limits && setrlimit_fallback {
-        Some(trusted_prlimit_program().map_err(|_| Error::Unsupported {
+        Some(resolve_prlimit().map_err(|_| Error::Unsupported {
             sandbox: NAME.to_owned(),
             capability: Capability::ResourceLimits,
         })?)
