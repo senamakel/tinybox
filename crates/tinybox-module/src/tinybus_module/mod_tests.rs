@@ -935,6 +935,12 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
         },
     };
     assert_eq!(
+        proxy
+            .call::<ProcessRef>("StartExec", (request.clone(),))
+            .await?,
+        process
+    );
+    assert_eq!(
         proxy.call::<ProcessRef>("StartExec", (request,)).await?,
         process
     );
@@ -957,6 +963,10 @@ async fn start_exec_broadcasts_correlated_process_lifecycle_events() -> tinybus:
     assert_eq!(exited["process"]["process"], process.process.0);
     assert_eq!(exited["event"]["event"], "exited");
     assert_eq!(exited["event"]["status"], 7);
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
     proxy.call::<()>("Close", (resource,)).await?;
     Ok(())
 }
