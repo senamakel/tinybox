@@ -1035,6 +1035,8 @@ impl tinybox_core::ExecutionObserver for CapturingObserver {
         Ok(())
     }
 
+    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
+
     async fn cancelled(&self) {
         if !self.cancel {
             std::future::pending::<()>().await;

@@ -155,6 +155,7 @@ impl Host for MockHost {
         self.inner_cleanup_pending.store(false, Ordering::SeqCst);
         Ok(())
     }
+    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 }
 
 #[derive(Debug, Default)]
@@ -191,6 +192,8 @@ impl ExecutionObserver for CancelObserver {
     fn output(&self, _: OutputStream, _: &[u8]) -> Result<()> {
         Ok(())
     }
+
+    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 
     async fn cancelled(&self) {
         let notified = self.notify.notified();
@@ -455,6 +458,8 @@ impl ExecutionObserver for RefusingObserver {
             &std::io::Error::other("receiver closed"),
         ))
     }
+
+    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 }
 
 #[tokio::test]
@@ -500,6 +505,8 @@ impl ExecutionObserver for BlockingObserver {
         }
         Ok(())
     }
+
+    fn termination_cause(&self, _: tinybox_core::TerminationCause) {}
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
