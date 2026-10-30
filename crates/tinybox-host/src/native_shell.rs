@@ -5,12 +5,12 @@ use std::{
     pin::Pin,
     time::{Duration, Instant},
 };
+use futures_util::{FutureExt, pin_mut, select};
 
 use tinybox_bus::{
-    CreateRequest, ExecutionState, OutputBatch, OutputChunk, ProcessRef, ReserveRequest,
-    ResourceId, ShellExecRequest,
+    CreateRequest, ExecutionFailure, ExecutionState, OutputBatch, OutputChunk, OutputStream,
+    ProcessRef, ReserveRequest, ResourceId, ShellExecRequest,
 };
-use crate::native_shell_tests as _;
 
 /// Transport operations required to supervise a native shell.
 ///
@@ -113,7 +113,7 @@ pub enum NativeShellError<E> {
         source: E,
     },
     /// The module reported a terminal failed state.
-    Execution(crate::ExecutionFailure),
+    Execution(ExecutionFailure),
     /// An output batch did not advance its cursor despite containing chunks.
     InvalidOutputCursor,
     /// Cancellation failed, so native cleanup is not acknowledged.
@@ -333,7 +333,7 @@ async fn finish_native_shell<C: NativeShellClient>(
         ExecutionState::Exited { exit_code } => capture.finish(exit_code, timed_out),
         ExecutionState::Cancelled => capture.finish(-1, timed_out),
         ExecutionState::Failed {
-            code: crate::ExecutionFailure::TimedOut,
+            code: ExecutionFailure::TimedOut,
         } => capture.finish(-1, true),
         ExecutionState::Failed { code } => {
             client
@@ -375,8 +375,8 @@ impl NativeShellCapture {
         for chunk in &batch.chunks {
             on_chunk(chunk);
             match chunk.stream {
-                crate::OutputStream::Stdout => self.stdout.extend_from_slice(&chunk.bytes),
-                crate::OutputStream::Stderr => self.stderr.extend_from_slice(&chunk.bytes),
+                OutputStream::Stdout => self.stdout.extend_from_slice(&chunk.bytes),
+                OutputStream::Stderr => self.stderr.extend_from_slice(&chunk.bytes),
             }
         }
         self.cursor = batch.next_sequence;
