@@ -23,7 +23,7 @@ pub use jail::{JailEnforcement, NativeJailConfig, NativeJailRequest, NativeJailR
 
 mod shell_execution;
 mod shell_selection;
-pub use shell_execution::ShellExecRequest;
+pub use shell_execution::{RunNativeShellRequest, RunNativeShellResult, ShellExecRequest};
 pub use shell_selection::{SelectShellRequest, ShellFlavor, ShellInvocation};
 
 mod stdio;
