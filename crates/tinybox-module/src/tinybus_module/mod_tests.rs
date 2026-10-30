@@ -1449,7 +1449,7 @@ async fn run_native_shell_returns_finished_output_after_module_cleanup()
     else {
         panic!("short shell should finish before returning: {result:?}");
     };
-    assert_eq!(exit_code, 0);
+    assert_eq!(exit_code, 0, "timed_out={timed_out}, stdout={stdout:?}");
     assert_eq!(stdout, b"finished\n");
     assert!(!timed_out);
     assert_eq!(
