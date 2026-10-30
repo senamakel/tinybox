@@ -1,5 +1,5 @@
 //! Reserved native shell execution; authorization remains caller-owned.
-use crate::{NativeJailConfig, ResourceId, SelectShellRequest};
+use crate::{CreateRequest, NativeJailConfig, ProcessRef, ResourceId, SelectShellRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -33,6 +33,42 @@ pub struct ShellExecRequest {
     /// other platforms.
     #[serde(default)]
     pub hide_window: bool,
+}
+
+/// Start and supervise a native shell through its first completion or yield.
+/// Reservation identifiers inside `shell` are ignored and replaced by the
+/// module. A yielded process remains module-owned and can be polled through
+/// `ReadOutput` or stopped through `Cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunNativeShellRequest {
+    /// Resource configuration; its reservation identifier is ignored.
+    pub create: CreateRequest,
+    /// Shell configuration; resource and process identifiers are ignored.
+    pub shell: ShellExecRequest,
+    /// Yield when still running after this duration, if shorter than timeout.
+    #[serde(default)]
+    pub yield_after_ms: Option<u64>,
+}
+
+/// Result of a supervised shell call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RunNativeShellResult {
+    /// The process exited or timed out and cleanup was acknowledged.
+    Finished {
+        exit_code: i32,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+        timed_out: bool,
+    },
+    /// The process is still running and remains owned by the module.
+    Running {
+        resource: ResourceId,
+        process: ProcessRef,
+        cursor: u64,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
 }
 const fn default_timeout() -> u64 {
     30_000
