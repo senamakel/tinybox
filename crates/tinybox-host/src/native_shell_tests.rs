@@ -1,10 +1,10 @@
 //! Tests for runtime-neutral native shell orchestration.
 use super::*;
-use crate::{
+use std::{collections::BTreeMap, sync::Mutex};
+use tinybox_bus::{
     ExecutionFailure, HostConfig, NetworkPolicy, OutputStream, ResourceLimits, SelectShellRequest,
     Workspace,
 };
-use std::{collections::BTreeMap, sync::Mutex};
 
 struct MockClient {
     calls: Mutex<Vec<&'static str>>,

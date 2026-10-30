@@ -1,11 +1,11 @@
 //! Runtime-neutral orchestration for one supervised native shell execution.
 
+use futures_util::{FutureExt, pin_mut, select};
 use std::{
     future::Future,
     pin::Pin,
     time::{Duration, Instant},
 };
-use futures_util::{FutureExt, pin_mut, select};
 
 use tinybox_bus::{
     CreateRequest, ExecutionFailure, ExecutionState, OutputBatch, OutputChunk, OutputStream,
