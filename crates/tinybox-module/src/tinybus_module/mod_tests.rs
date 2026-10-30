@@ -1434,7 +1434,7 @@ async fn run_native_shell_returns_finished_output_after_module_cleanup()
         .call(
             "RunNativeShell",
             (run_native_shell_request(
-                "printf finished",
+                "echo finished",
                 state.path(),
                 None,
             ),),
@@ -1450,7 +1450,7 @@ async fn run_native_shell_returns_finished_output_after_module_cleanup()
         panic!("short shell should finish before returning: {result:?}");
     };
     assert_eq!(exit_code, 0);
-    assert_eq!(stdout, b"finished");
+    assert_eq!(stdout, b"finished\n");
     assert!(!timed_out);
     assert_eq!(
         std::fs::read_dir(state.path().join("artifacts/sandbox-scratch"))?.count(),
@@ -1475,7 +1475,7 @@ async fn run_native_shell_yields_an_owned_process_for_existing_output_operations
         .call(
             "RunNativeShell",
             (run_native_shell_request(
-                "sleep 0.2; printf yielded",
+                "sleep 0.2; echo yielded",
                 state.path(),
                 Some(10),
             ),),
@@ -1509,7 +1509,7 @@ async fn run_native_shell_yields_an_owned_process_for_existing_output_operations
         batch.state,
         tinybox_bus::ExecutionState::Exited { exit_code: 0 }
     );
-    assert_eq!(output, b"yielded");
+    assert_eq!(output, b"yielded\n");
     proxy.call::<()>("ReleaseOutput", (process,)).await?;
     proxy.call::<()>("Close", (resource,)).await?;
     Ok(())
