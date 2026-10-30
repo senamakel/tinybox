@@ -6,12 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_util::{FutureExt, pin_mut, select};
-
-use crate::{
+use tinybox_bus::{
     CreateRequest, ExecutionState, OutputBatch, OutputChunk, ProcessRef, ReserveRequest,
     ResourceId, ShellExecRequest,
 };
+use crate::native_shell_tests as _;
 
 /// Transport operations required to supervise a native shell.
 ///

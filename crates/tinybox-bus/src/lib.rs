@@ -1,5 +1,4 @@
-//! Serialized requests and results for the `TinyBox` module, plus runtime-neutral
-//! native-shell lifecycle orchestration over a caller-supplied client.
+//! Serialized requests and results for the `TinyBox` module.
 //!
 //! This crate has no bus connection, executor, native backend, or policy.
 //! A caller applies its own authorization before sending these requests.
@@ -18,12 +17,6 @@ use std::collections::BTreeMap;
 
 mod grants;
 pub use grants::{LocalGrantConfig, LocalGrants, ProtectedPaths, ResolveLocalGrantsRequest};
-
-mod native_shell;
-pub use native_shell::{
-    NativeShellClient, NativeShellError, NativeShellOutput, NativeShellRunOutcome,
-    NativeShellRunRequest, NativeShellRunning, run_native_shell,
-};
 
 mod jail;
 pub use jail::{JailEnforcement, NativeJailConfig, NativeJailRequest, NativeJailResourceRequest};

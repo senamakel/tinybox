@@ -12,23 +12,17 @@ repository.workspace = true
 serde.workspace = true
 # OpenHuman config operations share this contract type for schema generation.
 schemars = "1"
-# Runtime-neutral future combinators for the optional native-shell client helper.
-futures-util = { version = "0.3", features = ["async-await"] }
-# Runtime-neutral delay used between bounded output polls.
-futures-timer = "3"
 # Only the `storage` feature: pure collection and legacy-body vocabulary.
 serde_json = { workspace = true, optional = true }
-tinystoragedrivers-types = { workspace = true, optional = true }
 
 [features]
 default = []
 # `collections()` and pure v1-to-v2 body converters. Off by default so the
 # contract's default dependency closure stays serde only; a host enables it.
-storage = ["dep:serde_json", "dep:tinystoragedrivers-types"]
+storage = ["dep:serde_json"]
 
 [dev-dependencies]
 serde_json.workspace = true
-futures-executor = "0.3"
 
 [lints]
 workspace = true
