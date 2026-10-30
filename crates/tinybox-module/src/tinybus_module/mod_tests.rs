@@ -1384,6 +1384,141 @@ async fn existing_shell_method_keeps_its_two_argument_bus_codec()
     Ok(())
 }
 
+fn run_native_shell_request(
+    command: &str,
+    state_dir: &std::path::Path,
+    yield_after_ms: Option<u64>,
+) -> tinybox_bus::RunNativeShellRequest {
+    tinybox_bus::RunNativeShellRequest {
+        create: tinybox_bus::CreateRequest {
+            resource: tinybox_bus::ResourceId(String::new()),
+            backend: "passthrough".into(),
+            host: tinybox_bus::HostConfig::Local,
+            workspace: tinybox_bus::Workspace::Directory(".".into()),
+            ..Default::default()
+        },
+        shell: tinybox_bus::ShellExecRequest {
+            process: tinybox_bus::ResourceId(String::new()),
+            resource: tinybox_bus::ResourceId(String::new()),
+            shell: tinybox_bus::SelectShellRequest {
+                command: command.into(),
+                preserve_pipeline_status: false,
+                runtime_path: None,
+                python_utf8: false,
+            },
+            cwd: None,
+            extra_env: Default::default(),
+            state_dir: state_dir.to_string_lossy().into_owned(),
+            timeout_ms: 5_000,
+            stdin: None,
+            jail: None,
+            hide_window: false,
+        },
+        yield_after_ms,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_native_shell_returns_finished_output_after_module_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
+    let service = Connection::connect(bus.connect().await?).await?;
+    setup(service.clone()).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+
+    let result: tinybox_bus::RunNativeShellResult = proxy
+        .call(
+            "RunNativeShell",
+            (run_native_shell_request("printf finished", state.path(), None),),
+        )
+        .await?;
+    let tinybox_bus::RunNativeShellResult::Finished {
+        exit_code,
+        stdout,
+        timed_out,
+        ..
+    } = result
+    else {
+        panic!("short shell should finish before returning: {result:?}");
+    };
+    assert_eq!(exit_code, 0);
+    assert_eq!(stdout, b"finished");
+    assert!(!timed_out);
+    assert_eq!(std::fs::read_dir(state.path().join("artifacts/sandbox-scratch"))?.count(), 0);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_native_shell_yields_an_owned_process_for_existing_output_operations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let state = tempfile::tempdir()?;
+    let bus = MemoryBus::new();
+    Broker::new().spawn(bus.clone());
+    let _storage_host = serve_test_storage(&bus).await?;
+    let service = Connection::connect(bus.connect().await?).await?;
+    setup(service.clone()).await?;
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(INTERFACE, OBJECT_PATH, INTERFACE)?;
+
+    let result: tinybox_bus::RunNativeShellResult = proxy
+        .call(
+            "RunNativeShell",
+            (run_native_shell_request("sleep 0.2; printf yielded", state.path(), Some(10)),),
+        )
+        .await?;
+    let tinybox_bus::RunNativeShellResult::Running {
+        resource,
+        process,
+        mut cursor,
+        stdout,
+        stderr,
+    } = result
+    else {
+        panic!("long shell should yield while running: {result:?}");
+    };
+    let mut output = stdout;
+    output.extend(stderr);
+    let batch = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let batch: tinybox_bus::OutputBatch =
+                proxy.call("ReadOutput", (process.clone(), cursor)).await?;
+            cursor = batch.next_sequence;
+            output.extend(batch.chunks.iter().flat_map(|chunk| chunk.bytes.clone()));
+            if batch.state != tinybox_bus::ExecutionState::Running {
+                break Ok::<_, tinybus::Error>(batch);
+            }
+        }
+    })
+    .await??;
+    assert_eq!(batch.state, tinybox_bus::ExecutionState::Exited { exit_code: 0 });
+    assert_eq!(output, b"yielded");
+    proxy.call::<()>("ReleaseOutput", (process,)).await?;
+    proxy.call::<()>("Close", (resource,)).await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_run_native_shell_invocation_cancels_and_joins_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    let state = tempfile::tempdir()?;
+    let service = std::sync::Arc::new(BoxService::default());
+    let task_service = service.clone();
+    let request = run_native_shell_request("sleep 30", state.path(), None);
+    let invocation = tokio::spawn(async move { task_service.run_native_shell(request).await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    invocation.abort();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        service.resources.shutdown(),
+    )
+    .await??;
+    Ok(())
+}
+
 #[tokio::test]
 async fn shell_discovery_preserves_the_requested_pipeline_status() -> tinybus::Result<()> {
     let service = BoxService::default();
