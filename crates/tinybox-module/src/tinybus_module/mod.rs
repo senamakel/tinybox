@@ -13,7 +13,8 @@ use tinybox_bus::{
     CreateRequest, ExecOutput, ExecRequest, FileChunk, FileReadInfo, FileWriteInfo,
     FileWriteProgress, FinishFileReadRequest, FinishFileWriteRequest, ForwardInfo, ForwardRequest,
     INTERFACE, OBJECT_PATH, ProcessEvent, ProcessRef, ReadFileChunkRequest, ResourceId,
-    ResourceInfo, SandboxEvent, ShellAnalysis, SpawnRequest, WriteFileChunkRequest,
+    ResourceInfo, RunNativeShellRequest, RunNativeShellResult, SandboxEvent, ShellAnalysis,
+    SpawnRequest, WriteFileChunkRequest,
 };
 
 mod docker;
@@ -369,6 +370,26 @@ impl BoxService {
         Ok(process)
     }
 
+    /// Supervise a native shell through completion or the requested yield
+    /// point. Dropping the bus invocation requests cancellation and cleanup in
+    /// the module-owned worker.
+    async fn run_native_shell(
+        &self,
+        request: RunNativeShellRequest,
+    ) -> TinyBusResult<RunNativeShellResult> {
+        let resources = self.resources.clone();
+        let (cancel, cancelled) = tokio::sync::oneshot::channel::<std::convert::Infallible>();
+        let task = tokio::spawn(async move {
+            native_shell::run::run(resources, request, async move {
+                let _ = cancelled.await;
+            })
+            .await
+        });
+        let result = finish_operation(task).await;
+        drop(cancel);
+        result
+    }
+
     /// Start one program with piped stdio inside the resource's native jail.
     async fn start_stdio(
         &self,
@@ -656,7 +677,7 @@ tinybus_module::module_export_optional_static! {
     setup = setup,
     worker_threads = 1,
     provides = ["ai.tinyhumans.tinybox.Box"],
-    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources"],
+    methods = ["Describe", "Create", "Exec", "Inspect", "Close", "Spawn", "IsRunning", "Cancel", "AnalyzeShell", "Reserve", "Capabilities", "Shutdown", "Forward", "CloseForward", "JailStatus", "BeginFileRead", "ReadFileChunk", "FinishFileRead", "BeginFileWrite", "WriteFileChunk", "FinishFileWrite", "AbortFileWrite", "StartExec", "ReadOutput", "ReleaseOutput", "StartJailedExec", "RunDocker", "DockerStatus", "CleanupDocker", "RunDockerWithoutWorkspace", "ResolveLocalGrants", "SelectShell", "StartShellExec", "StartNativeShellExec", "ValidateDockerPolicy", "StartStdio", "WriteStdio", "ReadStdio", "CloseStdin", "KillStdio", "StdioStatus", "StartJailedExecWithResources", "RunNativeShell"],
     signals = ["ProcessEvent"],
     requires = [],
     optional = [],

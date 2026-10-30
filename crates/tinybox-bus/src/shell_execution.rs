@@ -56,17 +56,26 @@ pub struct RunNativeShellRequest {
 pub enum RunNativeShellResult {
     /// The process exited or timed out and cleanup was acknowledged.
     Finished {
+        /// Process exit status, including nonzero results.
         exit_code: i32,
+        /// Collected standard output bytes.
         stdout: Vec<u8>,
+        /// Collected standard error bytes.
         stderr: Vec<u8>,
+        /// Whether the shell exceeded its request timeout.
         timed_out: bool,
     },
     /// The process is still running and remains owned by the module.
     Running {
+        /// Resource to close after process cleanup.
         resource: ResourceId,
+        /// Process to poll or cancel.
         process: ProcessRef,
+        /// Cursor for the next output read.
         cursor: u64,
+        /// Standard output collected before yielding.
         stdout: Vec<u8>,
+        /// Standard error collected before yielding.
         stderr: Vec<u8>,
     },
 }

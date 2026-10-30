@@ -7,6 +7,7 @@ use tinybox_bus::ShellExecRequest;
 use tinybus::Result;
 
 mod types;
+pub(super) mod run;
 pub(super) use types::ShellContext;
 use types::ShellHost;
 impl ShellContext {

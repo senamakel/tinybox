@@ -5,7 +5,7 @@ use tinybox_bus::{
     RunNativeShellResult, ShellExecRequest,
 };
 use tinybox_host::{NativeShellClient, NativeShellRunOutcome};
-use tinybus::{Error, Result};
+use tinybus::Result;
 
 use super::super::resources::Resources;
 
@@ -75,7 +75,7 @@ impl NativeShellClient for Client {
 /// Supervises a native shell until it finishes, times out, is cancelled, or
 /// reaches the requested yield point. The dropped request receiver is used as
 /// the cancellation signal so this future always awaits native cleanup.
-pub(super) async fn run(
+pub(in crate::tinybus_module) async fn run(
     resources: std::sync::Arc<Resources>,
     request: RunNativeShellRequest,
     abandoned: impl Future<Output = ()> + Send,
