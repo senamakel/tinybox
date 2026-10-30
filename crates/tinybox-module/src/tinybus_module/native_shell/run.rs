@@ -47,6 +47,10 @@ impl NativeShellClient for Client {
         process: ProcessRef,
         cursor: u64,
     ) -> std::result::Result<tinybox_bus::OutputBatch, Self::Error> {
+        // The host helper expects transport polling to yield between empty
+        // reads. This in-process adapter otherwise returns a ready future and
+        // can starve the shell's output collector on a single-worker module.
+        tokio::task::yield_now().await;
         self.0
             .read_output(&process, cursor)
             .await
