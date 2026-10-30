@@ -18,7 +18,10 @@ impl NativeShellClient for Client {
         &self,
         request: ReserveRequest,
     ) -> std::result::Result<ResourceId, Self::Error> {
-        self.0.reserve(request).await.map_err(|error| error.to_string())
+        self.0
+            .reserve(request)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn create(&self, request: CreateRequest) -> std::result::Result<(), Self::Error> {
@@ -57,10 +60,7 @@ impl NativeShellClient for Client {
             .map_err(|error| error.to_string())
     }
 
-    async fn release_output(
-        &self,
-        process: ProcessRef,
-    ) -> std::result::Result<(), Self::Error> {
+    async fn release_output(&self, process: ProcessRef) -> std::result::Result<(), Self::Error> {
         self.0
             .release_output(&process)
             .await
@@ -68,7 +68,10 @@ impl NativeShellClient for Client {
     }
 
     async fn close(&self, resource: ResourceId) -> std::result::Result<(), Self::Error> {
-        self.0.close(&resource).await.map_err(|error| error.to_string())
+        self.0
+            .close(&resource)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -93,9 +96,9 @@ pub(in crate::tinybus_module) async fn run(
     .await
     .map_err(|error| {
         let name = match error {
-            tinybox_host::NativeShellError::Execution(tinybox_bus::ExecutionFailure::OutputLimit) => {
-                tinybox_bus::OUTPUT_LIMIT
-            }
+            tinybox_host::NativeShellError::Execution(
+                tinybox_bus::ExecutionFailure::OutputLimit,
+            ) => tinybox_bus::OUTPUT_LIMIT,
             _ => tinybox_bus::BACKEND_ERROR,
         };
         super::super::resources::failure(name, &format!("native shell operation failed: {error:?}"))

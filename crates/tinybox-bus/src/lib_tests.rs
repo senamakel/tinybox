@@ -328,6 +328,39 @@ fn native_shell_wire_defaults_close_stdin_and_keep_a_bounded_runtime()
 }
 
 #[test]
+fn run_native_shell_result_preserves_finished_and_yielded_shapes() -> Result<(), serde_json::Error>
+{
+    let finished = RunNativeShellResult::Finished {
+        exit_code: 7,
+        stdout: b"out".to_vec(),
+        stderr: b"err".to_vec(),
+        timed_out: false,
+    };
+    assert_eq!(
+        serde_json::from_value::<RunNativeShellResult>(serde_json::to_value(&finished)?)?,
+        finished
+    );
+    let running = RunNativeShellResult::Running {
+        resource: ResourceId("resource".into()),
+        process: ProcessRef {
+            resource: ResourceId("resource".into()),
+            process: ResourceId("process".into()),
+        },
+        cursor: 4,
+        stdout: b"before".to_vec(),
+        stderr: Vec::new(),
+    };
+    let value = serde_json::to_value(&running)?;
+    assert_eq!(value["state"], "running");
+    assert_eq!(
+        serde_json::from_value::<RunNativeShellResult>(value)?,
+        running
+    );
+    assert_eq!(names::RUN_NATIVE_SHELL, "RunNativeShell");
+    Ok(())
+}
+
+#[test]
 fn named_members_resolve_to_the_method_catalogue_in_order() {
     use names::*;
     let expected = [

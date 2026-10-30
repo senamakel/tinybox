@@ -6,8 +6,8 @@ use std::{
 use tinybox_bus::ShellExecRequest;
 use tinybus::Result;
 
-mod types;
 pub(super) mod run;
+mod types;
 pub(super) use types::ShellContext;
 use types::ShellHost;
 impl ShellContext {

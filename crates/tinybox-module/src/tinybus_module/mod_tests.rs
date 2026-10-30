@@ -1433,7 +1433,11 @@ async fn run_native_shell_returns_finished_output_after_module_cleanup()
     let result: tinybox_bus::RunNativeShellResult = proxy
         .call(
             "RunNativeShell",
-            (run_native_shell_request("printf finished", state.path(), None),),
+            (run_native_shell_request(
+                "printf finished",
+                state.path(),
+                None,
+            ),),
         )
         .await?;
     let tinybox_bus::RunNativeShellResult::Finished {
@@ -1448,7 +1452,10 @@ async fn run_native_shell_returns_finished_output_after_module_cleanup()
     assert_eq!(exit_code, 0);
     assert_eq!(stdout, b"finished");
     assert!(!timed_out);
-    assert_eq!(std::fs::read_dir(state.path().join("artifacts/sandbox-scratch"))?.count(), 0);
+    assert_eq!(
+        std::fs::read_dir(state.path().join("artifacts/sandbox-scratch"))?.count(),
+        0
+    );
     Ok(())
 }
 
@@ -1467,7 +1474,11 @@ async fn run_native_shell_yields_an_owned_process_for_existing_output_operations
     let result: tinybox_bus::RunNativeShellResult = proxy
         .call(
             "RunNativeShell",
-            (run_native_shell_request("sleep 0.2; printf yielded", state.path(), Some(10)),),
+            (run_native_shell_request(
+                "sleep 0.2; printf yielded",
+                state.path(),
+                Some(10),
+            ),),
         )
         .await?;
     let tinybox_bus::RunNativeShellResult::Running {
@@ -1494,7 +1505,10 @@ async fn run_native_shell_yields_an_owned_process_for_existing_output_operations
         }
     })
     .await??;
-    assert_eq!(batch.state, tinybox_bus::ExecutionState::Exited { exit_code: 0 });
+    assert_eq!(
+        batch.state,
+        tinybox_bus::ExecutionState::Exited { exit_code: 0 }
+    );
     assert_eq!(output, b"yielded");
     proxy.call::<()>("ReleaseOutput", (process,)).await?;
     proxy.call::<()>("Close", (resource,)).await?;
@@ -1502,7 +1516,8 @@ async fn run_native_shell_yields_an_owned_process_for_existing_output_operations
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dropping_run_native_shell_invocation_cancels_and_joins_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+async fn dropping_run_native_shell_invocation_cancels_and_joins_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
     let state = tempfile::tempdir()?;
     let service = std::sync::Arc::new(BoxService::default());
     let task_service = service.clone();
